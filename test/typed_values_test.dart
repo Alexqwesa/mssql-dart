@@ -123,5 +123,48 @@ void main() {
       expect(_containsUcs2(body, '@d datetimeoffset'), isTrue);
       expect(body.contains(typeDateTimeOffsetN), isTrue);
     });
+
+    test('decimal decl + typeDecimalN on wire', () async {
+      final pkt = await _capture(
+        (buf) => RpcRequest.sendExecuteSql(
+          buf,
+          'SELECT @d',
+          {'d': MssqlDecimal(12.34, precision: 10, scale: 2)},
+        ),
+      );
+      final body = _body(pkt);
+      expect(_containsUcs2(body, '@d decimal(10,2)'), isTrue);
+      expect(body.contains(typeDecimalN), isTrue);
+    });
+  });
+
+  group('MssqlDecimal', () {
+    test('parse and toWireBytes match DECIMAL(5,2) golden', () {
+      final d = MssqlDecimal.parse('123.45', precision: 5, scale: 2);
+      expect(d.unscaled, equals(BigInt.from(12345)));
+      final w = d.toWireBytes();
+      expect(w.length, equals(5));
+      expect(w[0], equals(1)); // positive
+      expect(w[1] | (w[2] << 8) | (w[3] << 16) | (w[4] << 24), equals(12345));
+    });
+
+    test('negative numeric wire sign byte 0', () {
+      final d = MssqlDecimal.parse(
+        '-5.00',
+        precision: 5,
+        scale: 2,
+        asNumeric: true,
+      );
+      expect(d.sqlDecl, equals('numeric(5,2)'));
+      expect(d.toWireBytes()[0], equals(0));
+      expect(d.unscaled, equals(BigInt.from(-500)));
+    });
+
+    test('rejects precision overflow', () {
+      expect(
+        () => MssqlDecimal.parse('123456', precision: 5, scale: 0),
+        throwsArgumentError,
+      );
+    });
   });
 }

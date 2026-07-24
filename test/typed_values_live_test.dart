@@ -109,4 +109,25 @@ void main() {
     expect(v.hour, equals(4));
     expect(v.minute, equals(30));
   });
+
+  test('MssqlDecimal round-trip', () async {
+    if (!available) {
+      markTestSkipped('SQL Server not available on :$_port');
+      return;
+    }
+    final r = await conn.query(
+      'SELECT @d AS d, @n AS n',
+      {
+        'd': MssqlDecimal(1234.56, precision: 10, scale: 2),
+        'n': MssqlDecimal.parse(
+          '-99.9900',
+          precision: 10,
+          scale: 4,
+          asNumeric: true,
+        ),
+      },
+    );
+    expect(r[0]['d'] as double, closeTo(1234.56, 0.001));
+    expect(r[0]['n'] as double, closeTo(-99.99, 0.0001));
+  });
 }

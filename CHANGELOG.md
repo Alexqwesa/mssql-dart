@@ -3,7 +3,8 @@
 ## Unreleased
 
 * LAN typed binders: `MssqlGuid`, `MssqlMoney`, `MssqlSmallMoney`,
-  `MssqlDateTimeOffset` for uniqueidentifier / money / datetimeoffset params.
+  `MssqlDateTimeOffset`, `MssqlDecimal` for uniqueidentifier / money /
+  datetimeoffset / decimal|numeric params.
 * LAN transactions: `MssqlIsolationLevel`, `beginTransaction(isolation:)`,
   `savepoint` / `rollbackTo`, `transaction(isolation:)` on connection + pool.
 * LAN diagnostics + resilience: parse full INFO/ERROR metadata (`state`,

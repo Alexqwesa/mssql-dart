@@ -119,6 +119,7 @@ class RpcRequest {
     if (v is MssqlMoney) return 'money';
     if (v is MssqlSmallMoney) return 'smallmoney';
     if (v is MssqlDateTimeOffset) return 'datetimeoffset';
+    if (v is MssqlDecimal) return v.sqlDecl;
     if (v is int) return 'bigint';
     if (v is double) return 'float';
     if (v is bool) return 'bit';
@@ -180,6 +181,8 @@ class RpcRequest {
         _writeMoneyParam(buf, v.scaled, small: true);
       case MssqlDateTimeOffset v:
         _writeDateTimeOffsetParam(buf, v);
+      case MssqlDecimal v:
+        _writeDecimalParam(buf, v);
       case int v:
         buf.writeByte(typeIntN);
         buf.writeByte(8); // max len
@@ -276,6 +279,21 @@ class RpcRequest {
       buf.writeByte(0);
       return;
     }
+    final dec = RegExp(r'^(decimal|numeric)\s*\(\s*(\d+)\s*,\s*(\d+)\s*\)$')
+        .firstMatch(t);
+    if (dec != null) {
+      final prec = int.parse(dec.group(2)!);
+      final scale = int.parse(dec.group(3)!);
+      final maxLen = MssqlDecimal.maxLenForPrecision(prec);
+      buf.writeByte(
+        dec.group(1) == 'numeric' ? typeNumericN : typeDecimalN,
+      );
+      buf.writeByte(maxLen);
+      buf.writeByte(prec);
+      buf.writeByte(scale);
+      buf.writeByte(0);
+      return;
+    }
     // int / bigint / smallint / tinyint / default
     final maxLen = (t == 'bigint')
         ? 8
@@ -320,6 +338,16 @@ class RpcRequest {
       buf.writeUint16LE(valueBytes.length);
       buf.writeBytes(valueBytes);
     }
+  }
+
+  static void _writeDecimalParam(TdsBuffer buf, MssqlDecimal d) {
+    final bytes = d.toWireBytes();
+    buf.writeByte(d.asNumeric ? typeNumericN : typeDecimalN);
+    buf.writeByte(bytes.length); // MaxLen
+    buf.writeByte(d.precision);
+    buf.writeByte(d.scale);
+    buf.writeByte(bytes.length); // value len
+    buf.writeBytes(bytes);
   }
 
   static void _writeGuidParam(TdsBuffer buf, MssqlGuid guid) {
