@@ -54,5 +54,41 @@ void main() {
       expect(result.rows, isEmpty);
       expect(result.rowsAffected, equals(0));
     });
+
+    // Server may send aborted-batch DONE then a separate Attention ACK message
+    test('drains DONE then Attention ACK across two messages', () async {
+      final pair = await TdsSocketPair.open();
+      addTearDown(pair.close);
+      final buf = TdsBuffer(pair.client);
+
+      final queryFuture = TokenStream(buf).processQueryResponse();
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await buf.sendAttention();
+
+      // 1) Normal final DONE (aborted batch) — no ATTN bit
+      await tdsSend(
+        pair.server,
+        tdsPacket(
+          type: packReply,
+          body: () {
+            final out = BytesBuilder(copy: false);
+            out.addByte(tokenDone);
+            writeUint16LE(out, doneFlagFinal);
+            writeUint16LE(out, 0);
+            writeUint64LE(out, 0);
+            return out.toBytes();
+          }(),
+        ),
+      );
+      // 2) Attention acknowledgement
+      await tdsSend(
+        pair.server,
+        tdsPacket(type: packReply, body: _doneAttn()),
+      );
+
+      final result = await queryFuture.timeout(const Duration(seconds: 2));
+      expect(result.rows, isEmpty);
+      expect(buf.attentionSent, isFalse);
+    });
   });
 }

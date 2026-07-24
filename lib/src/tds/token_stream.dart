@@ -175,6 +175,9 @@ class TokenStream {
           final count = await _buf.readUint64LE();
           if ((flags & doneFlagCount) != 0) rowsAffected += count;
           if ((flags & doneFlagMore) == 0) {
+            final attnAck = (flags & doneFlagAttn) != 0;
+            if (attnAck) _buf.attentionSent = false;
+
             // Flush the last (or only) result set.
             if (columns != null && columns.isNotEmpty) {
               results.add(QueryResult(
@@ -185,6 +188,21 @@ class TokenStream {
                   columns: [], rows: [], rowsAffected: rowsAffected));
             }
             if (errors.isNotEmpty) throw _buildError(errors);
+
+            // Cancel path: server may send a normal DONE for the aborted batch
+            // then a separate Attention ACK message — keep draining until ATTN.
+            if (_buf.attentionSent && !attnAck) {
+              results.clear();
+              columns = null;
+              rows = [];
+              rowsAffected = 0;
+              await _buf.beginRead();
+              continue;
+            }
+
+            // Attention ACK alone — cancelled query yields no result sets.
+            if (attnAck) return <QueryResult>[];
+
             return results;
           }
         default:
@@ -252,7 +270,13 @@ class TokenStream {
           await _buf.readUint16LE(); // curCmd
           await _buf.readUint64LE(); // rowCount
           if ((flags & doneFlagMore) == 0) {
+            final attnAck = (flags & doneFlagAttn) != 0;
+            if (attnAck) _buf.attentionSent = false;
             if (errors.isNotEmpty) throw _buildError(errors);
+            if (_buf.attentionSent && !attnAck) {
+              await _buf.beginRead();
+              continue;
+            }
             return;
           }
         default:

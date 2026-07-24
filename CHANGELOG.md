@@ -30,6 +30,9 @@
 * Add `TdsBuffer.sendAttention` / `MssqlConnection.cancel`; offline Attention
   cancel mock; NTLM Type 1 NEGOTIATE encode; Azure AD `extractAccessToken` unit
   tests (no network).
+* Fix Attention cancel: drain until DONE `doneAttn` when the server sends a
+  separate aborted-batch DONE first (keeps connection usable after cancel).
+* Add live cancel + large multi-packet / many-row tests (`attention_live_test.dart`).
 * CI: run unit tests without Docker before the SQL Server 2022 integration suite.
 
 ## 0.1.1

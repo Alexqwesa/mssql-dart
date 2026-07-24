@@ -24,6 +24,10 @@ class TdsBuffer {
   // Write state
   final _wbuf = BytesBuilder(copy: false);
 
+  /// Set by [sendAttention]; cleared when a DONE with [doneFlagAttn] is parsed.
+  /// While true, response readers keep draining messages until the Attention ACK.
+  bool attentionSent = false;
+
   // Read state – filled one TDS packet at a time
   Uint8List _rbuf = Uint8List(0);
   int _rpos = 0;
@@ -133,6 +137,7 @@ class TdsBuffer {
   /// Safe to call while a read is in progress (write path is independent).
   /// The server acknowledges with DONE where [doneFlagAttn] is set.
   Future<void> sendAttention() async {
+    attentionSent = true;
     beginPacket(packAttention);
     await finishPacket(packAttention);
   }
