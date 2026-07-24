@@ -213,6 +213,17 @@ class MssqlConnection {
     return result.rowsAffected;
   }
 
+  /// Cancels the query currently in progress by sending a TDS Attention packet.
+  ///
+  /// No-op when the connection is idle. The in-flight [query] / [queryMultiple]
+  /// / [queryStream] should finish after the server's Attention acknowledgement
+  /// (DONE with `doneAttn`). Does not close the connection.
+  Future<void> cancel() async {
+    _assertOpen();
+    if (!_busy) return;
+    await _buf.sendAttention();
+  }
+
   /// The database currently active on this connection.
   String get database => _currentDatabase;
 

@@ -37,7 +37,7 @@ class AzureAdAuth {
       'password': password,
       'resource': resource,
     });
-    return AzureAdAuth._(_extractToken(response));
+    return AzureAdAuth._(extractAccessToken(response));
   }
 
   /// Acquire a token using client credentials (service principal).
@@ -56,10 +56,13 @@ class AzureAdAuth {
       'client_secret': clientSecret,
       'resource': resource,
     });
-    return AzureAdAuth._(_extractToken(response));
+    return AzureAdAuth._(extractAccessToken(response));
   }
 
-  static String _extractToken(http.Response response) {
+  /// Parses `access_token` from an Azure AD token endpoint [response].
+  ///
+  /// Exposed for offline unit tests (no network).
+  static String extractAccessToken(http.Response response) {
     if (response.statusCode != 200) {
       throw StateError(
         'Azure AD token request failed (${response.statusCode}): ${response.body}',

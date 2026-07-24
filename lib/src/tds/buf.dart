@@ -128,6 +128,15 @@ class TdsBuffer {
     _wbuf.clear();
   }
 
+  /// Sends a TDS Attention packet (ms-tds §2.2.1.7) — empty body, type 6.
+  ///
+  /// Safe to call while a read is in progress (write path is independent).
+  /// The server acknowledges with DONE where [doneFlagAttn] is set.
+  Future<void> sendAttention() async {
+    beginPacket(packAttention);
+    await finishPacket(packAttention);
+  }
+
   // ── Read API ───────────────────────────────────────────────────────────────
 
   /// Read the next TDS packet off the wire and fill [_rbuf].

@@ -25,6 +25,11 @@
   TEXT/NTEXT/IMAGE TypeInfo decode.
 * Extend offline coverage: XML/UDT TYPE_INFO + COLMETADATA/ROW (PLP), Login7
   SSPI + FedAuth feature-data layout, PRELOGIN OOB field length + encryptRequired.
+* Extend offline coverage: Attention DONE (`doneFlagAttn`), multi-packet token
+  stream straddles for ROW INT4 / NVARCHAR length / COLMETADATA count (PR #3).
+* Add `TdsBuffer.sendAttention` / `MssqlConnection.cancel`; offline Attention
+  cancel mock; NTLM Type 1 NEGOTIATE encode; Azure AD `extractAccessToken` unit
+  tests (no network).
 * CI: run unit tests without Docker before the SQL Server 2022 integration suite.
 
 ## 0.1.1

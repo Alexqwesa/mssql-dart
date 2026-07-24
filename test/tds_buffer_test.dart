@@ -260,8 +260,7 @@ void main() {
       pair.server.listen(received.add);
 
       final buf = TdsBuffer(pair.client, packetSize: 4096);
-      buf.beginPacket(packAttention);
-      await buf.finishPacket(packAttention);
+      await buf.sendAttention();
 
       await Future<void>.delayed(const Duration(milliseconds: 20));
 

@@ -2,6 +2,7 @@
 library mssql;
 
 export 'src/auth/azure_ad_auth.dart';
+export 'src/auth/ntlm_auth.dart';
 export 'src/auth/sql_auth.dart';
 export 'src/connection.dart';
 export 'src/exception.dart';

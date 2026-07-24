@@ -52,6 +52,9 @@ jobs:
             test/type_decode_test.dart \
             test/rpc_encode_test.dart \
             test/mock_full_login_test.dart \
+            test/attention_cancel_test.dart \
+            test/ntlm_auth_test.dart \
+            test/azure_ad_auth_test.dart \
             --timeout=60s
 
   # ════════════════════════════════════════════════════════════════════════════

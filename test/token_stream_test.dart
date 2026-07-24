@@ -360,6 +360,38 @@ Future<_Fed> _openWithBody(List<int> body) async {
   return (buf: TdsBuffer(pair.client), pair: pair);
 }
 
+/// Multi-packet reply (EOM only on last) — PR #3 / go-mssqldb multi-packet reads.
+Future<_Fed> _openWithPackets(List<List<int>> bodies) async {
+  final pair = await TdsSocketPair.open();
+  for (var i = 0; i < bodies.length; i++) {
+    await tdsSend(
+      pair.server,
+      tdsPacket(
+        type: packReply,
+        body: bodies[i],
+        eom: i == bodies.length - 1,
+        seq: i + 1,
+      ),
+    );
+  }
+  return (buf: TdsBuffer(pair.client), pair: pair);
+}
+
+/// COLMETADATA for a single NVARCHAR column (fixed MaxLen, collation zeros).
+Uint8List _colMetaNVarChar(String name, {int maxLen = 100}) {
+  final out = BytesBuilder(copy: false);
+  out.addByte(tokenColMetadata);
+  writeUint16LE(out, 1);
+  writeUint32LE(out, 0);
+  writeUint16LE(out, 0);
+  out.addByte(typeNVarChar);
+  writeUint16LE(out, maxLen);
+  out.add([0, 0, 0, 0, 0]); // collation
+  out.addByte(name.length);
+  out.add(ucs2(name));
+  return Uint8List.fromList(out.toBytes());
+}
+
 void main() {
   group('TokenStream login response', () {
     // go-mssqldb parseLoginAck + ENVCHANGE database; Tedious loginack-token-parser
@@ -918,6 +950,87 @@ void main() {
 
       final result = await TokenStream(fed.buf).processQueryResponse();
       expect(result.rows.single, equals([payload]));
+    });
+
+    // ms-tds §2.2.7.6 DONE doneAttn — Attention acknowledgement (no result set)
+    test('DONE with doneFlagAttn yields empty QueryResult', () async {
+      final body = [..._doneToken(flags: doneFlagAttn)];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.columns, isEmpty);
+      expect(result.rows, isEmpty);
+      expect(result.rowsAffected, equals(0));
+    });
+
+    test('streamQueryResponse completes on Attention DONE', () async {
+      final body = [..._doneToken(flags: doneFlagAttn)];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final rows = <List<Object?>>[];
+      await for (final (_, row) in TokenStream(fed.buf).streamQueryResponse()) {
+        rows.add(row);
+      }
+      expect(rows, isEmpty);
+    });
+
+    // go-mssqldb buf_test + PR #3: INT4 ROW value straddles TDS packets mid-parse
+    test('ROW INT4 value straddling packets stays synced (PR #3)', () async {
+      final meta = _colMetaInt('n');
+      final done = _doneToken(flags: doneFlagCount, rowCount: 1);
+      // 42 = 0x2A little-endian — split after 2 value bytes
+      final fed = await _openWithPackets([
+        [...meta, tokenRow, 0x2A, 0x00],
+        [0x00, 0x00, ...done],
+      ]);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.rows.single, equals([42]));
+    });
+
+    // PR #3: USHORT NVARCHAR length prefix straddles packet boundary
+    test('ROW NVARCHAR length prefix straddling packets (PR #3)', () async {
+      final meta = _colMetaNVarChar('s');
+      final text = ucs2('hi');
+      final done = _doneToken(flags: doneFlagCount, rowCount: 1);
+      // length 4 LE = 0x04 0x00 — send only first length byte in pkt1
+      final fed = await _openWithPackets([
+        [...meta, tokenRow, 0x04],
+        [0x00, ...text, ...done],
+      ]);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.rows.single, equals(['hi']));
+    });
+
+    // PR #3: COLMETADATA column-count USHORT straddles packets
+    test('COLMETADATA count straddling packets then ROW (PR #3)', () async {
+      // tokenColMetadata + low byte of count=1, rest in next packet
+      final name = ucs2('n');
+      final done = _doneToken(flags: doneFlagCount, rowCount: 1);
+      final fed = await _openWithPackets([
+        [tokenColMetadata, 0x01],
+        [
+          0x00, // count high
+          0, 0, 0, 0, // userType
+          0, 0, // flags
+          typeInt4,
+          1, // name len
+          ...name,
+          tokenRow,
+          0x07, 0x00, 0x00, 0x00, // 7
+          ...done,
+        ],
+      ]);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.columns.single.name, equals('n'));
+      expect(result.rows.single, equals([7]));
     });
   });
 }
