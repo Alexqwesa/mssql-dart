@@ -41,6 +41,8 @@
   `packSSPIMessage` in `processLoginResponse`; mock SSPI handshake test.
 * CI: run unit tests without Docker before the SQL Server 2022 integration suite.
 * `MssqlPoolConfig.ntlm` / `ntlmDomain`: pool opens via `connectNtlm` (SSPI).
+* `MssqlPoolConfig.azureAd` / `azureAdAuth`: pool opens via `connectAzureAd`
+  (FedAuth); Azure AD takes precedence over NTLM/SQL when set.
 
 ## 0.1.1
 

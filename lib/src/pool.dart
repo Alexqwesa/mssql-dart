@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'auth/azure_ad_auth.dart';
 import 'connection.dart';
 import 'exception.dart';
 import 'result.dart';
@@ -16,7 +17,12 @@ class MssqlPoolConfig {
   final Duration connectionTimeout;
 
   /// When non-null, [MssqlPool] opens connections via
-  /// [MssqlConnection.connectNtlm] (Windows SSPI / NTLMv2) instead of SQL auth.
+  /// [MssqlConnection.connectAzureAd] (FedAuth). Takes precedence over
+  /// [ntlmDomain] and SQL auth.
+  final AzureAdAuth? azureAdAuth;
+
+  /// When non-null (and [azureAdAuth] is null), [MssqlPool] opens connections
+  /// via [MssqlConnection.connectNtlm] (Windows SSPI / NTLMv2).
   final String? ntlmDomain;
 
   /// Optional workstation name for NTLM (used only when [ntlmDomain] is set).
@@ -43,6 +49,7 @@ class MssqlPoolConfig {
     this.encrypt = true,
     this.trustServerCertificate = false,
     this.connectionTimeout = const Duration(seconds: 30),
+    this.azureAdAuth,
     this.ntlmDomain,
     this.ntlmWorkstation,
     this.min = 0,
@@ -50,6 +57,39 @@ class MssqlPoolConfig {
     this.idleTimeout = const Duration(seconds: 30),
     this.acquireTimeout = const Duration(seconds: 15),
   });
+
+  /// Pool config that opens connections with Azure AD (FedAuth).
+  ///
+  /// [encrypt] is always true (Azure AD requires TLS). [user]/[password] are
+  /// unused placeholders for the shared config shape.
+  factory MssqlPoolConfig.azureAd({
+    required String host,
+    int port = 1433,
+    required AzureAdAuth azureAdAuth,
+    String database = '',
+    bool trustServerCertificate = false,
+    Duration connectionTimeout = const Duration(seconds: 30),
+    int min = 0,
+    int max = 10,
+    Duration idleTimeout = const Duration(seconds: 30),
+    Duration acquireTimeout = const Duration(seconds: 15),
+  }) {
+    return MssqlPoolConfig(
+      host: host,
+      port: port,
+      user: '',
+      password: '',
+      database: database,
+      encrypt: true,
+      trustServerCertificate: trustServerCertificate,
+      connectionTimeout: connectionTimeout,
+      azureAdAuth: azureAdAuth,
+      min: min,
+      max: max,
+      idleTimeout: idleTimeout,
+      acquireTimeout: acquireTimeout,
+    );
+  }
 
   /// Pool config that opens connections with Windows NTLM (SSPI).
   factory MssqlPoolConfig.ntlm({
@@ -112,8 +152,10 @@ class _IdleEntry {
 /// await pool.close();
 /// ```
 ///
-/// For Windows auth, use [MssqlPoolConfig.ntlm] (requires a domain-joined SQL
-/// Server that accepts NTLM/SSPI).
+/// Auth variants:
+/// - SQL: default [MssqlPoolConfig] constructor
+/// - Azure AD: [MssqlPoolConfig.azureAd]
+/// - Windows NTLM: [MssqlPoolConfig.ntlm] (domain-joined SQL that accepts SSPI)
 class MssqlPool {
   final MssqlPoolConfig config;
 
@@ -297,6 +339,17 @@ class MssqlPool {
   // ── Internals ──────────────────────────────────────────────────────────────
 
   Future<MssqlConnection> _openConnection() {
+    final aad = config.azureAdAuth;
+    if (aad != null) {
+      return MssqlConnection.connectAzureAd(
+        host: config.host,
+        port: config.port,
+        azureAdAuth: aad,
+        database: config.database,
+        trustServerCertificate: config.trustServerCertificate,
+        timeout: config.connectionTimeout,
+      );
+    }
     final domain = config.ntlmDomain;
     if (domain != null) {
       return MssqlConnection.connectNtlm(

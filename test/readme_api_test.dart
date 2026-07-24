@@ -338,6 +338,21 @@ void main() {
       // Don't open — needs domain SQL / NTLM.
     });
 
+    test('MssqlPoolConfig.azureAd params compile', () {
+      final pool = MssqlPool(MssqlPoolConfig.azureAd(
+        host: _host,
+        port: _port,
+        azureAdAuth: AzureAdAuth.fromToken('fake-token'),
+        database: 'master',
+        trustServerCertificate: true,
+        min: 0,
+        max: 2,
+      ));
+      expect(pool.config.azureAdAuth!.bearerToken, 'fake-token');
+      expect(pool.config.encrypt, isTrue);
+      // Don't open — needs Azure SQL + real token.
+    });
+
     test('pool.open() pre-warms min connections', () async {
       final pool = MssqlPool(MssqlPoolConfig(
         host: _host,
