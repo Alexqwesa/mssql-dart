@@ -17,6 +17,9 @@
   NVARCHAR PLP param encoding.
 * Add DML-only DONE, empty COLMETADATA, streamQueryResponse offline tests;
   annotate protocol unit tests with go-mssqldb / Tedious / ms-tds / PR #3 sources.
+* Extend offline coverage: DONE_PROC/DONE_IN_PROC/RETURNSTATUS, unknown token,
+  multi-set `rowsAffected` sum, 9-col NBCROW bitmap boundary, sql_variant INT/
+  NVARCHAR/NULL decode, empty Attention packet framing.
 * CI: run unit tests without Docker before the SQL Server 2022 integration suite.
 
 ## 0.1.1

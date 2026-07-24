@@ -249,4 +249,26 @@ void main() {
       expect(await buf.readAll(), equals([1, 2, 3, 4, 5]));
     });
   });
+
+  group('TdsBuffer Attention packet', () {
+    // ms-tds §2.2.1.7 Attention; go-mssqldb sendAttention — empty body, type 6
+    test('empty Attention packet is header-only EOM', () async {
+      final pair = await TdsSocketPair.open();
+      addTearDown(pair.close);
+
+      final received = BytesBuilder(copy: false);
+      pair.server.listen(received.add);
+
+      final buf = TdsBuffer(pair.client, packetSize: 4096);
+      buf.beginPacket(packAttention);
+      await buf.finishPacket(packAttention);
+
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+
+      expect(
+        received.toBytes(),
+        equals([packAttention, 1, 0, 8, 0, 0, 1, 0]),
+      );
+    });
+  });
 }

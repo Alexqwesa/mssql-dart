@@ -157,6 +157,37 @@ Uint8List _nbcRowSecondInt(int value) {
   return Uint8List.fromList(out.toBytes());
 }
 
+/// COLMETADATA for [count] nullable INTN columns named c0..c{n-1}.
+Uint8List _colMetaNullableInts(int count) {
+  final out = BytesBuilder(copy: false);
+  out.addByte(tokenColMetadata);
+  writeUint16LE(out, count);
+  for (var i = 0; i < count; i++) {
+    final name = 'c$i';
+    writeUint32LE(out, 0);
+    writeUint16LE(out, 1); // nullable
+    out.addByte(typeIntN);
+    out.addByte(4);
+    out.addByte(name.length);
+    out.add(ucs2(name));
+  }
+  return Uint8List.fromList(out.toBytes());
+}
+
+/// 9-col NBCROW: null,1,null,2,null,3,null,4,null — spans bitmap byte boundary.
+Uint8List _nbcRowNineColBoundary() {
+  final out = BytesBuilder(copy: false);
+  out.addByte(tokenNbcRow);
+  // bits 0..7: 1,0,1,0,1,0,1,0 → 0x55; bit 8 null → second byte 0x01
+  out.addByte(0x55);
+  out.addByte(0x01);
+  for (final v in [1, 2, 3, 4]) {
+    out.addByte(4);
+    writeUint32LE(out, v);
+  }
+  return Uint8List.fromList(out.toBytes());
+}
+
 Uint8List _envChangePacketSize(String size) {
   final payload = BytesBuilder(copy: false);
   payload.addByte(envPacketSize);
@@ -521,6 +552,115 @@ void main() {
         throwsA(isA<MssqlException>()
             .having((e) => e.errorCode, 'errorCode', 50000)),
       );
+    });
+
+    // go-mssqldb / tedious: DONE_PROC (0xFE) ends RPC response like DONE
+    test('DONE_PROC ends result set like DONE', () async {
+      final out = BytesBuilder(copy: false);
+      out.addByte(tokenDoneProc);
+      writeUint16LE(out, doneFlagCount);
+      writeUint16LE(out, 0);
+      writeUint64LE(out, 1);
+      final body = [
+        ..._colMetaInt('n'),
+        ..._rowInt(7),
+        ...out.toBytes(),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.rows.single, equals([7]));
+      expect(result.rowsAffected, equals(1));
+    });
+
+    // ms-tds §2.2.7.16 RETURNSTATUS — 4-byte status, skipped in query path
+    test('RETURNSTATUS is skipped before DONE', () async {
+      final out = BytesBuilder(copy: false);
+      out.addByte(tokenReturnStatus);
+      writeUint32LE(out, 0); // status OK
+      final body = [
+        ..._colMetaInt('n'),
+        ..._rowInt(1),
+        ...out.toBytes(),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.rows.single, equals([1]));
+    });
+
+    // processQueryResponse keeps first set rows, sums rowsAffected (node-mssql)
+    test('processQueryResponse sums rowsAffected across result sets', () async {
+      final body = [
+        ..._colMetaInt('a'),
+        ..._rowInt(1),
+        ..._doneToken(flags: doneFlagMore | doneFlagCount, rowCount: 2),
+        ..._colMetaInt('b'),
+        ..._rowInt(9),
+        ..._doneToken(flags: doneFlagCount, rowCount: 5),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.columns.single.name, equals('a'));
+      expect(result.rows.single, equals([1]));
+      expect(result.rowsAffected, equals(7));
+    });
+
+    // go-mssqldb / tedious: unexpected token → hard error
+    test('unknown token throws StateError', () async {
+      final body = [
+        0x00, // invalid
+        ..._doneToken(),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      await expectLater(
+        TokenStream(fed.buf).processQueryResponse(),
+        throwsA(isA<StateError>()),
+      );
+    });
+
+    // types_test 9-column NBCROW; Tedious nbcrow bitmap byte boundary
+    test('NBCROW 9-column null bitmap spans byte boundary', () async {
+      final body = [
+        ..._colMetaNullableInts(9),
+        ..._nbcRowNineColBoundary(),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(
+        result.rows.single,
+        equals([null, 1, null, 2, null, 3, null, 4, null]),
+      );
+    });
+
+    // ms-tds §2.2.7.7 DONE_IN_PROC — same layout as DONE inside RPC
+    test('DONE_IN_PROC ends result set like DONE', () async {
+      final out = BytesBuilder(copy: false);
+      out.addByte(tokenDoneInProc);
+      writeUint16LE(out, doneFlagCount);
+      writeUint16LE(out, 0);
+      writeUint64LE(out, 1);
+      final body = [
+        ..._colMetaInt('n'),
+        ..._rowInt(3),
+        ...out.toBytes(),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.rows.single, equals([3]));
+      expect(result.rowsAffected, equals(1));
     });
   });
 }

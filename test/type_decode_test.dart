@@ -355,4 +355,47 @@ void main() {
       expect(v, equals([0xDE, 0xAD, 0xBE]));
     });
   });
+
+  group('TypeInfo sql_variant decode', () {
+    // go-mssqldb types.go sql_variant; ms-tds §2.2.5.5.3; live types_test sql_variant
+    test('INT inside sql_variant', () async {
+      // TYPE_INFO: variant + MaxLen; value: varLen + baseType + propCount + int32
+      final v = await _decode(
+        typeInfoBytes: [typeVariant, 0x09, 0x1F, 0x00, 0x00], // MaxLen 8009
+        valueBytes: [
+          6, 0, 0, 0, // varLen = 1+1+4
+          typeInt4,
+          0, // propCount
+          0x14, 0x00, 0x00, 0x00, // 20
+        ],
+      );
+      expect(v, equals(20));
+    });
+
+    test('NVARCHAR inside sql_variant', () async {
+      final text = ucs2('ab');
+      // props: 5 collation + 2 maxLen = 7; valueLen = 4
+      final varLen = 2 + 7 + text.length;
+      final v = await _decode(
+        typeInfoBytes: [typeVariant, 0x09, 0x1F, 0x00, 0x00],
+        valueBytes: [
+          varLen & 0xFF, (varLen >> 8) & 0xFF, 0, 0,
+          typeNVarChar,
+          7, // propCount
+          0, 0, 0, 0, 0, // collation
+          0x00, 0x20, // max length hint
+          ...text,
+        ],
+      );
+      expect(v, equals('ab'));
+    });
+
+    test('NULL sql_variant', () async {
+      final v = await _decode(
+        typeInfoBytes: [typeVariant, 0x09, 0x1F, 0x00, 0x00],
+        valueBytes: [0, 0, 0, 0],
+      );
+      expect(v, isNull);
+    });
+  });
 }
