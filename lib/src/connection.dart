@@ -9,6 +9,7 @@ import 'auth/ntlm_auth.dart';
 import 'auth/sql_auth.dart';
 import 'connection_string.dart';
 import 'exception.dart';
+import 'params.dart';
 import 'result.dart';
 import 'server_endpoint.dart';
 import 'tds/buf.dart';
@@ -447,6 +448,44 @@ class MssqlConnection {
         timeout: timeout,
       );
       return result.rowsAffected > 0 ? result.rowsAffected : rows.length;
+    } finally {
+      _busy = false;
+    }
+  }
+
+  /// Invokes a stored procedure via TDS RPC (not `EXEC` batch).
+  ///
+  /// Mark OUTPUT / INPUT-OUTPUT parameters with [MssqlOutput]. The response
+  /// includes [MssqlProcedureResult.returnStatus] (`RETURN` integer) and
+  /// [MssqlProcedureResult.output] (RETURNVALUE tokens).
+  ///
+  /// ```dart
+  /// final r = await conn.call('dbo.dart_sp_output', {
+  ///   'in': 5,
+  ///   'out': MssqlOutput(0),
+  /// });
+  /// print(r.output['out']); // 15
+  /// ```
+  Future<MssqlProcedureResult> call(
+    String procedure, [
+    Map<String, Object?> parameters = const {},
+    Duration? timeout,
+  ]) async {
+    _assertOpen();
+    _assertNotBusy();
+    _busy = true;
+    try {
+      await RpcRequest.sendProcedure(_buf, procedure, parameters);
+      final ts = _tokenStream();
+      final sets = await _awaitQuery(
+        ts.processAllQueryResponses(),
+        timeout: timeout,
+      );
+      return MssqlProcedureResult(
+        returnStatus: ts.lastReturnStatus,
+        output: Map.unmodifiable(Map<String, Object?>.from(ts.lastReturnValues)),
+        resultSets: [for (final s in sets) MssqlResult.fromInternal(s)],
+      );
     } finally {
       _busy = false;
     }

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+* LAN RPC / stored procedures: `MssqlConnection.call` / `MssqlPool.call` with
+  `MssqlOutput` parameters; capture `RETURNSTATUS` + `RETURNVALUE` into
+  `MssqlProcedureResult` (go-mssqldb / ms-tds RETURNVALUE).
+
 ## 0.2.0
 
 LAN / on-prem hardening wave: cancel, NTLM, timeouts, pool health, named

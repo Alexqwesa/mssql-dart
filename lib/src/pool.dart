@@ -4,6 +4,7 @@ import 'auth/azure_ad_auth.dart';
 import 'connection.dart';
 import 'connection_string.dart';
 import 'exception.dart';
+import 'params.dart';
 import 'result.dart';
 import 'tds/constants.dart';
 
@@ -428,6 +429,20 @@ class MssqlPool {
     final conn = await acquire();
     try {
       return await conn.execute(sql, parameters);
+    } finally {
+      await release(conn);
+    }
+  }
+
+  /// Invokes a stored procedure via TDS RPC (see [MssqlConnection.call]).
+  Future<MssqlProcedureResult> call(
+    String procedure, [
+    Map<String, Object?> parameters = const {},
+    Duration? timeout,
+  ]) async {
+    final conn = await acquire();
+    try {
+      return await conn.call(procedure, parameters, timeout);
     } finally {
       await release(conn);
     }

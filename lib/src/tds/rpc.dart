@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import '../params.dart';
 import 'buf.dart';
 import 'constants.dart';
 import 'tvp.dart';
@@ -11,6 +12,9 @@ class RpcRequest {
   // Well-known RPC procedure IDs (ProcIDSwitch)
   static const int _spExecuteSql = 10;
 
+  /// StatusFlags: by-ref / OUTPUT parameter (ms-tds RPC ParameterData).
+  static const int _fByRefValue = 0x01;
+
   /// Sends [sql] as a direct SQL batch (packSQLBatch) without sp_executesql.
   /// Use for parameterless statements, especially DDL — temp tables created
   /// inside sp_executesql are scoped to that call, not the session.
@@ -19,6 +23,31 @@ class RpcRequest {
     _writeAllHeaders(buf);
     buf.writeBytes(_ucs2(sql));
     await buf.finishPacket(packSQLBatch);
+  }
+
+  /// Sends a named stored-procedure RPC (ProcName form, not ProcID).
+  ///
+  /// [procedure] may be `dbo.MyProc` or `MyProc`. Parameters marked with
+  /// [MssqlOutput] are sent with fByRefValue so the server returns
+  /// RETURNVALUE tokens.
+  static Future<void> sendProcedure(
+    TdsBuffer buf,
+    String procedure,
+    Map<String, Object?> parameters,
+  ) async {
+    buf.beginPacket(packRPCRequest);
+    _writeAllHeaders(buf);
+
+    final nameBytes = _ucs2(procedure);
+    buf.writeUint16LE(nameBytes.length >> 1);
+    buf.writeBytes(nameBytes);
+    buf.writeUint16LE(0); // OptionFlags
+
+    for (final entry in parameters.entries) {
+      _writeParam(buf, entry.key, entry.value);
+    }
+
+    await buf.finishPacket(packRPCRequest);
   }
 
   /// Sends `sp_executesql @statement, @params, @p1=v1, ...`.
@@ -71,12 +100,18 @@ class RpcRequest {
 
   static String _buildParamDecl(Map<String, Object?> params) {
     return params.entries.map((e) {
+      final out = e.value is MssqlOutput;
       final typeName = _dartTypeToSql(e.value);
-      return '@${e.key} $typeName';
+      return '@${e.key} $typeName${out ? ' OUTPUT' : ''}';
     }).join(', ');
   }
 
   static String _dartTypeToSql(Object? v) {
+    if (v is MssqlOutput) {
+      if (v.sqlType != null && v.sqlType!.isNotEmpty) return v.sqlType!;
+      if (v.value == null) return 'int';
+      return _dartTypeToSql(v.value);
+    }
     if (v == null) return 'nvarchar(max)';
     if (v is MssqlTvp) return v.readonlyDecl;
     if (v is int) return 'bigint';
@@ -89,20 +124,43 @@ class RpcRequest {
   }
 
   static void _writeParam(TdsBuffer buf, String name, Object? value) {
-    // ParamName: BVarChar — must include the '@' prefix to match the @params declaration.
     final nameBytes = _ucs2('@$name');
     buf.writeByte(nameBytes.length >> 1);
     buf.writeBytes(nameBytes);
 
-    // StatusFlags: 0 (input)
-    buf.writeByte(0x00);
+    var isOutput = false;
+    Object? actual = value;
+    String? sqlType;
+    if (value is MssqlOutput) {
+      isOutput = true;
+      actual = value.value;
+      sqlType = value.sqlType;
+    }
 
+    buf.writeByte(isOutput ? _fByRefValue : 0x00);
+    _writeParamValue(
+      buf,
+      actual,
+      sqlType: sqlType ?? (isOutput && actual == null ? 'int' : null),
+    );
+  }
+
+  static void _writeParamValue(
+    TdsBuffer buf,
+    Object? value, {
+    String? sqlType,
+  }) {
     if (value == null) {
-      // nvarchar(1), null value
-      buf.writeByte(typeNVarChar);
-      buf.writeUint16LE(2); // max length hint
-      _writeCollation(buf);
-      buf.writeUint16LE(0xFFFF); // null
+      if (sqlType != null) {
+        _writeNullParam(buf, sqlType);
+      } else {
+        // Untyped null in sp_executesql / query params → nvarchar NULL
+        // (historical default; matches prior driver behaviour).
+        buf.writeByte(typeNVarChar);
+        buf.writeUint16LE(2); // max length hint
+        _writeCollation(buf);
+        buf.writeUint16LE(0xFFFF); // null
+      }
       return;
     }
 
@@ -113,7 +171,6 @@ class RpcRequest {
         buf.writeByte(typeIntN);
         buf.writeByte(8); // max len
         buf.writeByte(8); // actual len
-        // Write as two 32-bit halves to avoid 64-bit literal overflow.
         final lo = v & 0xFFFFFFFF;
         final hi = (v >> 32) & 0xFFFFFFFF;
         buf.writeUint32LE(lo);
@@ -131,15 +188,68 @@ class RpcRequest {
         buf.writeByte(1);
         buf.writeByte(v ? 1 : 0);
       case String v:
-        _writeNVarCharParam(buf, name, v, isOutput: false, skipName: true);
+        _writeNVarCharParam(buf, '', v, isOutput: false, skipName: true);
       case DateTime v:
         _writeDateTimeParam(buf, v);
       case List<int> v:
         _writeBinaryParam(buf, Uint8List.fromList(v));
       default:
         final s = value.toString();
-        _writeNVarCharParam(buf, name, s, isOutput: false, skipName: true);
+        _writeNVarCharParam(buf, '', s, isOutput: false, skipName: true);
     }
+  }
+
+  static void _writeNullParam(TdsBuffer buf, String? sqlType) {
+    final t = (sqlType ?? 'int').trim().toLowerCase();
+    if (t.startsWith('nvarchar') || t.startsWith('nchar')) {
+      buf.writeByte(typeNVarChar);
+      buf.writeUint16LE(2);
+      _writeCollation(buf);
+      buf.writeUint16LE(0xFFFF);
+      return;
+    }
+    if (t.startsWith('varchar') || t.startsWith('char')) {
+      buf.writeByte(typeBigVarChar);
+      buf.writeUint16LE(1);
+      _writeCollation(buf);
+      buf.writeUint16LE(0xFFFF);
+      return;
+    }
+    if (t == 'bit') {
+      buf.writeByte(typeBitN);
+      buf.writeByte(1);
+      buf.writeByte(0);
+      return;
+    }
+    if (t == 'float' || t == 'real' || t == 'double') {
+      buf.writeByte(typeFltN);
+      buf.writeByte(8);
+      buf.writeByte(0);
+      return;
+    }
+    if (t.startsWith('varbinary') || t == 'image' || t == 'binary') {
+      buf.writeByte(typeBigVarBin);
+      buf.writeUint16LE(0xFFFF);
+      buf.writeUint64LE(plpNull);
+      return;
+    }
+    if (t.startsWith('datetime')) {
+      buf.writeByte(typeDateTime2N);
+      buf.writeByte(7);
+      buf.writeByte(0);
+      return;
+    }
+    // int / bigint / smallint / tinyint / default
+    final maxLen = (t == 'bigint')
+        ? 8
+        : (t == 'smallint')
+            ? 2
+            : (t == 'tinyint')
+                ? 1
+                : 4;
+    buf.writeByte(typeIntN);
+    buf.writeByte(maxLen);
+    buf.writeByte(0); // null
   }
 
   static void _writeNVarCharParam(
@@ -153,7 +263,7 @@ class RpcRequest {
       final nameBytes = _ucs2(name);
       buf.writeByte(nameBytes.length >> 1);
       buf.writeBytes(nameBytes);
-      buf.writeByte(isOutput ? 0x01 : 0x00);
+      buf.writeByte(isOutput ? _fByRefValue : 0x00);
     }
 
     final valueBytes = _ucs2(value);

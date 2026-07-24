@@ -57,7 +57,19 @@ class TokenStream {
   /// Invoked when ENVCHANGE type 1 (database) is seen — new database name.
   final void Function(String database)? onDatabaseChanged;
 
+  /// Last `RETURN` status (`tokenReturnStatus` 0x79) from the most recent
+  /// response parse. Cleared at the start of each query response method.
+  int? lastReturnStatus;
+
+  /// OUTPUT parameter values from `tokenReturnValue` (0xAC), keyed without `@`.
+  final Map<String, Object?> lastReturnValues = {};
+
   TokenStream(this._buf, {this.onDatabaseChanged});
+
+  void _clearReturnState() {
+    lastReturnStatus = null;
+    lastReturnValues.clear();
+  }
 
   /// Process the server response after LOGIN7. Returns basic session metadata.
   ///
@@ -170,6 +182,7 @@ class TokenStream {
   /// Stored procedures that execute multiple SELECT statements produce one
   /// [QueryResult] per SELECT, each with its own column schema and rows.
   Future<List<QueryResult>> processAllQueryResponses() async {
+    _clearReturnState();
     final results = <QueryResult>[];
     List<ColumnMeta>? columns;
     List<List<Object?>> rows = [];
@@ -203,9 +216,10 @@ class TokenStream {
         case tokenEnvChange:
           await _applyEnvChange();
         case tokenReturnStatus:
-          await _buf.readUint32LE();
+          lastReturnStatus = await _buf.readInt32LE();
         case tokenReturnValue:
-          await _skipReturnValue();
+          final rv = await _readReturnValue();
+          lastReturnValues[rv.$1] = rv.$2;
         case tokenInfo:
           await _skipInfoOrError();
         case tokenError:
@@ -264,6 +278,7 @@ class TokenStream {
   ///
   /// The stream emits `(columns, row)` pairs so callers always have schema info.
   Stream<(List<ColumnMeta>, List<Object?>)> streamQueryResponse() async* {
+    _clearReturnState();
     List<ColumnMeta>? columns;
     // inFirstSet: true only while reading the first COLMETADATA group's rows.
     // Rows from subsequent result sets are read and discarded (not yielded).
@@ -299,9 +314,10 @@ class TokenStream {
         case tokenEnvChange:
           await _applyEnvChange();
         case tokenReturnStatus:
-          await _buf.readUint32LE();
+          lastReturnStatus = await _buf.readInt32LE();
         case tokenReturnValue:
-          await _skipReturnValue();
+          final rv = await _readReturnValue();
+          lastReturnValues[rv.$1] = rv.$2;
         case tokenInfo:
           await _skipInfoOrError();
         case tokenError:
@@ -358,9 +374,10 @@ class TokenStream {
         case tokenEnvChange:
           await _applyEnvChange();
         case tokenReturnStatus:
-          await _buf.readUint32LE();
+          lastReturnStatus = await _buf.readInt32LE();
         case tokenReturnValue:
-          await _skipReturnValue();
+          final rv = await _readReturnValue();
+          lastReturnValues[rv.$1] = rv.$2;
         case tokenInfo:
           await _skipInfoOrError();
         case tokenError:
@@ -595,19 +612,28 @@ class TokenStream {
     await _buf.readBytes(length);
   }
 
-  /// Reads and discards a RETURNVALUE token (0xAC).
+  /// Reads a RETURNVALUE token (0xAC) — OUTPUT / return parameter.
   ///
-  /// Appears in stored procedure responses for OUTPUT parameters.
-  /// ms-tds §2.2.7.15 RETURNVALUE.
-  Future<void> _skipReturnValue() async {
+  /// Layout matches go-mssqldb `parseReturnValue` / ms-tds §2.2.7.15:
+  /// ParamOrdinal, ParamName, Status, UserType, Flags, TypeInfo, Value.
+  Future<(String, Object?)> _readReturnValue() async {
     await _buf.readUint16LE(); // OrdinalNum
     final nameLen = await _buf.readUint8();
-    if (nameLen > 0) await _buf.readBytes(nameLen * 2); // ParamName (UCS-2)
+    var name = '';
+    if (nameLen > 0) {
+      final nameBytes = await _buf.readBytes(nameLen * 2);
+      name = String.fromCharCodes([
+        for (int j = 0; j < nameBytes.length; j += 2)
+          nameBytes[j] | (nameBytes[j + 1] << 8)
+      ]);
+    }
+    if (name.startsWith('@')) name = name.substring(1);
     await _buf.readUint8(); // Status
     await _buf.readUint32LE(); // UserType
     await _buf.readUint16LE(); // Flags
     final ti = await TypeInfo.read(_buf);
-    await ti.readValue(_buf); // read and discard the value
+    final value = await ti.readValue(_buf);
+    return (name, value);
   }
 
   Future<List<ColumnMeta>> _readColMetadata() async {

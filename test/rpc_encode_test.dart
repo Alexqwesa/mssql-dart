@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import 'package:mssql/mssql.dart' show MssqlOutput;
 import 'package:mssql/src/tds/buf.dart';
 import 'package:mssql/src/tds/constants.dart';
 import 'package:mssql/src/tds/rpc.dart';
@@ -267,6 +268,54 @@ void main() {
         }
       }
       expect(foundPlp, isTrue);
+    });
+  });
+
+  group('RpcRequest.sendProcedure', () {
+    // ms-tds §2.2.6.5 ProcName form; go-mssqldb RPC by name
+    test('named procedure uses ProcName (not 0xFFFF ProcID)', () async {
+      final pkt = await _capturePacket(
+        send: (buf) => RpcRequest.sendProcedure(
+          buf,
+          'dbo.MyProc',
+          {'a': 1},
+        ),
+      );
+      expect(pkt[0], equals(packRPCRequest));
+      final body = _body(pkt);
+      // After ALL_HEADERS (22 bytes): USHORT name len, not 0xFFFF
+      expect(readUint16LE(body, 22), equals('dbo.MyProc'.length));
+      expect(_containsUcs2(body, 'dbo.MyProc'), isTrue);
+      expect(readUint16LE(body, 22), isNot(equals(0xFFFF)));
+    });
+
+    // ms-tds ParameterData StatusFlags fByRefValue
+    test('MssqlOutput sets fByRefValue status byte', () async {
+      final pkt = await _capturePacket(
+        send: (buf) => RpcRequest.sendProcedure(
+          buf,
+          'dbo.OutProc',
+          {'out': const MssqlOutput(0)},
+        ),
+      );
+      final body = _body(pkt);
+      // Find @out name then status byte 0x01
+      final name = ucs2('@out');
+      var found = false;
+      for (var i = 0; i <= body.length - name.length - 1; i++) {
+        var ok = true;
+        for (var j = 0; j < name.length; j++) {
+          if (body[i + j] != name[j]) {
+            ok = false;
+            break;
+          }
+        }
+        if (ok && body[i + name.length] == 0x01) {
+          found = true;
+          break;
+        }
+      }
+      expect(found, isTrue);
     });
   });
 }

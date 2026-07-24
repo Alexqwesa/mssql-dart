@@ -127,6 +127,18 @@ await MssqlConnection.connectNtlm(
 );
 ```
 
+### Stored procedures (OUTPUT / RETURN)
+
+```dart
+final r = await conn.call('dbo.MyProc', {
+  'inVal': 5,
+  'outVal': MssqlOutput(0), // or MssqlOutput(null, 'nvarchar(100)')
+});
+print(r.returnStatus);   // RETURN integer, if any
+print(r.output['outVal']);
+print(r.resultSets);     // SELECT sets inside the proc
+```
+
 ---
 
 ## API reference
@@ -359,6 +371,7 @@ Named parameters use `@name` placeholders. Supported Dart → SQL type mappings:
 | `List<int>`  | VARBINARY(MAX)              |
 | `DateTime`   | DATETIME2(7)                |
 | `MssqlTvp`   | user-defined table type (`… READONLY`) |
+| `MssqlOutput`| OUTPUT / INPUT-OUTPUT (with [call]) |
 | `null`       | NULL (any type)             |
 
 ---

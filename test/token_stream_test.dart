@@ -551,7 +551,7 @@ void main() {
     });
 
     // ms-tds §2.2.7.15 RETURNVALUE; go-mssqldb / tedious OUTPUT params
-    test('RETURNVALUE token is skipped without corrupting stream', () async {
+    test('RETURNVALUE token is captured into lastReturnValues', () async {
       final body = [
         ..._colMetaInt('n'),
         ..._rowInt(1),
@@ -561,8 +561,24 @@ void main() {
       final fed = await _openWithBody(body);
       addTearDown(fed.pair.close);
 
-      final result = await TokenStream(fed.buf).processQueryResponse();
+      final ts = TokenStream(fed.buf);
+      final result = await ts.processQueryResponse();
       expect(result.rows.single, equals([1]));
+      expect(ts.lastReturnValues['out'], equals(99));
+    });
+
+    // ms-tds §2.2.7.16 RETURNSTATUS; go-mssqldb parseReturnStatus
+    test('RETURNSTATUS token is captured as signed int32', () async {
+      final out = BytesBuilder(copy: false);
+      out.addByte(tokenReturnStatus);
+      writeUint32LE(out, 0xFFFFFF9C); // -100 as uint32 bits
+      out.add(_doneToken());
+      final fed = await _openWithBody(out.toBytes());
+      addTearDown(fed.pair.close);
+
+      final ts = TokenStream(fed.buf);
+      await ts.processAllQueryResponses();
+      expect(ts.lastReturnStatus, equals(-100));
     });
 
     // ms-tds ENVCHANGE type 8/9; go-mssqldb transaction descriptor

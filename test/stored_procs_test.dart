@@ -123,6 +123,11 @@ void main() {
       final r = await conn.query('SELECT 99 AS ok');
       expect(r[0]['ok'], equals(99));
     });
+
+    test('call() surfaces RETURN status', () async {
+      final r = await conn.call('dbo.dart_sp_return', {'v': 42});
+      expect(r.returnStatus, equals(142));
+    });
   });
 
   // ── OUTPUT parameters (tokenReturnValue) ──────────────────────────────────
@@ -143,6 +148,14 @@ void main() {
           "DECLARE @out INT; EXEC dbo.dart_sp_output @in = 10, @out = @out OUTPUT; SELECT @out AS v");
       final r = await conn.query('SELECT 7 AS ok');
       expect(r[0]['ok'], equals(7));
+    });
+
+    test('call() returns OUTPUT param values', () async {
+      final r = await conn.call('dbo.dart_sp_output', {
+        'in': 5,
+        'out': const MssqlOutput(0),
+      });
+      expect(r.output['out'], equals(15));
     });
   });
 
