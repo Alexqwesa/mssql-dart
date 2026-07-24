@@ -7,6 +7,7 @@ import 'package:async/async.dart';
 import 'auth/azure_ad_auth.dart';
 import 'auth/ntlm_auth.dart';
 import 'auth/sql_auth.dart';
+import 'connection_string.dart';
 import 'exception.dart';
 import 'result.dart';
 import 'server_endpoint.dart';
@@ -145,6 +146,46 @@ class MssqlConnection {
       timeout: timeout,
       queryTimeout: queryTimeout,
     )._open();
+  }
+
+  /// Connects using an ADO.NET / ODBC keyword string or `sqlserver://` URL.
+  ///
+  /// See [MssqlConnectionString.parse]. `User Id=DOMAIN\user` (or URL form)
+  /// opens via [connectNtlm].
+  static Future<MssqlConnection> connectFromString(String connectionString) {
+    final c = MssqlConnectionString.parse(connectionString);
+    if (c.useNtlm) {
+      return connectNtlm(
+        host: c.host,
+        port: c.port,
+        instanceName: c.instanceName,
+        domain: c.ntlmDomain!,
+        user: c.user,
+        password: c.password,
+        workstation: c.workstation,
+        database: c.database,
+        appName: c.appName,
+        packetSize: c.packetSize,
+        encrypt: c.encrypt,
+        trustServerCertificate: c.trustServerCertificate,
+        timeout: c.connectionTimeout,
+        queryTimeout: c.queryTimeout,
+      );
+    }
+    return connect(
+      host: c.host,
+      port: c.port,
+      instanceName: c.instanceName,
+      user: c.user,
+      password: c.password,
+      database: c.database,
+      appName: c.appName,
+      packetSize: c.packetSize,
+      encrypt: c.encrypt,
+      trustServerCertificate: c.trustServerCertificate,
+      timeout: c.connectionTimeout,
+      queryTimeout: c.queryTimeout,
+    );
   }
 
   /// Connects using Azure AD authentication (bearer token).

@@ -68,6 +68,8 @@
 * LAN TDS RESETCONNECTION: `requestSessionReset` / `resetSession` set status
   `0x08` on next Batch/RPC (go-mssqldb ResetSession); pool `resetOnRelease`
   uses it to clear temp tables and session settings.
+* LAN connection strings: ADO.NET keyword + `sqlserver://` URL parse
+  (`MssqlConnectionString`, `connectFromString`, `MssqlPoolConfig.fromConnectionString`).
 
 ## 0.1.1
 

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'auth/azure_ad_auth.dart';
 import 'connection.dart';
+import 'connection_string.dart';
 import 'exception.dart';
 import 'result.dart';
 import 'tds/constants.dart';
@@ -83,6 +84,66 @@ class MssqlPoolConfig {
     this.validateOnAcquire = true,
     this.resetOnRelease = true,
   });
+
+  /// Builds pool config from an ADO.NET / `sqlserver://` connection string.
+  ///
+  /// Pool sizing knobs ([min], [max], …) are not part of the string — pass
+  /// them here. NTLM is used when the string has `DOMAIN\user`.
+  factory MssqlPoolConfig.fromConnectionString(
+    String connectionString, {
+    int min = 0,
+    int max = 10,
+    Duration idleTimeout = const Duration(seconds: 30),
+    Duration acquireTimeout = const Duration(seconds: 15),
+    bool validateOnAcquire = true,
+    bool resetOnRelease = true,
+  }) {
+    final c = MssqlConnectionString.parse(connectionString);
+    if (c.useNtlm) {
+      return MssqlPoolConfig.ntlm(
+        host: c.host,
+        port: c.port,
+        instanceName: c.instanceName,
+        domain: c.ntlmDomain!,
+        user: c.user,
+        password: c.password,
+        workstation: c.workstation,
+        database: c.database,
+        appName: c.appName,
+        packetSize: c.packetSize,
+        encrypt: c.encrypt,
+        trustServerCertificate: c.trustServerCertificate,
+        connectionTimeout: c.connectionTimeout,
+        queryTimeout: c.queryTimeout,
+        min: min,
+        max: max,
+        idleTimeout: idleTimeout,
+        acquireTimeout: acquireTimeout,
+        validateOnAcquire: validateOnAcquire,
+        resetOnRelease: resetOnRelease,
+      );
+    }
+    return MssqlPoolConfig(
+      host: c.host,
+      port: c.port,
+      instanceName: c.instanceName,
+      user: c.user,
+      password: c.password,
+      database: c.database,
+      appName: c.appName,
+      packetSize: c.packetSize,
+      encrypt: c.encrypt,
+      trustServerCertificate: c.trustServerCertificate,
+      connectionTimeout: c.connectionTimeout,
+      queryTimeout: c.queryTimeout,
+      min: min,
+      max: max,
+      idleTimeout: idleTimeout,
+      acquireTimeout: acquireTimeout,
+      validateOnAcquire: validateOnAcquire,
+      resetOnRelease: resetOnRelease,
+    );
+  }
 
   /// Pool config that opens connections with Azure AD (FedAuth).
   ///

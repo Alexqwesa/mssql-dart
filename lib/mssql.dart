@@ -5,6 +5,7 @@ export 'src/auth/azure_ad_auth.dart';
 export 'src/auth/ntlm_auth.dart';
 export 'src/auth/sql_auth.dart';
 export 'src/connection.dart';
+export 'src/connection_string.dart';
 export 'src/exception.dart';
 export 'src/pool.dart';
 export 'src/result.dart';
