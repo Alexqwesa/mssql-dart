@@ -4,6 +4,7 @@ import 'auth/azure_ad_auth.dart';
 import 'connection.dart';
 import 'connection_string.dart';
 import 'exception.dart';
+import 'info_message.dart';
 import 'params.dart';
 import 'result.dart';
 import 'tds/constants.dart';
@@ -62,6 +63,13 @@ class MssqlPoolConfig {
   /// previous borrower do not leak to the next acquire.
   final bool resetOnRelease;
 
+  /// Extra connect attempts on transient failure (default `2`). See
+  /// [MssqlTransient].
+  final int connectRetries;
+
+  /// Optional INFO token handler applied to every pooled connection.
+  final void Function(MssqlInfoMessage info)? onInfoMessage;
+
   const MssqlPoolConfig({
     required this.host,
     this.port = 1433,
@@ -84,6 +92,8 @@ class MssqlPoolConfig {
     this.acquireTimeout = const Duration(seconds: 15),
     this.validateOnAcquire = true,
     this.resetOnRelease = true,
+    this.connectRetries = 2,
+    this.onInfoMessage,
   });
 
   /// Builds pool config from an ADO.NET / `sqlserver://` connection string.
@@ -98,6 +108,8 @@ class MssqlPoolConfig {
     Duration acquireTimeout = const Duration(seconds: 15),
     bool validateOnAcquire = true,
     bool resetOnRelease = true,
+    int connectRetries = 2,
+    void Function(MssqlInfoMessage info)? onInfoMessage,
   }) {
     final c = MssqlConnectionString.parse(connectionString);
     if (c.useNtlm) {
@@ -122,6 +134,8 @@ class MssqlPoolConfig {
         acquireTimeout: acquireTimeout,
         validateOnAcquire: validateOnAcquire,
         resetOnRelease: resetOnRelease,
+        connectRetries: connectRetries,
+        onInfoMessage: onInfoMessage,
       );
     }
     return MssqlPoolConfig(
@@ -143,6 +157,8 @@ class MssqlPoolConfig {
       acquireTimeout: acquireTimeout,
       validateOnAcquire: validateOnAcquire,
       resetOnRelease: resetOnRelease,
+      connectRetries: connectRetries,
+      onInfoMessage: onInfoMessage,
     );
   }
 
@@ -167,6 +183,8 @@ class MssqlPoolConfig {
     Duration acquireTimeout = const Duration(seconds: 15),
     bool validateOnAcquire = true,
     bool resetOnRelease = true,
+    int connectRetries = 2,
+    void Function(MssqlInfoMessage info)? onInfoMessage,
   }) {
     return MssqlPoolConfig(
       host: host,
@@ -188,6 +206,8 @@ class MssqlPoolConfig {
       acquireTimeout: acquireTimeout,
       validateOnAcquire: validateOnAcquire,
       resetOnRelease: resetOnRelease,
+      connectRetries: connectRetries,
+      onInfoMessage: onInfoMessage,
     );
   }
 
@@ -213,6 +233,8 @@ class MssqlPoolConfig {
     Duration acquireTimeout = const Duration(seconds: 15),
     bool validateOnAcquire = true,
     bool resetOnRelease = true,
+    int connectRetries = 2,
+    void Function(MssqlInfoMessage info)? onInfoMessage,
   }) {
     return MssqlPoolConfig(
       host: host,
@@ -235,10 +257,11 @@ class MssqlPoolConfig {
       acquireTimeout: acquireTimeout,
       validateOnAcquire: validateOnAcquire,
       resetOnRelease: resetOnRelease,
+      connectRetries: connectRetries,
+      onInfoMessage: onInfoMessage,
     );
   }
 }
-
 class _IdleEntry {
   final MssqlConnection connection;
   final DateTime idleSince;
@@ -497,10 +520,11 @@ class MssqlPool {
 
   // ── Internals ──────────────────────────────────────────────────────────────
 
-  Future<MssqlConnection> _openConnection() {
+  Future<MssqlConnection> _openConnection() async {
     final aad = config.azureAdAuth;
+    late final MssqlConnection conn;
     if (aad != null) {
-      return MssqlConnection.connectAzureAd(
+      conn = await MssqlConnection.connectAzureAd(
         host: config.host,
         port: config.port,
         instanceName: config.instanceName,
@@ -511,41 +535,48 @@ class MssqlPool {
         trustServerCertificate: config.trustServerCertificate,
         timeout: config.connectionTimeout,
         queryTimeout: config.queryTimeout,
+        connectRetries: config.connectRetries,
       );
+    } else {
+      final domain = config.ntlmDomain;
+      if (domain != null) {
+        conn = await MssqlConnection.connectNtlm(
+          host: config.host,
+          port: config.port,
+          instanceName: config.instanceName,
+          domain: domain,
+          user: config.user,
+          password: config.password,
+          workstation: config.ntlmWorkstation,
+          database: config.database,
+          appName: config.appName,
+          packetSize: config.packetSize,
+          encrypt: config.encrypt,
+          trustServerCertificate: config.trustServerCertificate,
+          timeout: config.connectionTimeout,
+          queryTimeout: config.queryTimeout,
+          connectRetries: config.connectRetries,
+        );
+      } else {
+        conn = await MssqlConnection.connect(
+          host: config.host,
+          port: config.port,
+          instanceName: config.instanceName,
+          user: config.user,
+          password: config.password,
+          database: config.database,
+          appName: config.appName,
+          packetSize: config.packetSize,
+          encrypt: config.encrypt,
+          trustServerCertificate: config.trustServerCertificate,
+          timeout: config.connectionTimeout,
+          queryTimeout: config.queryTimeout,
+          connectRetries: config.connectRetries,
+        );
+      }
     }
-    final domain = config.ntlmDomain;
-    if (domain != null) {
-      return MssqlConnection.connectNtlm(
-        host: config.host,
-        port: config.port,
-        instanceName: config.instanceName,
-        domain: domain,
-        user: config.user,
-        password: config.password,
-        workstation: config.ntlmWorkstation,
-        database: config.database,
-        appName: config.appName,
-        packetSize: config.packetSize,
-        encrypt: config.encrypt,
-        trustServerCertificate: config.trustServerCertificate,
-        timeout: config.connectionTimeout,
-        queryTimeout: config.queryTimeout,
-      );
-    }
-    return MssqlConnection.connect(
-      host: config.host,
-      port: config.port,
-      instanceName: config.instanceName,
-      user: config.user,
-      password: config.password,
-      database: config.database,
-      appName: config.appName,
-      packetSize: config.packetSize,
-      encrypt: config.encrypt,
-      trustServerCertificate: config.trustServerCertificate,
-      timeout: config.connectionTimeout,
-      queryTimeout: config.queryTimeout,
-    );
+    conn.onInfoMessage = config.onInfoMessage;
+    return conn;
   }
 
   Future<void> _createAndIdle() async {

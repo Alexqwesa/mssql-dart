@@ -488,8 +488,33 @@ void main() {
         TokenStream(fed.buf).processQueryResponse(),
         throwsA(isA<MssqlException>()
             .having((e) => e.errorCode, 'errorCode', 208)
-            .having((e) => e.message, 'message', contains('Invalid object'))),
+            .having((e) => e.message, 'message', contains('Invalid object'))
+            .having((e) => e.severity, 'severity', 16)
+            .having((e) => e.state, 'state', 1)
+            .having((e) => e.lineNo, 'lineNo', 1)),
       );
+    });
+
+    // go-mssqldb parseInfo; Tedious infoMessage event
+    test('INFO token invokes onInfoMessage with full fields', () async {
+      MssqlInfoMessage? seen;
+      final body = [
+        ..._infoToken('hello print'),
+        ..._colMetaInt('n'),
+        ..._rowInt(1),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(
+        fed.buf,
+        onInfoMessage: (info) => seen = info,
+      ).processQueryResponse();
+      expect(result.rows.single, equals([1]));
+      expect(seen, isNotNull);
+      expect(seen!.message, equals('hello print'));
+      expect(seen!.isError, isFalse);
     });
 
     // go-mssqldb doneStruct multi-error aggregation pattern

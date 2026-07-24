@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import '../auth/azure_ad_auth.dart';
 import '../exception.dart';
+import '../info_message.dart';
 import 'buf.dart';
 import 'constants.dart';
 import 'type_info.dart';
@@ -57,6 +58,9 @@ class TokenStream {
   /// Invoked when ENVCHANGE type 1 (database) is seen — new database name.
   final void Function(String database)? onDatabaseChanged;
 
+  /// Invoked for each INFO token (`0xAB`) — PRINT / low-severity RAISERROR.
+  final void Function(MssqlInfoMessage info)? onInfoMessage;
+
   /// Last `RETURN` status (`tokenReturnStatus` 0x79) from the most recent
   /// response parse. Cleared at the start of each query response method.
   int? lastReturnStatus;
@@ -64,7 +68,11 @@ class TokenStream {
   /// OUTPUT parameter values from `tokenReturnValue` (0xAC), keyed without `@`.
   final Map<String, Object?> lastReturnValues = {};
 
-  TokenStream(this._buf, {this.onDatabaseChanged});
+  TokenStream(
+    this._buf, {
+    this.onDatabaseChanged,
+    this.onInfoMessage,
+  });
 
   void _clearReturnState() {
     lastReturnStatus = null;
@@ -111,7 +119,7 @@ class TokenStream {
         case tokenError:
           final err = await _readError();
           // Login errors are always fatal and always single; throw immediately.
-          throw MssqlException(err.$1, errorCode: err.$2);
+          throw err;
         case tokenSSPI:
           // USHORT length + SSPI blob (go-mssqldb parseSSPIMsg / ms-tds §2.2.7.22)
           final sspiLen = await _buf.readUint16LE();
@@ -224,7 +232,7 @@ class TokenStream {
           await _skipInfoOrError();
         case tokenError:
           final err = await _readError();
-          errors.add(MssqlException(err.$1, errorCode: err.$2));
+          errors.add(err);
         case tokenDone:
         case tokenDoneProc:
         case tokenDoneInProc:
@@ -322,7 +330,7 @@ class TokenStream {
           await _skipInfoOrError();
         case tokenError:
           final err = await _readError();
-          errors.add(MssqlException(err.$1, errorCode: err.$2));
+          errors.add(err);
         case tokenDone:
         case tokenDoneProc:
         case tokenDoneInProc:
@@ -428,6 +436,10 @@ class TokenStream {
       last.message,
       errorCode: last.errorCode,
       severity: last.severity,
+      state: last.state,
+      serverName: last.serverName,
+      procName: last.procName,
+      lineNo: last.lineNo,
       precedingErrors: errors,
     );
   }
@@ -579,13 +591,26 @@ class TokenStream {
     return (type, newVal, oldVal);
   }
 
-  Future<(String, int)> _readError() async => _readInfoOrError();
-
-  Future<void> _skipInfoOrError() async {
-    await _readInfoOrError();
+  Future<MssqlException> _readError() async {
+    final info = await _readInfoOrErrorMessage();
+    return MssqlException(
+      info.message,
+      errorCode: info.number,
+      severity: info.severity,
+      state: info.state,
+      serverName: info.serverName.isEmpty ? null : info.serverName,
+      procName: info.procName.isEmpty ? null : info.procName,
+      lineNo: info.lineNo,
+    );
   }
 
-  Future<(String, int)> _readInfoOrError() async {
+  Future<void> _skipInfoOrError() async {
+    final info = await _readInfoOrErrorMessage();
+    onInfoMessage?.call(info);
+  }
+
+  /// Parses INFO/ERROR body — go-mssqldb `parseInfo` / `parseError72`.
+  Future<MssqlInfoMessage> _readInfoOrErrorMessage() async {
     final length = await _buf.readUint16LE();
     final data = await _buf.readBytes(length);
     int i = 0;
@@ -593,18 +618,52 @@ class TokenStream {
         (data[i + 1] << 8) |
         (data[i + 2] << 16) |
         (data[i + 3] << 24);
+    // Sign-extend if high bit set (SQL numbers are INT32).
+    final signedNumber =
+        number >= 0x80000000 ? number - 0x100000000 : number;
     i += 4;
-    i++; // state
-    i++; // class
+    final state = data[i++];
+    final severity = data[i++];
     final msgLen = data[i] | (data[i + 1] << 8);
     i += 2;
-    final chars = <int>[];
+    final msgChars = <int>[];
     for (int j = 0; j < msgLen; j++) {
-      chars.add(data[i] | (data[i + 1] << 8));
+      msgChars.add(data[i] | (data[i + 1] << 8));
       i += 2;
     }
-    final message = String.fromCharCodes(chars);
-    return (message, number);
+    final message = String.fromCharCodes(msgChars);
+
+    String readBVarChar() {
+      if (i >= data.length) return '';
+      final n = data[i++];
+      final chars = <int>[];
+      for (int j = 0; j < n && i + 1 < data.length; j++) {
+        chars.add(data[i] | (data[i + 1] << 8));
+        i += 2;
+      }
+      return String.fromCharCodes(chars);
+    }
+
+    final serverName = readBVarChar();
+    final procName = readBVarChar();
+    var lineNo = 0;
+    if (i + 3 < data.length) {
+      lineNo = data[i] |
+          (data[i + 1] << 8) |
+          (data[i + 2] << 16) |
+          (data[i + 3] << 24);
+      if (lineNo >= 0x80000000) lineNo -= 0x100000000;
+    }
+
+    return MssqlInfoMessage(
+      number: signedNumber,
+      state: state,
+      severity: severity,
+      message: message,
+      serverName: serverName,
+      procName: procName,
+      lineNo: lineNo,
+    );
   }
 
   Future<void> _skipOrder() async {

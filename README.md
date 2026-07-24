@@ -139,6 +139,30 @@ print(r.output['outVal']);
 print(r.resultSets);     // SELECT sets inside the proc
 ```
 
+### Diagnostics & transient retry
+
+```dart
+conn.onInfoMessage = (info) {
+  print('INFO ${info.number}: ${info.message}'); // PRINT / RAISERROR < 11
+};
+
+// Pool: connectRetries default 2; optional INFO fan-out
+final pool = MssqlPool(MssqlPoolConfig(
+  host: '10.0.0.5',
+  user: 'sa',
+  password: '…',
+  encrypt: false,
+  connectRetries: 2,
+  onInfoMessage: (info) => print(info.message),
+));
+
+// App-level retry for deadlocks / brief disconnects
+await MssqlTransient.retry(
+  () => conn.query('UPDATE …'),
+  retries: 2,
+);
+```
+
 ---
 
 ## API reference

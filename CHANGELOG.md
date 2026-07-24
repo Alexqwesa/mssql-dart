@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* LAN diagnostics + resilience: parse full INFO/ERROR metadata (`state`,
+  `severity`, `serverName`, `procName`, `lineNo`); `onInfoMessage` on
+  connection/pool; `MssqlTransient.isTransient` / `retry`; pool/connect
+  `connectRetries` (pool default 2).
 * LAN RPC / stored procedures: `MssqlConnection.call` / `MssqlPool.call` with
   `MssqlOutput` parameters; capture `RETURNSTATUS` + `RETURNVALUE` into
   `MssqlProcedureResult` (go-mssqldb / ms-tds RETURNVALUE).

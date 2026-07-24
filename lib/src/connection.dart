@@ -9,6 +9,7 @@ import 'auth/ntlm_auth.dart';
 import 'auth/sql_auth.dart';
 import 'connection_string.dart';
 import 'exception.dart';
+import 'info_message.dart';
 import 'params.dart';
 import 'result.dart';
 import 'server_endpoint.dart';
@@ -65,6 +66,11 @@ class MssqlConnection {
   /// Database set at login (ENVCHANGE) — pool reset target when config.db empty.
   String _initialDatabase = '';
 
+  /// Optional handler for TDS INFO tokens (PRINT / low-severity RAISERROR).
+  ///
+  /// Set before running queries (pool sets this from [MssqlPoolConfig.onInfoMessage]).
+  void Function(MssqlInfoMessage info)? onInfoMessage;
+
   MssqlConnection._({
     required String host,
     required int port,
@@ -119,6 +125,9 @@ class MssqlConnection {
   /// Named instances: pass `host: r'HOST\INSTANCE'` (or [instanceName]) and
   /// the driver queries SQL Browser (UDP 1434) unless [port] / `host,port` is
   /// explicit. PRELOGIN INSTOPT always carries the instance name when set.
+  ///
+  /// [connectRetries] — extra attempts after a transient connect/login failure
+  /// (see [MssqlTransient]). Default `0` (single attempt).
   static Future<MssqlConnection> connect({
     required String host,
     int port = defaultPort,
@@ -132,22 +141,26 @@ class MssqlConnection {
     bool trustServerCertificate = false,
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
+    int connectRetries = 0,
   }) {
     final ep = ServerEndpoint.parse(host, port: port, instanceName: instanceName);
-    return MssqlConnection._(
-      host: ep.host,
-      port: ep.port,
-      instanceName: ep.instanceName,
-      resolveNamedInstancePort: ep.shouldResolvePort,
-      database: database,
-      appName: appName,
-      packetSize: packetSize,
-      sqlAuth: SqlAuth(username: user, password: password),
-      encrypt: encrypt,
-      trustServerCertificate: trustServerCertificate,
-      timeout: timeout,
-      queryTimeout: queryTimeout,
-    )._open();
+    return MssqlTransient.retry(
+      () => MssqlConnection._(
+        host: ep.host,
+        port: ep.port,
+        instanceName: ep.instanceName,
+        resolveNamedInstancePort: ep.shouldResolvePort,
+        database: database,
+        appName: appName,
+        packetSize: packetSize,
+        sqlAuth: SqlAuth(username: user, password: password),
+        encrypt: encrypt,
+        trustServerCertificate: trustServerCertificate,
+        timeout: timeout,
+        queryTimeout: queryTimeout,
+      )._open(),
+      retries: connectRetries,
+    );
   }
 
   /// Connects using an ADO.NET / ODBC keyword string or `sqlserver://` URL.
@@ -202,22 +215,26 @@ class MssqlConnection {
     bool trustServerCertificate = false,
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
+    int connectRetries = 0,
   }) {
     final ep = ServerEndpoint.parse(host, port: port, instanceName: instanceName);
-    return MssqlConnection._(
-      host: ep.host,
-      port: ep.port,
-      instanceName: ep.instanceName,
-      resolveNamedInstancePort: ep.shouldResolvePort,
-      database: database,
-      appName: appName,
-      packetSize: packetSize,
-      azureAdAuth: azureAdAuth,
-      encrypt: true, // Azure AD always requires TLS
-      trustServerCertificate: trustServerCertificate,
-      timeout: timeout,
-      queryTimeout: queryTimeout,
-    )._open();
+    return MssqlTransient.retry(
+      () => MssqlConnection._(
+        host: ep.host,
+        port: ep.port,
+        instanceName: ep.instanceName,
+        resolveNamedInstancePort: ep.shouldResolvePort,
+        database: database,
+        appName: appName,
+        packetSize: packetSize,
+        azureAdAuth: azureAdAuth,
+        encrypt: true, // Azure AD always requires TLS
+        trustServerCertificate: trustServerCertificate,
+        timeout: timeout,
+        queryTimeout: queryTimeout,
+      )._open(),
+      retries: connectRetries,
+    );
   }
 
   /// Connects using Windows NTLM (SSPI) authentication.
@@ -240,27 +257,31 @@ class MssqlConnection {
     bool trustServerCertificate = false,
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
+    int connectRetries = 0,
   }) {
     final ep = ServerEndpoint.parse(host, port: port, instanceName: instanceName);
-    return MssqlConnection._(
-      host: ep.host,
-      port: ep.port,
-      instanceName: ep.instanceName,
-      resolveNamedInstancePort: ep.shouldResolvePort,
-      database: database,
-      appName: appName,
-      packetSize: packetSize,
-      ntlmAuth: NtlmAuth(
-        domain: domain,
-        username: user,
-        password: password,
-        workstation: workstation,
-      ),
-      encrypt: encrypt,
-      trustServerCertificate: trustServerCertificate,
-      timeout: timeout,
-      queryTimeout: queryTimeout,
-    )._open();
+    return MssqlTransient.retry(
+      () => MssqlConnection._(
+        host: ep.host,
+        port: ep.port,
+        instanceName: ep.instanceName,
+        resolveNamedInstancePort: ep.shouldResolvePort,
+        database: database,
+        appName: appName,
+        packetSize: packetSize,
+        ntlmAuth: NtlmAuth(
+          domain: domain,
+          username: user,
+          password: password,
+          workstation: workstation,
+        ),
+        encrypt: encrypt,
+        trustServerCertificate: trustServerCertificate,
+        timeout: timeout,
+        queryTimeout: queryTimeout,
+      )._open(),
+      retries: connectRetries,
+    );
   }
 
   // ── Public query API ───────────────────────────────────────────────────────
@@ -716,6 +737,7 @@ class MssqlConnection {
         onDatabaseChanged: (db) {
           _currentDatabase = db;
         },
+        onInfoMessage: onInfoMessage,
       );
 
   static bool _dbEquals(String a, String b) =>
