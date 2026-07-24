@@ -51,6 +51,8 @@
   FEATUREEXTACK + LOGINACK (`test/mock_fedauth_login_test.dart`).
 * Parse `tokenFedAuthInfo` (STS URL / SPN); optional `onFedAuthInfo` sends
   `packFedAuthToken` (ADAL-style); skip safely when handler absent.
+* Live Attention cancel over TLS against Docker SQL Edge
+  (`test/attention_tls_live_test.dart`): WAITFOR, stream, txn, back-to-back.
 
 ## 0.1.1
 
