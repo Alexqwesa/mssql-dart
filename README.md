@@ -174,6 +174,19 @@ await conn.transaction((c) async {
 }, isolation: MssqlIsolationLevel.repeatableRead);
 ```
 
+### Typed GUID / money / datetimeoffset
+
+```dart
+await conn.query('SELECT @g, @m, @d', {
+  'g': MssqlGuid('6F9619FF-8B86-D011-B42D-00C04FC964FF'),
+  'm': MssqlMoney(1234.56),
+  'd': MssqlDateTimeOffset(
+    DateTime.utc(2024, 1, 1, 4, 30),
+    offset: Duration(hours: 5, minutes: 30),
+  ),
+});
+```
+
 ---
 
 ## API reference
@@ -408,6 +421,9 @@ Named parameters use `@name` placeholders. Supported Dart → SQL type mappings:
 | `String`     | NVARCHAR(MAX) or NVARCHAR   |
 | `List<int>`  | VARBINARY(MAX)              |
 | `DateTime`   | DATETIME2(7)                |
+| `MssqlGuid`  | uniqueidentifier            |
+| `MssqlMoney` / `MssqlSmallMoney` | money / smallmoney |
+| `MssqlDateTimeOffset` | datetimeoffset       |
 | `MssqlTvp`   | user-defined table type (`… READONLY`) |
 | `MssqlOutput`| OUTPUT / INPUT-OUTPUT (with [call]) |
 | `null`       | NULL (any type)             |

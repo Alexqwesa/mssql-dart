@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 
 import '../params.dart';
+import '../typed_values.dart';
 import 'buf.dart';
 import 'constants.dart';
 import 'tvp.dart';
@@ -114,6 +115,10 @@ class RpcRequest {
     }
     if (v == null) return 'nvarchar(max)';
     if (v is MssqlTvp) return v.readonlyDecl;
+    if (v is MssqlGuid) return 'uniqueidentifier';
+    if (v is MssqlMoney) return 'money';
+    if (v is MssqlSmallMoney) return 'smallmoney';
+    if (v is MssqlDateTimeOffset) return 'datetimeoffset';
     if (v is int) return 'bigint';
     if (v is double) return 'float';
     if (v is bool) return 'bit';
@@ -167,6 +172,14 @@ class RpcRequest {
     switch (value) {
       case MssqlTvp v:
         v.writeTypeAndValue(buf);
+      case MssqlGuid v:
+        _writeGuidParam(buf, v);
+      case MssqlMoney v:
+        _writeMoneyParam(buf, v.scaled, small: false);
+      case MssqlSmallMoney v:
+        _writeMoneyParam(buf, v.scaled, small: true);
+      case MssqlDateTimeOffset v:
+        _writeDateTimeOffsetParam(buf, v);
       case int v:
         buf.writeByte(typeIntN);
         buf.writeByte(8); // max len
@@ -233,9 +246,33 @@ class RpcRequest {
       buf.writeUint64LE(plpNull);
       return;
     }
+    if (t.startsWith('datetimeoffset')) {
+      buf.writeByte(typeDateTimeOffsetN);
+      buf.writeByte(7);
+      buf.writeByte(0);
+      return;
+    }
     if (t.startsWith('datetime')) {
       buf.writeByte(typeDateTime2N);
       buf.writeByte(7);
+      buf.writeByte(0);
+      return;
+    }
+    if (t == 'uniqueidentifier' || t == 'guid') {
+      buf.writeByte(typeGuid);
+      buf.writeByte(16);
+      buf.writeByte(0);
+      return;
+    }
+    if (t == 'money') {
+      buf.writeByte(typeMoneyN);
+      buf.writeByte(8);
+      buf.writeByte(0);
+      return;
+    }
+    if (t == 'smallmoney') {
+      buf.writeByte(typeMoneyN);
+      buf.writeByte(4);
       buf.writeByte(0);
       return;
     }
@@ -283,6 +320,76 @@ class RpcRequest {
       buf.writeUint16LE(valueBytes.length);
       buf.writeBytes(valueBytes);
     }
+  }
+
+  static void _writeGuidParam(TdsBuffer buf, MssqlGuid guid) {
+    final bytes = guid.toWireBytes();
+    buf.writeByte(typeGuid);
+    buf.writeByte(16); // MaxLen
+    buf.writeByte(16); // value len
+    buf.writeBytes(bytes);
+  }
+
+  static void _writeMoneyParam(TdsBuffer buf, int scaled, {required bool small}) {
+    buf.writeByte(typeMoneyN);
+    if (small) {
+      buf.writeByte(4); // MaxLen
+      buf.writeByte(4); // value len
+      buf.writeInt32LE(scaled);
+    } else {
+      buf.writeByte(8);
+      buf.writeByte(8);
+      // Same layout as decode: signed hi INT32 + lo UINT32.
+      final hi = scaled >> 32;
+      final lo = scaled & 0xFFFFFFFF;
+      buf.writeInt32LE(hi);
+      buf.writeUint32LE(lo);
+    }
+  }
+
+  static void _writeDateTimeOffsetParam(
+    TdsBuffer buf,
+    MssqlDateTimeOffset dto,
+  ) {
+    final scale = dto.scale.clamp(0, 7);
+    final utc = dto.value.toUtc();
+    final timeBytes = _encodeTimeBytes(utc, scale);
+    final days = _daysSinceYear1(utc);
+    final offsetMins = dto.wireOffset.inMinutes;
+
+    buf.writeByte(typeDateTimeOffsetN);
+    buf.writeByte(scale);
+    buf.writeByte(timeBytes.length + 3 + 2);
+    buf.writeBytes(timeBytes);
+    buf.writeByte(days & 0xFF);
+    buf.writeByte((days >> 8) & 0xFF);
+    buf.writeByte((days >> 16) & 0xFF);
+    buf.writeByte(offsetMins & 0xFF);
+    buf.writeByte((offsetMins >> 8) & 0xFF);
+  }
+
+  /// Encodes TIME portion for DATETIME2 / DATETIMEOFFSET at [scale].
+  static Uint8List _encodeTimeBytes(DateTime dt, int scale) {
+    final micros = dt.hour * 3600000000 +
+        dt.minute * 60000000 +
+        dt.second * 1000000 +
+        dt.millisecond * 1000 +
+        dt.microsecond;
+    // scale 7 = 100ns ticks; reduce for lower scales.
+    var ticks = micros * 10;
+    for (var s = 7; s > scale; s--) {
+      ticks = ticks ~/ 10;
+    }
+    final size = scale <= 2
+        ? 3
+        : scale <= 4
+            ? 4
+            : 5;
+    final out = Uint8List(size);
+    for (var i = 0; i < size; i++) {
+      out[i] = (ticks >> (8 * i)) & 0xFF;
+    }
+    return out;
   }
 
   static void _writeDateTimeParam(TdsBuffer buf, DateTime dt) {
