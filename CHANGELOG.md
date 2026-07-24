@@ -12,6 +12,9 @@
 * Add RPC encode tests, DATETIME2/OFFSET/DECIMAL/PLP multi-chunk decode coverage,
   and mock PreLogin→Login7→LOGINACK handshake (`test/rpc_encode_test.dart`,
   `test/mock_full_login_test.dart`).
+* Extend token-stream coverage: multi-result sets, ORDER/RETURNVALUE skip,
+  ENVCHANGE begin/commit txn descriptor, FeatureExtAck + packet-size; RPC large
+  NVARCHAR PLP param encoding.
 * CI: run unit tests without Docker before the SQL Server 2022 integration suite.
 
 ## 0.1.1

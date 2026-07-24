@@ -151,6 +151,86 @@ Uint8List _nbcRowSecondInt(int value) {
   return Uint8List.fromList(out.toBytes());
 }
 
+Uint8List _envChangePacketSize(String size) {
+  final payload = BytesBuilder(copy: false);
+  payload.addByte(envPacketSize);
+  payload.addByte(size.length);
+  payload.add(ucs2(size));
+  payload.addByte(size.length);
+  payload.add(ucs2(size));
+  final data = payload.toBytes();
+  final out = BytesBuilder(copy: false);
+  out.addByte(tokenEnvChange);
+  writeUint16LE(out, data.length);
+  out.add(data);
+  return Uint8List.fromList(out.toBytes());
+}
+
+Uint8List _envChangeBeginTran(int descriptor) {
+  final payload = BytesBuilder(copy: false);
+  payload.addByte(envBeginTran);
+  payload.addByte(8); // new value length
+  for (var i = 0; i < 8; i++) {
+    payload.addByte((descriptor >> (i * 8)) & 0xFF);
+  }
+  payload.addByte(0); // old empty
+  final data = payload.toBytes();
+  final out = BytesBuilder(copy: false);
+  out.addByte(tokenEnvChange);
+  writeUint16LE(out, data.length);
+  out.add(data);
+  return Uint8List.fromList(out.toBytes());
+}
+
+Uint8List _envChangeCommitTran() {
+  final payload = BytesBuilder(copy: false);
+  payload.addByte(envCommitTran);
+  payload.addByte(0);
+  payload.addByte(0);
+  final data = payload.toBytes();
+  final out = BytesBuilder(copy: false);
+  out.addByte(tokenEnvChange);
+  writeUint16LE(out, data.length);
+  out.add(data);
+  return Uint8List.fromList(out.toBytes());
+}
+
+Uint8List _orderToken() {
+  // One column ordinal (1) — skipped by parser.
+  final data = [0x01, 0x00];
+  final out = BytesBuilder(copy: false);
+  out.addByte(tokenOrder);
+  writeUint16LE(out, data.length);
+  out.add(data);
+  return Uint8List.fromList(out.toBytes());
+}
+
+Uint8List _returnValueInt({required String name, required int value}) {
+  final out = BytesBuilder(copy: false);
+  out.addByte(tokenReturnValue);
+  writeUint16LE(out, 1); // ordinal
+  out.addByte(name.length);
+  out.add(ucs2(name));
+  out.addByte(0x01); // status OUTPUT
+  writeUint32LE(out, 0); // userType
+  writeUint16LE(out, 0); // flags
+  out.addByte(typeIntN);
+  out.addByte(4); // MaxLen
+  out.addByte(4); // value len
+  writeUint32LE(out, value);
+  return Uint8List.fromList(out.toBytes());
+}
+
+Uint8List _featureExtAck({int featureId = featExtFedAuth}) {
+  final out = BytesBuilder(copy: false);
+  out.addByte(tokenFeatureExtAck);
+  out.addByte(featureId);
+  writeUint32LE(out, 2); // feature data len
+  out.add([0x00, 0x00]);
+  out.addByte(featExtTerminator);
+  return Uint8List.fromList(out.toBytes());
+}
+
 typedef _Fed = ({TdsBuffer buf, TdsSocketPair pair});
 
 Future<_Fed> _openWithBody(List<int> body) async {
@@ -189,6 +269,21 @@ void main() {
             .having((e) => e.errorCode, 'errorCode', 18456)
             .having((e) => e.message, 'message', contains('Login failed'))),
       );
+    });
+
+    test('FeatureExtAck is skipped; packet-size ENVCHANGE applied', () async {
+      final body = [
+        ..._loginAckToken('SQL Server'),
+        ..._featureExtAck(),
+        ..._envChangePacketSize('8192'),
+        ..._doneToken(),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processLoginResponse();
+      expect(result.serverVersion, equals('SQL Server'));
+      expect(result.packetSize, equals(8192));
     });
   });
 
@@ -259,6 +354,89 @@ void main() {
         expect(e.precedingErrors[0].message, contains('error 1'));
         expect(e.precedingErrors[1].message, contains('error 2'));
       }
+    });
+
+    test('multiple result sets via DONE MORE', () async {
+      final body = [
+        ..._colMetaInt('a'),
+        ..._rowInt(1),
+        ..._doneToken(flags: doneFlagMore | doneFlagCount, rowCount: 1),
+        ..._colMetaInt('b'),
+        ..._rowInt(2),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final sets = await TokenStream(fed.buf).processAllQueryResponses();
+      expect(sets.length, equals(2));
+      expect(sets[0].columns.single.name, equals('a'));
+      expect(sets[0].rows.single, equals([1]));
+      expect(sets[1].columns.single.name, equals('b'));
+      expect(sets[1].rows.single, equals([2]));
+    });
+
+    test('ORDER token is skipped between COLMETADATA and ROW', () async {
+      final body = [
+        ..._colMetaInt('n'),
+        ..._orderToken(),
+        ..._rowInt(5),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.rows.single, equals([5]));
+    });
+
+    test('RETURNVALUE token is skipped without corrupting stream', () async {
+      final body = [
+        ..._colMetaInt('n'),
+        ..._rowInt(1),
+        ..._returnValueInt(name: '@out', value: 99),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.rows.single, equals([1]));
+    });
+
+    test('ENVCHANGE begin/commit updates transactionDescriptor', () async {
+      const descriptor = 0x0102030405060708;
+      final body = [
+        ..._envChangeBeginTran(descriptor),
+        ..._doneToken(flags: doneFlagMore),
+        ..._envChangeCommitTran(),
+        ..._doneToken(),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      // Drive login-style loop isn't right — use processAllQueryResponses which
+      // still parses ENVCHANGE. No COLMETADATA → empty results.
+      final sets = await TokenStream(fed.buf).processAllQueryResponses();
+      expect(sets, isEmpty);
+      // After commit, descriptor cleared.
+      expect(fed.buf.transactionDescriptor, equals(0));
+    });
+
+    test('ENVCHANGE begin sets transactionDescriptor mid-stream', () async {
+      const descriptor = 0x1122334455667788;
+      // Query path: begin-tran envchange then a result set.
+      final body = [
+        ..._envChangeBeginTran(descriptor),
+        ..._colMetaInt('n'),
+        ..._rowInt(1),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      await TokenStream(fed.buf).processQueryResponse();
+      expect(fed.buf.transactionDescriptor, equals(descriptor));
     });
   });
 }

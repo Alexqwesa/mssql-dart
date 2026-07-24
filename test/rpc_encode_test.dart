@@ -230,5 +230,36 @@ void main() {
       final body = _body(pkt);
       expect(readUint64LE(body, 10), equals(0x1122334455667788));
     });
+
+    test('large NVARCHAR param uses PLP encoding', () async {
+      final big = 'x' * 5000; // > 4000 chars → nvarchar(max) + PLP on wire
+      final pkt = await _capturePacket(
+        send: (buf) => RpcRequest.sendExecuteSql(
+          buf,
+          'SELECT @s',
+          {'s': big},
+        ),
+      );
+      final body = _body(pkt);
+      expect(_containsUcs2(body, '@s nvarchar(max)'), isTrue);
+
+      // Named param value: typeNVarChar + MaxLen 0xFFFF + collation + PLP
+      var foundPlp = false;
+      for (var i = 0; i < body.length - 10; i++) {
+        if (body[i] == typeNVarChar &&
+            body[i + 1] == 0xFF &&
+            body[i + 2] == 0xFF) {
+          // After 5-byte collation, total PLP length should be byte length.
+          final afterCollation = i + 3 + 5;
+          if (afterCollation + 8 <= body.length) {
+            final total = readUint64LE(body, afterCollation);
+            expect(total, equals(big.length * 2));
+            foundPlp = true;
+            break;
+          }
+        }
+      }
+      expect(foundPlp, isTrue);
+    });
   });
 }
