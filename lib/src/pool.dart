@@ -78,6 +78,13 @@ class MssqlPoolConfig {
   /// Parallel-dial all DNS A/AAAA records (AG multi-subnet listeners).
   final bool multiSubnetFailover;
 
+  /// TCP keepalive (go-mssqldb default 30s). [Duration.zero] disables.
+  final Duration keepAlive;
+
+  /// Batch run after each new connection login and after [resetSession]
+  /// (go-mssqldb `SessionInitSQL`).
+  final String? sessionInitSql;
+
   /// Optional INFO token handler applied to every pooled connection.
   final void Function(MssqlInfoMessage info)? onInfoMessage;
 
@@ -108,6 +115,8 @@ class MssqlPoolConfig {
     this.failoverPartner,
     this.failoverPort,
     this.multiSubnetFailover = false,
+    this.keepAlive = const Duration(seconds: 30),
+    this.sessionInitSql,
     this.onInfoMessage,
   });
 
@@ -124,6 +133,7 @@ class MssqlPoolConfig {
     bool validateOnAcquire = true,
     bool resetOnRelease = true,
     int connectRetries = 2,
+    String? sessionInitSql,
     void Function(MssqlInfoMessage info)? onInfoMessage,
   }) {
     final c = MssqlConnectionString.parse(connectionString);
@@ -154,6 +164,8 @@ class MssqlPoolConfig {
         failoverPartner: c.failoverPartner,
         failoverPort: c.failoverPort,
         multiSubnetFailover: c.multiSubnetFailover,
+        keepAlive: c.keepAlive,
+        sessionInitSql: sessionInitSql,
         onInfoMessage: onInfoMessage,
       );
     }
@@ -181,6 +193,8 @@ class MssqlPoolConfig {
       failoverPartner: c.failoverPartner,
       failoverPort: c.failoverPort,
       multiSubnetFailover: c.multiSubnetFailover,
+      keepAlive: c.keepAlive,
+      sessionInitSql: sessionInitSql,
       onInfoMessage: onInfoMessage,
     );
   }
@@ -211,6 +225,8 @@ class MssqlPoolConfig {
     String? failoverPartner,
     int? failoverPort,
     bool multiSubnetFailover = false,
+    Duration keepAlive = const Duration(seconds: 30),
+    String? sessionInitSql,
     void Function(MssqlInfoMessage info)? onInfoMessage,
   }) {
     return MssqlPoolConfig(
@@ -238,6 +254,8 @@ class MssqlPoolConfig {
       failoverPartner: failoverPartner,
       failoverPort: failoverPort,
       multiSubnetFailover: multiSubnetFailover,
+      keepAlive: keepAlive,
+      sessionInitSql: sessionInitSql,
       onInfoMessage: onInfoMessage,
     );
   }
@@ -269,6 +287,8 @@ class MssqlPoolConfig {
     String? failoverPartner,
     int? failoverPort,
     bool multiSubnetFailover = false,
+    Duration keepAlive = const Duration(seconds: 30),
+    String? sessionInitSql,
     void Function(MssqlInfoMessage info)? onInfoMessage,
   }) {
     return MssqlPoolConfig(
@@ -297,6 +317,8 @@ class MssqlPoolConfig {
       failoverPartner: failoverPartner,
       failoverPort: failoverPort,
       multiSubnetFailover: multiSubnetFailover,
+      keepAlive: keepAlive,
+      sessionInitSql: sessionInitSql,
       onInfoMessage: onInfoMessage,
     );
   }
@@ -582,6 +604,8 @@ class MssqlPool {
         failoverPartner: config.failoverPartner,
         failoverPort: config.failoverPort,
         multiSubnetFailover: config.multiSubnetFailover,
+        keepAlive: config.keepAlive,
+        sessionInitSql: config.sessionInitSql,
       );
     } else {
       final domain = config.ntlmDomain;
@@ -606,6 +630,8 @@ class MssqlPool {
           failoverPartner: config.failoverPartner,
           failoverPort: config.failoverPort,
           multiSubnetFailover: config.multiSubnetFailover,
+          keepAlive: config.keepAlive,
+          sessionInitSql: config.sessionInitSql,
         );
       } else {
         conn = await MssqlConnection.connect(
@@ -626,6 +652,8 @@ class MssqlPool {
           failoverPartner: config.failoverPartner,
           failoverPort: config.failoverPort,
           multiSubnetFailover: config.multiSubnetFailover,
+          keepAlive: config.keepAlive,
+          sessionInitSql: config.sessionInitSql,
         );
       }
     }

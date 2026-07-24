@@ -39,6 +39,10 @@ class MssqlConnectionString {
   /// Parallel-dial all DNS A/AAAA records (AG multi-subnet listeners).
   final bool multiSubnetFailover;
 
+  /// TCP keepalive interval (go-mssqldb `keepAlive`; default 30s).
+  /// [Duration.zero] disables.
+  final Duration keepAlive;
+
   const MssqlConnectionString({
     required this.host,
     this.port = defaultPort,
@@ -58,6 +62,7 @@ class MssqlConnectionString {
     this.failoverPartner,
     this.failoverPort,
     this.multiSubnetFailover = false,
+    this.keepAlive = const Duration(seconds: 30),
   });
 
   bool get useNtlm => ntlmDomain != null;
@@ -185,6 +190,7 @@ class MssqlConnectionString {
       failoverPartner: map['failoverpartner'],
       failoverPort: failoverPort,
       multiSubnetFailover: _parseBool(map['multisubnetfailover']),
+      keepAlive: _parseKeepAlive(map['keepalive']),
     );
   }
 
@@ -294,6 +300,7 @@ class MssqlConnectionString {
       failoverPartner: q['failoverpartner'],
       failoverPort: failoverPort,
       multiSubnetFailover: _parseBool(q['multisubnetfailover']),
+      keepAlive: _parseKeepAlive(q['keepalive']),
     );
   }
 
@@ -401,6 +408,8 @@ class MssqlConnectionString {
         return 'failoverport';
       case 'multisubnetfailover':
         return 'multisubnetfailover';
+      case 'keepalive':
+        return 'keepalive';
       default:
         return null; // ignore unknown
     }
@@ -494,6 +503,16 @@ class MssqlConnectionString {
     throw FormatException(
       'Invalid ApplicationIntent "$v" (expected ReadOnly or ReadWrite)',
     );
+  }
+
+  /// go-mssqldb `keepAlive` seconds; missing → 30s; `0` → disabled.
+  static Duration _parseKeepAlive(String? v) {
+    if (v == null || v.isEmpty) return const Duration(seconds: 30);
+    final n = int.tryParse(v.trim());
+    if (n == null || n < 0) {
+      throw FormatException('Invalid KeepAlive seconds "$v"');
+    }
+    return Duration(seconds: n);
   }
 
   static int? _parseSeconds(String? v) {

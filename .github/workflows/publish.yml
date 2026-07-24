@@ -67,6 +67,7 @@ jobs:
             test/transient_test.dart \
             test/isolation_test.dart \
             test/typed_values_test.dart \
+            test/keepalive_session_init_test.dart \
             --timeout=60s
 
   # ════════════════════════════════════════════════════════════════════════════

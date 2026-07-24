@@ -212,6 +212,29 @@ final conn = await MssqlConnection.connectFromString(
 );
 ```
 
+### KeepAlive + session init
+
+```dart
+final conn = await MssqlConnection.connect(
+  host: '10.0.0.5',
+  user: 'sa',
+  password: '…',
+  encrypt: false,
+  keepAlive: Duration(seconds: 30), // TCP keepalive (0 = off)
+  sessionInitSql: 'SET XACT_ABORT ON; SET LOCK_TIMEOUT 5000;',
+);
+
+// Same knobs on the pool; SessionInitSQL re-runs after resetOnRelease
+final pool = MssqlPool(MssqlPoolConfig(
+  host: '10.0.0.5',
+  user: 'sa',
+  password: '…',
+  encrypt: false,
+  keepAlive: Duration(seconds: 30),
+  sessionInitSql: 'SET XACT_ABORT ON;',
+));
+```
+
 ---
 
 ## API reference

@@ -124,6 +124,23 @@ void main() {
       expect(c.multiSubnetFailover, isTrue);
     });
 
+    test('KeepAlive seconds (default 30, 0 disables)', () {
+      final def = MssqlConnectionString.parse(
+        'Server=h;User Id=sa;Password=x',
+      );
+      expect(def.keepAlive, const Duration(seconds: 30));
+
+      final off = MssqlConnectionString.parse(
+        'Server=h;User Id=sa;Password=x;KeepAlive=0',
+      );
+      expect(off.keepAlive, Duration.zero);
+
+      final custom = MssqlConnectionString.parse(
+        'sqlserver://sa:x@h?keepalive=60',
+      );
+      expect(custom.keepAlive, const Duration(seconds: 60));
+    });
+
     test('np: rejected', () {
       expect(
         () => MssqlConnectionString.parse(

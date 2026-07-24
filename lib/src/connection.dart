@@ -14,6 +14,7 @@ import 'isolation.dart';
 import 'params.dart';
 import 'result.dart';
 import 'server_endpoint.dart';
+import 'tcp_options.dart';
 import 'tds/buf.dart';
 import 'tds/bulk.dart';
 import 'tds/constants.dart';
@@ -66,6 +67,13 @@ class MssqlConnection {
   /// Parallel dial all DNS A/AAAA records (AG multi-subnet listeners).
   final bool _multiSubnetFailover;
 
+  /// TCP keepalive interval (go-mssqldb `keepAlive`). [Duration.zero] disables.
+  final Duration _keepAlive;
+
+  /// Optional batch run after login and after [resetSession] (go-mssqldb
+  /// `Connector.SessionInitSQL`) — e.g. `SET XACT_ABORT ON; SET LOCK_TIMEOUT 5000`.
+  final String? _sessionInitSql;
+
   late TdsBuffer _buf;
   late Socket _socket;
   // The raw TCP socket to SQL Server. Only non-null when TLS is active;
@@ -102,6 +110,8 @@ class MssqlConnection {
     String? failoverPartner,
     int? failoverPort,
     bool multiSubnetFailover = false,
+    Duration keepAlive = const Duration(seconds: 30),
+    String? sessionInitSql,
   })  : _host = host,
         _port = port,
         _instanceName = instanceName,
@@ -119,7 +129,9 @@ class MssqlConnection {
         _readOnlyIntent = readOnlyIntent,
         _failoverPartner = failoverPartner,
         _failoverPort = failoverPort,
-        _multiSubnetFailover = multiSubnetFailover;
+        _multiSubnetFailover = multiSubnetFailover,
+        _keepAlive = keepAlive,
+        _sessionInitSql = sessionInitSql;
 
   // ── Factory constructors ───────────────────────────────────────────────────
 
@@ -156,6 +168,12 @@ class MssqlConnection {
   ///   (database mirroring partner / go-mssqldb `FailoverPartner`).
   /// - [multiSubnetFailover] — parallel-dial all DNS A/AAAA records (AG
   ///   multi-subnet listeners).
+  ///
+  /// [keepAlive] — TCP keepalive interval (go-mssqldb default 30s). Pass
+  /// [Duration.zero] to disable. Helps LAN firewalls that drop idle sockets.
+  ///
+  /// [sessionInitSql] — batch executed after login and after [resetSession]
+  /// (go-mssqldb `SessionInitSQL`), e.g. `SET XACT_ABORT ON;`.
   static Future<MssqlConnection> connect({
     required String host,
     int port = defaultPort,
@@ -174,6 +192,8 @@ class MssqlConnection {
     String? failoverPartner,
     int? failoverPort,
     bool multiSubnetFailover = false,
+    Duration keepAlive = const Duration(seconds: 30),
+    String? sessionInitSql,
   }) {
     _validateHaOptions(
       database: database,
@@ -199,6 +219,8 @@ class MssqlConnection {
         failoverPartner: failoverPartner,
         failoverPort: failoverPort,
         multiSubnetFailover: multiSubnetFailover,
+        keepAlive: keepAlive,
+        sessionInitSql: sessionInitSql,
       )._open(),
       retries: connectRetries,
     );
@@ -208,7 +230,10 @@ class MssqlConnection {
   ///
   /// See [MssqlConnectionString.parse]. `User Id=DOMAIN\user` (or URL form)
   /// opens via [connectNtlm].
-  static Future<MssqlConnection> connectFromString(String connectionString) {
+  static Future<MssqlConnection> connectFromString(
+    String connectionString, {
+    String? sessionInitSql,
+  }) {
     final c = MssqlConnectionString.parse(connectionString);
     if (c.useNtlm) {
       return connectNtlm(
@@ -230,6 +255,8 @@ class MssqlConnection {
         failoverPartner: c.failoverPartner,
         failoverPort: c.failoverPort,
         multiSubnetFailover: c.multiSubnetFailover,
+        keepAlive: c.keepAlive,
+        sessionInitSql: sessionInitSql,
       );
     }
     return connect(
@@ -249,6 +276,8 @@ class MssqlConnection {
       failoverPartner: c.failoverPartner,
       failoverPort: c.failoverPort,
       multiSubnetFailover: c.multiSubnetFailover,
+      keepAlive: c.keepAlive,
+      sessionInitSql: sessionInitSql,
     );
   }
 
@@ -269,6 +298,8 @@ class MssqlConnection {
     String? failoverPartner,
     int? failoverPort,
     bool multiSubnetFailover = false,
+    Duration keepAlive = const Duration(seconds: 30),
+    String? sessionInitSql,
   }) {
     _validateHaOptions(
       database: database,
@@ -294,6 +325,8 @@ class MssqlConnection {
         failoverPartner: failoverPartner,
         failoverPort: failoverPort,
         multiSubnetFailover: multiSubnetFailover,
+        keepAlive: keepAlive,
+        sessionInitSql: sessionInitSql,
       )._open(),
       retries: connectRetries,
     );
@@ -324,6 +357,8 @@ class MssqlConnection {
     String? failoverPartner,
     int? failoverPort,
     bool multiSubnetFailover = false,
+    Duration keepAlive = const Duration(seconds: 30),
+    String? sessionInitSql,
   }) {
     _validateHaOptions(
       database: database,
@@ -354,6 +389,8 @@ class MssqlConnection {
         failoverPartner: failoverPartner,
         failoverPort: failoverPort,
         multiSubnetFailover: multiSubnetFailover,
+        keepAlive: keepAlive,
+        sessionInitSql: sessionInitSql,
       )._open(),
       retries: connectRetries,
     );
@@ -671,6 +708,8 @@ class MssqlConnection {
           !_dbEquals(_currentDatabase, _initialDatabase)) {
         _currentDatabase = _initialDatabase;
       }
+      // Re-apply session defaults wiped by RESETCONNECTION (go-mssqldb).
+      await _runSessionInitSql();
       return true;
     } catch (_) {
       await close();
@@ -806,7 +845,10 @@ class MssqlConnection {
     while (true) {
       final loginResult = await _openHandshakeTimed();
       final routing = loginResult.routing;
-      if (routing == null) return this;
+      if (routing == null) {
+        await _runSessionInitSql();
+        return this;
+      }
       if (redirected) {
         await _forceClose();
         throw MssqlException(
@@ -903,7 +945,9 @@ class MssqlConnection {
   /// TCP dial — optionally races all DNS addresses ([multiSubnetFailover]).
   Future<Socket> _dialTcp(String host, int port) async {
     if (!_multiSubnetFailover) {
-      return Socket.connect(host, port, timeout: _timeout);
+      final sock = await Socket.connect(host, port, timeout: _timeout);
+      applyMssqlTcpOptions(sock, keepAlive: _keepAlive);
+      return sock;
     }
     final addrs = await InternetAddress.lookup(host);
     if (addrs.isEmpty) {
@@ -915,7 +959,10 @@ class MssqlConnection {
       if (seen.add(a.address)) unique.add(a);
     }
     if (unique.length == 1) {
-      return Socket.connect(unique.first, port, timeout: _timeout);
+      final sock =
+          await Socket.connect(unique.first, port, timeout: _timeout);
+      applyMssqlTcpOptions(sock, keepAlive: _keepAlive);
+      return sock;
     }
 
     final completer = Completer<Socket>();
@@ -927,6 +974,7 @@ class MssqlConnection {
           if (completer.isCompleted) {
             sock.destroy();
           } else {
+            applyMssqlTcpOptions(sock, keepAlive: _keepAlive);
             completer.complete(sock);
           }
         }, onError: (Object e) {
@@ -939,6 +987,13 @@ class MssqlConnection {
       );
     }
     return completer.future;
+  }
+
+  /// Runs [sessionInitSql] after login / reset (go-mssqldb SessionInitSQL).
+  Future<void> _runSessionInitSql() async {
+    final sql = _sessionInitSql;
+    if (sql == null || sql.trim().isEmpty) return;
+    await execute(sql);
   }
 
   static void _validateHaOptions({

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* LAN session resilience: TCP `keepAlive` (go-mssqldb default 30s;
+  `KeepAlive=` in connection strings; `Duration.zero` disables) +
+  `TCP_NODELAY`; `sessionInitSql` after login and after `resetSession`
+  (go-mssqldb `SessionInitSQL`).
 * LAN typed binders: `MssqlVarchar`, `MssqlDate`, `MssqlTime` for varchar /
   date / time params (bare `String`/`DateTime` stay nvarchar/datetime2).
 * LAN Always On / HA: `ApplicationIntent=ReadOnly` (`readOnlyIntent` → LOGIN7
