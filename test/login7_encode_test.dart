@@ -161,5 +161,59 @@ void main() {
       expect(found, isTrue, reason: 'FedAuth token missing from feature ext');
       expect(feat.last, equals(featExtTerminator));
     });
+
+    // ms-tds §2.2.6.3 FeatureExt FedAuth: FeatureID + DataLen + options + tokenLen
+    test('FedAuth feature data: SecurityToken library + UCS-2 token length',
+        () async {
+      const token = 'tok';
+      final body = await _captureLogin7Body(const LoginConfig(
+        host: host,
+        username: '',
+        password: '',
+        serverName: server,
+        fedAuthToken: token,
+      ));
+
+      final featOff = readUint16LE(body, 56);
+      final featLen = readUint16LE(body, 58);
+      final feat = body.sublist(featOff, featOff + featLen);
+
+      expect(feat[0], equals(featExtFedAuth));
+      final dataLen = readUint32LE(feat, 1);
+      expect(dataLen, equals(5 + token.length * 2));
+      expect(feat[5], equals(fedAuthLibSecurityToken << 1)); // options
+      expect(readUint32LE(feat, 6), equals(token.length * 2));
+      expect(
+        feat.sublist(10, 10 + token.length * 2),
+        equals(ucs2(token)),
+      );
+      expect(feat[10 + token.length * 2], equals(featExtTerminator));
+    });
+  });
+
+  group('Login7 SSPI / integrated security', () {
+    // go-mssqldb tds.go Login7 SSPI field; OptionFlags2 fIntSecurity
+    test('SSPI blob sets fIntSecurity and lands at declared byte offset',
+        () async {
+      final sspi = Uint8List.fromList([0x4E, 0x54, 0x4C, 0x4D, 0x01, 0x02]);
+      final body = await _captureLogin7Body(LoginConfig(
+        host: host,
+        username: '',
+        password: '',
+        serverName: server,
+        database: database,
+        sspi: sspi,
+      ));
+
+      expect(body[25] & fIntSecurity, equals(fIntSecurity));
+      expect(body[25] & fODBC, equals(0));
+
+      // After ClientID @72 (6 bytes): SSPI off/len @78, SSPILongLength @90
+      final sspiOff = readUint16LE(body, 78);
+      final sspiLen = readUint16LE(body, 80);
+      expect(sspiLen, equals(sspi.length)); // byte length, not char count
+      expect(body.sublist(sspiOff, sspiOff + sspiLen), equals(sspi));
+      expect(readUint32LE(body, 90), equals(0)); // SSPILongLength
+    });
   });
 }

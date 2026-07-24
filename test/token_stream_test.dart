@@ -858,5 +858,66 @@ void main() {
       final result = await TokenStream(fed.buf).processQueryResponse();
       expect(result.rows.single, equals([8]));
     });
+
+    // ms-tds XMLTYPE COLMETADATA (schemaPresent=0) + PLP ROW; Tedious xml
+    test('COLMETADATA XML + PLP ROW', () async {
+      final xml = ucs2('<x/>');
+      final out = BytesBuilder(copy: false);
+      out.addByte(tokenColMetadata);
+      writeUint16LE(out, 1);
+      writeUint32LE(out, 0);
+      writeUint16LE(out, 0);
+      out.addByte(typeXml);
+      out.addByte(0); // no schema
+      out.addByte(1); // name "v"
+      out.add(ucs2('v'));
+      out.addByte(tokenRow);
+      writeUint64LE(out, xml.length);
+      writeUint32LE(out, xml.length);
+      out.add(xml);
+      writeUint32LE(out, 0); // PLP terminator
+      out.add(_doneToken(flags: doneFlagCount, rowCount: 1));
+
+      final fed = await _openWithBody(out.toBytes());
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.columns.single.name, equals('v'));
+      expect(result.rows.single, equals(['<x/>']));
+    });
+
+    // ms-tds UDTINFO COLMETADATA + PLP binary ROW; go-mssqldb UDT
+    test('COLMETADATA UDT + PLP ROW', () async {
+      final payload = [0xAA, 0xBB];
+      List<int> us(String s) => [
+            s.length & 0xFF,
+            (s.length >> 8) & 0xFF,
+            ...ucs2(s),
+          ];
+      final out = BytesBuilder(copy: false);
+      out.addByte(tokenColMetadata);
+      writeUint16LE(out, 1);
+      writeUint32LE(out, 0);
+      writeUint16LE(out, 0);
+      out.addByte(typeUdt);
+      out.add(us('db'));
+      out.add(us('dbo'));
+      out.add(us('T'));
+      out.add(us('A'));
+      out.addByte(1);
+      out.add(ucs2('u'));
+      out.addByte(tokenRow);
+      writeUint64LE(out, payload.length);
+      writeUint32LE(out, payload.length);
+      out.add(payload);
+      writeUint32LE(out, 0);
+      out.add(_doneToken(flags: doneFlagCount, rowCount: 1));
+
+      final fed = await _openWithBody(out.toBytes());
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.rows.single, equals([payload]));
+    });
   });
 }

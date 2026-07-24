@@ -23,6 +23,8 @@
 * Extend offline coverage: TEXT/NTEXT/IMAGE COLMETADATA TableName skip + ROW,
   computed TEXT `numParts=0`, ENVCHANGE routing/collation skip, INFO-before-row,
   TEXT/NTEXT/IMAGE TypeInfo decode.
+* Extend offline coverage: XML/UDT TYPE_INFO + COLMETADATA/ROW (PLP), Login7
+  SSPI + FedAuth feature-data layout, PRELOGIN OOB field length + encryptRequired.
 * CI: run unit tests without Docker before the SQL Server 2022 integration suite.
 
 ## 0.1.1

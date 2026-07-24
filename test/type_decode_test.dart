@@ -445,4 +445,106 @@ void main() {
       expect(n, isNull);
     });
   });
+
+  group('TypeInfo XML / UDT decode', () {
+    // ms-tds §2.2.5.5.3 XMLTYPE / UDTINFO; go-mssqldb types.go; Tedious xml/udt
+    List<int> bVarChar(String s) => [s.length, ...ucs2(s)];
+    List<int> usVarChar(String s) => [
+          s.length & 0xFF,
+          (s.length >> 8) & 0xFF,
+          ...ucs2(s),
+        ];
+
+    List<int> plp(List<int> data) => [
+          data.length & 0xFF,
+          (data.length >> 8) & 0xFF,
+          (data.length >> 16) & 0xFF,
+          (data.length >> 24) & 0xFF,
+          0,
+          0,
+          0,
+          0,
+          data.length & 0xFF,
+          (data.length >> 8) & 0xFF,
+          (data.length >> 16) & 0xFF,
+          (data.length >> 24) & 0xFF,
+          ...data,
+          0,
+          0,
+          0,
+          0, // terminator
+        ];
+
+    List<int> plpNull() => [
+          0xFF,
+          0xFF,
+          0xFF,
+          0xFF,
+          0xFF,
+          0xFF,
+          0xFF,
+          0xFF,
+        ];
+
+    test('XML without schema + PLP string', () async {
+      final xml = ucs2('<a/>');
+      final v = await _decode(
+        typeInfoBytes: [typeXml, 0], // schemaPresent = 0
+        valueBytes: plp(xml),
+      );
+      expect(v, equals('<a/>'));
+    });
+
+    test('XML with schema descriptor skips names then decodes PLP', () async {
+      final xml = ucs2('<r/>');
+      final v = await _decode(
+        typeInfoBytes: [
+          typeXml,
+          1, // schemaPresent
+          ...bVarChar('db'),
+          ...bVarChar('dbo'),
+          ...usVarChar('MySchema'),
+        ],
+        valueBytes: plp(xml),
+      );
+      expect(v, equals('<r/>'));
+    });
+
+    test('XML NULL PLP', () async {
+      final v = await _decode(
+        typeInfoBytes: [typeXml, 0],
+        valueBytes: plpNull(),
+      );
+      expect(v, isNull);
+    });
+
+    test('UDT skips four US_VARCHARs then returns PLP bytes', () async {
+      final payload = [0x01, 0x02, 0x03];
+      final v = await _decode(
+        typeInfoBytes: [
+          typeUdt,
+          ...usVarChar('db'),
+          ...usVarChar('dbo'),
+          ...usVarChar('Point'),
+          ...usVarChar('Asm, Version=1.0.0.0'),
+        ],
+        valueBytes: plp(payload),
+      );
+      expect(v, equals(payload));
+    });
+
+    test('UDT NULL PLP', () async {
+      final v = await _decode(
+        typeInfoBytes: [
+          typeUdt,
+          ...usVarChar(''),
+          ...usVarChar(''),
+          ...usVarChar('T'),
+          ...usVarChar(''),
+        ],
+        valueBytes: plpNull(),
+      );
+      expect(v, isNull);
+    });
+  });
 }

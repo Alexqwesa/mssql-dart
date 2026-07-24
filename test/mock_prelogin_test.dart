@@ -191,6 +191,61 @@ void main() {
       expect(await buf.readUint8(), equals(0x00));
       await serverDone;
     });
+
+    // go-mssqldb bad_server: out-of-range PRELOGIN field length is ignored
+    test('PRELOGIN field length past end of packet yields defaults', () async {
+      final pair = await TdsSocketPair.open();
+      addTearDown(pair.close);
+      final serverReader = ChunkedStreamReader(pair.server);
+
+      final serverDone = () async {
+        await _drainPreloginRequest(serverReader);
+        // token ENCRYPTION, offset 6, length 0x0100 (way past body)
+        final body = Uint8List.fromList([
+          preloginEncryption,
+          0x00,
+          0x06,
+          0x01,
+          0x00,
+          preloginTerminator,
+          encryptOn, // would be encryption if length were 1
+        ]);
+        pair.server.add(tdsPacket(type: packReply, body: body));
+        await pair.server.flush();
+      }();
+
+      final buf = TdsBuffer(pair.client);
+      await Prelogin.send(buf, requestEncrypt: encryptNotSupported);
+      final result = await Prelogin.read(buf);
+      await serverDone;
+
+      expect(result.encryption, equals(encryptNotSupported));
+      expect(result.fedAuthRequired, isFalse);
+    });
+
+    // ms-tds encryptRequired — client must still see requiresTls
+    test('encryptRequired from server sets requiresTls', () async {
+      final pair = await TdsSocketPair.open();
+      addTearDown(pair.close);
+      final serverReader = ChunkedStreamReader(pair.server);
+
+      final serverDone = () async {
+        await _drainPreloginRequest(serverReader);
+        final body = _preloginBody({
+          preloginEncryption: [encryptRequired],
+        });
+        pair.server.add(tdsPacket(type: packReply, body: body));
+        await pair.server.flush();
+      }();
+
+      final buf = TdsBuffer(pair.client);
+      await Prelogin.send(buf, requestEncrypt: encryptOn);
+      final result = await Prelogin.read(buf);
+      await serverDone;
+
+      expect(result.encryption, equals(encryptRequired));
+      expect(result.requiresTls, isTrue);
+    });
   });
 
   group('PreLogin client request framing', () {
