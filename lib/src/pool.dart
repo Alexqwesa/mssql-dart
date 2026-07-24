@@ -55,6 +55,11 @@ class MssqlPoolConfig {
   /// discarded instead of handed to callers.
   final bool validateOnAcquire;
 
+  /// When true (default), [MssqlPool.release] runs `USE` back to [database]
+  /// (or the connection's login database) so a caller that switched databases
+  /// does not poison the next acquire.
+  final bool resetOnRelease;
+
   const MssqlPoolConfig({
     required this.host,
     this.port = 1433,
@@ -76,6 +81,7 @@ class MssqlPoolConfig {
     this.idleTimeout = const Duration(seconds: 30),
     this.acquireTimeout = const Duration(seconds: 15),
     this.validateOnAcquire = true,
+    this.resetOnRelease = true,
   });
 
   /// Pool config that opens connections with Azure AD (FedAuth).
@@ -98,6 +104,7 @@ class MssqlPoolConfig {
     Duration idleTimeout = const Duration(seconds: 30),
     Duration acquireTimeout = const Duration(seconds: 15),
     bool validateOnAcquire = true,
+    bool resetOnRelease = true,
   }) {
     return MssqlPoolConfig(
       host: host,
@@ -118,6 +125,7 @@ class MssqlPoolConfig {
       idleTimeout: idleTimeout,
       acquireTimeout: acquireTimeout,
       validateOnAcquire: validateOnAcquire,
+      resetOnRelease: resetOnRelease,
     );
   }
 
@@ -142,6 +150,7 @@ class MssqlPoolConfig {
     Duration idleTimeout = const Duration(seconds: 30),
     Duration acquireTimeout = const Duration(seconds: 15),
     bool validateOnAcquire = true,
+    bool resetOnRelease = true,
   }) {
     return MssqlPoolConfig(
       host: host,
@@ -163,6 +172,7 @@ class MssqlPoolConfig {
       idleTimeout: idleTimeout,
       acquireTimeout: acquireTimeout,
       validateOnAcquire: validateOnAcquire,
+      resetOnRelease: resetOnRelease,
     );
   }
 }
@@ -279,13 +289,28 @@ class MssqlPool {
 
   /// Releases a connection back to the pool.
   ///
+  /// When [MssqlPoolConfig.resetOnRelease] is true, switches the session back
+  /// to the pool database (or login database) via `USE` before reuse. Failed
+  /// resets discard the connection.
+  ///
   /// If there are pending callers, the connection is handed directly to the
-  /// next waiter. Otherwise it goes to the idle list, or is closed if the pool
-  /// is at [config.min] and the connection is surplus.
-  void release(MssqlConnection conn) {
+  /// next waiter. Otherwise it goes to the idle list.
+  Future<void> release(MssqlConnection conn) async {
     if (_closed || !conn.isOpen) {
       _discard(conn);
       return;
+    }
+
+    if (config.resetOnRelease) {
+      final target =
+          config.database.isNotEmpty ? config.database : conn.initialDatabase;
+      if (target.isNotEmpty) {
+        final ok = await conn.resetDatabase(target);
+        if (!ok || !conn.isOpen) {
+          _discard(conn);
+          return;
+        }
+      }
     }
 
     // Hand off to the next waiter first.
@@ -297,7 +322,7 @@ class MssqlPool {
       }
     }
 
-    // No waiters — keep idle if above min, else discard surplus.
+    // No waiters — keep idle.
     _idle.add(_IdleEntry(conn));
   }
 
@@ -312,7 +337,7 @@ class MssqlPool {
     try {
       return await conn.query(sql, parameters);
     } finally {
-      release(conn);
+      await release(conn);
     }
   }
 
@@ -325,24 +350,11 @@ class MssqlPool {
     try {
       return await conn.queryMultiple(sql, parameters);
     } finally {
-      release(conn);
+      await release(conn);
     }
   }
 
-  /// Streams rows from [sql]. The connection is held for the duration of the stream.
-  Stream<MssqlRow> queryStream(
-    String sql, [
-    Map<String, Object?> parameters = const {},
-  ]) async* {
-    final conn = await acquire();
-    try {
-      yield* conn.queryStream(sql, parameters);
-    } finally {
-      release(conn);
-    }
-  }
-
-  /// Executes [sql] and returns rows affected.
+  /// Runs [sql] and returns rows affected.
   Future<int> execute(
     String sql, [
     Map<String, Object?> parameters = const {},
@@ -351,21 +363,34 @@ class MssqlPool {
     try {
       return await conn.execute(sql, parameters);
     } finally {
-      release(conn);
+      await release(conn);
+    }
+  }
+
+  /// Streams rows from [sql] on an acquired connection.
+  Stream<MssqlRow> queryStream(
+    String sql, [
+    Map<String, Object?> parameters = const {},
+  ]) async* {
+    final conn = await acquire();
+    try {
+      await for (final row in conn.queryStream(sql, parameters)) {
+        yield row;
+      }
+    } finally {
+      await release(conn);
     }
   }
 
   /// Runs [fn] inside a transaction on an acquired connection.
   ///
   /// Commits on success, rolls back on error, then releases the connection.
-  Future<T> transaction<T>(
-    Future<T> Function(MssqlConnection conn) fn,
-  ) async {
+  Future<T> transaction<T>(Future<T> Function(MssqlConnection conn) fn) async {
     final conn = await acquire();
     try {
       return await conn.transaction(fn);
     } finally {
-      release(conn);
+      await release(conn);
     }
   }
 

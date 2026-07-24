@@ -130,7 +130,7 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 250));
         await c.cancel();
         await pending.timeout(const Duration(seconds: 10));
-        pool.release(c);
+        await pool.release(c);
 
         final r = await pool.query('SELECT 27 AS n');
         expect(r[0]['n'], equals(27));
@@ -163,7 +163,7 @@ void main() {
         await Future<void>.delayed(const Duration(milliseconds: 250));
         await c.cancel();
         await pending.timeout(const Duration(seconds: 10));
-        pool.release(c);
+        await pool.release(c);
 
         final r = await pool.query('SELECT 29 AS n');
         expect(r[0]['n'], equals(29));

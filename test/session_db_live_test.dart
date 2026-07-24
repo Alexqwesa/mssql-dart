@@ -1,0 +1,130 @@
+import 'package:mssql/mssql.dart';
+import 'package:test/test.dart';
+
+/// Live USE / ENVCHANGE database tracking + pool resetOnRelease.
+///
+/// Requires `dart-mssql` on 127.0.0.1:14330. Skips when unreachable.
+
+const _host = '127.0.0.1';
+const _port = 14330;
+const _user = 'sa';
+const _password = 'Knex_Test1!';
+
+Future<bool> sqlUp() async {
+  try {
+    final c = await MssqlConnection.connect(
+      host: _host,
+      port: _port,
+      user: _user,
+      password: _password,
+      database: 'master',
+      encrypt: false,
+      trustServerCertificate: true,
+      timeout: const Duration(seconds: 5),
+    );
+    await c.close();
+    return true;
+  } catch (_) {
+    return false;
+  }
+}
+
+void main() {
+  late bool available;
+
+  setUpAll(() async {
+    available = await sqlUp();
+  });
+
+  test('USE updates conn.database; resetDatabase restores login DB', () async {
+    if (!available) {
+      markTestSkipped('SQL Server not available on :$_port');
+      return;
+    }
+    final c = await MssqlConnection.connect(
+      host: _host,
+      port: _port,
+      user: _user,
+      password: _password,
+      database: 'master',
+      encrypt: false,
+      trustServerCertificate: true,
+    );
+    addTearDown(c.close);
+
+    expect(c.database.toLowerCase(), 'master');
+    expect(c.initialDatabase.toLowerCase(), 'master');
+
+    await c.query('USE tempdb');
+    expect(c.database.toLowerCase(), 'tempdb');
+
+    expect(await c.resetDatabase(), isTrue);
+    expect(c.database.toLowerCase(), 'master');
+  });
+
+  test('pool resetOnRelease undoes USE before next acquire', () async {
+    if (!available) {
+      markTestSkipped('SQL Server not available on :$_port');
+      return;
+    }
+
+    final pool = MssqlPool(const MssqlPoolConfig(
+      host: _host,
+      port: _port,
+      user: _user,
+      password: _password,
+      database: 'master',
+      encrypt: false,
+      trustServerCertificate: true,
+      min: 0,
+      max: 1,
+      validateOnAcquire: true,
+      resetOnRelease: true,
+    ));
+    await pool.open();
+    addTearDown(pool.close);
+
+    final a = await pool.acquire();
+    await a.query('USE tempdb');
+    expect(a.database.toLowerCase(), 'tempdb');
+    await pool.release(a);
+
+    final b = await pool.acquire();
+    expect(identical(a, b), isTrue);
+    expect(b.database.toLowerCase(), 'master');
+    final name = await b.query('SELECT DB_NAME() AS db');
+    expect((name[0]['db'] as String).toLowerCase(), 'master');
+    await pool.release(b);
+  });
+
+  test('resetOnRelease false leaves switched database', () async {
+    if (!available) {
+      markTestSkipped('SQL Server not available on :$_port');
+      return;
+    }
+
+    final pool = MssqlPool(const MssqlPoolConfig(
+      host: _host,
+      port: _port,
+      user: _user,
+      password: _password,
+      database: 'master',
+      encrypt: false,
+      trustServerCertificate: true,
+      min: 0,
+      max: 1,
+      validateOnAcquire: false,
+      resetOnRelease: false,
+    ));
+    await pool.open();
+    addTearDown(pool.close);
+
+    final a = await pool.acquire();
+    await a.query('USE tempdb');
+    await pool.release(a);
+
+    final b = await pool.acquire();
+    expect(b.database.toLowerCase(), 'tempdb');
+    await pool.release(b);
+  });
+}

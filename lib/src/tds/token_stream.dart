@@ -54,7 +54,10 @@ class QueryResult {
 class TokenStream {
   final TdsBuffer _buf;
 
-  TokenStream(this._buf);
+  /// Invoked when ENVCHANGE type 1 (database) is seen — new database name.
+  final void Function(String database)? onDatabaseChanged;
+
+  TokenStream(this._buf, {this.onDatabaseChanged});
 
   /// Process the server response after LOGIN7. Returns basic session metadata.
   ///
@@ -80,7 +83,10 @@ class TokenStream {
       switch (tok) {
         case tokenEnvChange:
           final env = await _readEnvChange();
-          if (env.$1 == envDatabase) database = env.$2;
+          if (env.$1 == envDatabase) {
+            database = env.$2;
+            onDatabaseChanged?.call(env.$2);
+          }
           if (env.$1 == envPacketSize) {
             packetSize = int.tryParse(env.$2) ?? defaultPacketSize;
           }
@@ -195,7 +201,7 @@ class TokenStream {
         case tokenOrder:
           await _skipOrder();
         case tokenEnvChange:
-          await _readEnvChange();
+          await _applyEnvChange();
         case tokenReturnStatus:
           await _buf.readUint32LE();
         case tokenReturnValue:
@@ -291,7 +297,7 @@ class TokenStream {
         case tokenOrder:
           await _skipOrder();
         case tokenEnvChange:
-          await _readEnvChange();
+          await _applyEnvChange();
         case tokenReturnStatus:
           await _buf.readUint32LE();
         case tokenReturnValue:
@@ -350,7 +356,7 @@ class TokenStream {
         case tokenOrder:
           await _skipOrder();
         case tokenEnvChange:
-          await _readEnvChange();
+          await _applyEnvChange();
         case tokenReturnStatus:
           await _buf.readUint32LE();
         case tokenReturnValue:
@@ -383,6 +389,14 @@ class TokenStream {
   }
 
   // ── Token readers ──────────────────────────────────────────────────────────
+
+  /// Applies ENVCHANGE side effects (txn descriptor, database callback).
+  Future<void> _applyEnvChange() async {
+    final env = await _readEnvChange();
+    if (env.$1 == envDatabase) {
+      onDatabaseChanged?.call(env.$2);
+    }
+  }
 
   /// Builds the exception to throw when a response contains one or more errors.
   ///

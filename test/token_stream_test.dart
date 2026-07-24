@@ -602,6 +602,26 @@ void main() {
       expect(fed.buf.transactionDescriptor, equals(descriptor));
     });
 
+    // go-mssqldb / Tedious: USE → ENVCHANGE database; pool tracks for reset
+    test('ENVCHANGE database invokes onDatabaseChanged', () async {
+      String? seen;
+      final body = [
+        ..._envChangeDatabase('tempdb', 'master'),
+        ..._colMetaInt('n'),
+        ..._rowInt(7),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(
+        fed.buf,
+        onDatabaseChanged: (db) => seen = db,
+      ).processQueryResponse();
+      expect(seen, equals('tempdb'));
+      expect(result.rows.single, equals([7]));
+    });
+
     // go-mssqldb / node-mssql: INSERT/UPDATE DONE with COUNT, no COLMETADATA
     test('DML-only DONE emits rowsAffected without columns', () async {
       final body = [

@@ -62,6 +62,9 @@
 * LAN named instances: parse `HOST\INSTANCE` / `HOST\INSTANCE,port`; SQL
   Browser (UDP 1434) port lookup; PRELOGIN INSTOPT; `instanceName` on
   connect / pool (`test/named_instance_test.dart`).
+* LAN session DB: track ENVCHANGE database (`conn.database` / `initialDatabase`);
+  `resetDatabase()`; pool `resetOnRelease` (default true) runs `USE` before
+  reuse (`test/session_db_live_test.dart`).
 
 ## 0.1.1
 

@@ -207,7 +207,7 @@ final conn = await pool.acquire();
 try {
   await conn.execute('...');
 } finally {
-  pool.release(conn);
+  await pool.release(conn);
 }
 ```
 

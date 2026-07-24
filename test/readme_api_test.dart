@@ -472,7 +472,7 @@ void main() {
       expect(conn.isOpen, isTrue);
       final r = await conn.query('SELECT 1 AS v');
       expect(r[0]['v'], equals(1));
-      pool.release(conn);
+      await pool.release(conn);
       await pool.close();
     });
 
@@ -488,11 +488,11 @@ void main() {
         max: 1,
       ));
       final c1 = await pool.acquire();
-      pool.release(c1);
+      await pool.release(c1);
       // Should be able to acquire again immediately.
       final c2 = await pool.acquire();
       expect(c2.isOpen, isTrue);
-      pool.release(c2);
+      await pool.release(c2);
       await pool.close();
     });
 

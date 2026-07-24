@@ -167,7 +167,7 @@ void main() {
               .having((e) => e.message, 'message', contains('timeout'))),
         );
       } finally {
-        pool.release(conn);
+        await pool.release(conn);
         await pool.close();
       }
     });
@@ -185,11 +185,11 @@ void main() {
       final pending = pool.acquire();
 
       // Release triggers the handoff path (pool.dart:151-153).
-      pool.release(conn);
+      await pool.release(conn);
 
       final conn2 = await pending;
       expect(conn2.isOpen, isTrue);
-      pool.release(conn2);
+      await pool.release(conn2);
       await pool.close();
     });
   });
@@ -202,7 +202,7 @@ void main() {
       final pool = openPool(max: 2);
 
       final conn = await pool.acquire();
-      pool.release(conn); // conn is alive and goes to idle list
+      await pool.release(conn); // conn is alive and goes to idle list
 
       // Close the connection directly — it's now dead in the idle list.
       await conn.close();
@@ -212,7 +212,7 @@ void main() {
       expect(conn2.isOpen, isTrue);
       final r = await conn2.query('SELECT 1 AS v');
       expect(r[0]['v'], equals(1));
-      pool.release(conn2);
+      await pool.release(conn2);
       await pool.close();
     });
   });

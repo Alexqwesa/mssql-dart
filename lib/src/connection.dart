@@ -59,6 +59,8 @@ class MssqlConnection {
   bool _connected = false;
   bool _busy = false;
   String _currentDatabase = '';
+  /// Database set at login (ENVCHANGE) — pool reset target when config.db empty.
+  String _initialDatabase = '';
 
   MssqlConnection._({
     required String host,
@@ -240,7 +242,7 @@ class MssqlConnection {
     try {
       await _send(sql, parameters);
       final internal = await _awaitQuery(
-        TokenStream(_buf).processQueryResponse(),
+        _tokenStream().processQueryResponse(),
         timeout: timeout,
       );
       return MssqlResult(internal: internal);
@@ -269,7 +271,7 @@ class MssqlConnection {
     try {
       await _send(sql, parameters);
       final sets = await _awaitQuery(
-        TokenStream(_buf).processAllQueryResponses(),
+        _tokenStream().processAllQueryResponses(),
         timeout: timeout,
       );
       return MssqlMultiResult(sets);
@@ -314,7 +316,7 @@ class MssqlConnection {
         });
       }
       await for (final (cols, values)
-          in TokenStream(_buf).streamQueryResponse()) {
+          in _tokenStream().streamQueryResponse()) {
         yield MssqlRow(cols, values);
       }
       streamCompleted = true;
@@ -354,7 +356,12 @@ class MssqlConnection {
   }
 
   /// The database currently active on this connection.
+  ///
+  /// Updated from login ENVCHANGE and any later `USE` / ENVCHANGE type 1.
   String get database => _currentDatabase;
+
+  /// Database established at login (before any mid-session `USE`).
+  String get initialDatabase => _initialDatabase;
 
   /// Whether this connection is open.
   ///
@@ -364,6 +371,30 @@ class MssqlConnection {
 
   /// Application name sent at login (`program_name` in DMVs).
   String get appName => _appName;
+
+  /// Switches the session database with `USE` if needed.
+  ///
+  /// [database] defaults to [initialDatabase]. No-op when already on target
+  /// (case-insensitive). Returns `false` and closes the connection on failure
+  /// (used by [MssqlPool] session reset).
+  Future<bool> resetDatabase([String? database]) async {
+    final target = (database == null || database.isEmpty)
+        ? _initialDatabase
+        : database;
+    if (target.isEmpty) return true;
+    if (!_connected) return false;
+    if (_busy) {
+      throw StateError('Cannot resetDatabase while a query is in progress');
+    }
+    if (_dbEquals(_currentDatabase, target)) return true;
+    try {
+      await query('USE ${_bracketIdent(target)}');
+      return _connected && _dbEquals(_currentDatabase, target);
+    } catch (_) {
+      await close();
+      return false;
+    }
+  }
 
   /// Runs a cheap `SELECT 1` to verify the session is still alive.
   ///
@@ -478,7 +509,7 @@ class MssqlConnection {
     await _sendLogin7();
 
     // 5. Login response (may include SSPI challenge for NTLM)
-    final loginResult = await TokenStream(_buf).processLoginResponse(
+    final loginResult = await _tokenStream().processLoginResponse(
       onSspi: _ntlmAuth == null
           ? null
           : (challengeBytes) async {
@@ -487,10 +518,26 @@ class MssqlConnection {
             },
     );
     _currentDatabase = loginResult.database;
+    _initialDatabase =
+        loginResult.database.isNotEmpty ? loginResult.database : _database;
     _buf.packetSize = loginResult.packetSize;
     _connected = true;
     return this;
   }
+
+  TokenStream _tokenStream() => TokenStream(
+        _buf,
+        onDatabaseChanged: (db) {
+          _currentDatabase = db;
+        },
+      );
+
+  static bool _dbEquals(String a, String b) =>
+      a.toLowerCase() == b.toLowerCase();
+
+  /// Bracket-quotes a SQL identifier (`]` → `]]`).
+  static String _bracketIdent(String name) =>
+      '[${name.replaceAll(']', ']]')}]';
 
   /// Marks the connection dead when the peer closes or errors.
   void _watchSocket(Socket sock) {

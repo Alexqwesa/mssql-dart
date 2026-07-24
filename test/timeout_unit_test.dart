@@ -62,4 +62,16 @@ void main() {
     );
     expect(c.validateOnAcquire, isFalse);
   });
+
+  test('resetOnRelease defaults true and can be disabled', () {
+    const on = MssqlPoolConfig(host: 'h', user: 'u', password: 'p');
+    expect(on.resetOnRelease, isTrue);
+    const off = MssqlPoolConfig(
+      host: 'h',
+      user: 'u',
+      password: 'p',
+      resetOnRelease: false,
+    );
+    expect(off.resetOnRelease, isFalse);
+  });
 }

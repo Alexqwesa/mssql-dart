@@ -164,7 +164,7 @@ void main() {
       final setup = await pool.acquire();
       await setup.execute('CREATE TABLE #pool_break (n INT)');
       await setup.execute('INSERT INTO #pool_break VALUES (1),(2),(3)');
-      pool.release(setup);
+      await pool.release(setup);
 
       // Break early — pool should detect dead connection on release.
       await for (final row
@@ -234,7 +234,7 @@ void main() {
       await pool.close();
       await pendingCheck;
       // Release the held connection (close it since pool is shut).
-      pool.release(held);
+      await pool.release(held);
     });
 
     test('pool reuses idle connection', () async {

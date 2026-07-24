@@ -385,7 +385,7 @@ void main() {
         tinyPool.acquire(),
         throwsA(isA<MssqlException>()),
       );
-      tinyPool.release(held);
+      await tinyPool.release(held);
       await tinyPool.close();
     });
   });

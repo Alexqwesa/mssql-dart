@@ -81,7 +81,7 @@ void main() {
 
     final victim = await pool.acquire();
     final spid = (await victim.query('SELECT @@SPID AS id'))[0]['id'] as int;
-    pool.release(victim);
+    await pool.release(victim);
 
     // Kill the idle session from a separate connection.
     final killer = await MssqlConnection.connect(
@@ -110,7 +110,7 @@ void main() {
       final r = await fresh.query('SELECT 41 AS n');
       expect(r[0]['n'], equals(41));
     } finally {
-      pool.release(fresh);
+      await pool.release(fresh);
     }
   });
 

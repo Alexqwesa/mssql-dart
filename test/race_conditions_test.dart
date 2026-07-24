@@ -124,7 +124,7 @@ void main() {
           await conn.query("WAITFOR DELAY '00:00:00.1'; SELECT 1 AS v");
         } finally {
           currentActive--;
-          pool.release(conn);
+          await pool.release(conn);
         }
       });
 
@@ -176,11 +176,11 @@ void main() {
       final futures = List.generate(5, (i) async {
         final c = await pool.acquire();
         order.add(i);
-        pool.release(c);
+        await pool.release(c);
       });
 
       // Release the held connection — should unblock queue head first.
-      await Future.microtask(() => pool.release(conn));
+      await pool.release(conn);
       await Future.wait(futures);
       await pool.close();
 
@@ -200,12 +200,12 @@ void main() {
       final pending = List.generate(4, (_) async {
         final c = await pool.acquire();
         served++;
-        pool.release(c);
+        await pool.release(c);
       });
 
       // Release both connections — triggers the relay chain.
-      pool.release(c1);
-      pool.release(c2);
+      await pool.release(c1);
+      await pool.release(c2);
 
       await Future.wait(pending);
       await pool.close();
@@ -249,7 +249,7 @@ void main() {
       final r = await queryFuture;
       expect(r[0]['v'], equals(1));
 
-      pool.release(conn);
+      await pool.release(conn);
       await closeFuture;
     });
   });
@@ -263,7 +263,7 @@ void main() {
       final conn = await pool.acquire();
       await pool.close();
       // pool.release() after close should not throw — it just discards.
-      expect(() => pool.release(conn), returnsNormally);
+      await expectLater(pool.release(conn), completes);
     });
 
     test('releasing a dead connection to pool discards it gracefully',
@@ -272,7 +272,7 @@ void main() {
       final conn = await pool.acquire();
       await conn.close(); // kill the connection
       // release() with a dead connection should discard, not throw.
-      expect(() => pool.release(conn), returnsNormally);
+      await expectLater(pool.release(conn), completes);
       await pool.close();
     });
   });
