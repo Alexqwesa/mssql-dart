@@ -5,6 +5,7 @@ import 'connection.dart';
 import 'connection_string.dart';
 import 'exception.dart';
 import 'info_message.dart';
+import 'isolation.dart';
 import 'params.dart';
 import 'result.dart';
 import 'tds/constants.dart';
@@ -489,10 +490,13 @@ class MssqlPool {
   /// Runs [fn] inside a transaction on an acquired connection.
   ///
   /// Commits on success, rolls back on error, then releases the connection.
-  Future<T> transaction<T>(Future<T> Function(MssqlConnection conn) fn) async {
+  Future<T> transaction<T>(
+    Future<T> Function(MssqlConnection conn) fn, {
+    MssqlIsolationLevel? isolation,
+  }) async {
     final conn = await acquire();
     try {
-      return await conn.transaction(fn);
+      return await conn.transaction(fn, isolation: isolation);
     } finally {
       await release(conn);
     }

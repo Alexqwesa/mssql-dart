@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* LAN transactions: `MssqlIsolationLevel`, `beginTransaction(isolation:)`,
+  `savepoint` / `rollbackTo`, `transaction(isolation:)` on connection + pool.
 * LAN diagnostics + resilience: parse full INFO/ERROR metadata (`state`,
   `severity`, `serverName`, `procName`, `lineNo`); `onInfoMessage` on
   connection/pool; `MssqlTransient.isTransient` / `retry`; pool/connect

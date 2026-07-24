@@ -65,6 +65,7 @@ jobs:
             test/bulk_encode_test.dart \
             test/tvp_encode_test.dart \
             test/transient_test.dart \
+            test/isolation_test.dart \
             --timeout=60s
 
   # ════════════════════════════════════════════════════════════════════════════

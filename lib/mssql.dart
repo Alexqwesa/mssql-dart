@@ -8,6 +8,7 @@ export 'src/connection.dart';
 export 'src/connection_string.dart';
 export 'src/exception.dart';
 export 'src/info_message.dart';
+export 'src/isolation.dart';
 export 'src/params.dart';
 export 'src/pool.dart';
 export 'src/result.dart';

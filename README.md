@@ -163,6 +163,17 @@ await MssqlTransient.retry(
 );
 ```
 
+### Isolation & savepoints
+
+```dart
+await conn.transaction((c) async {
+  await c.execute('INSERT …');
+  await c.savepoint('sp1');
+  await c.execute('UPDATE …');
+  await c.rollbackTo('sp1'); // outer txn still open
+}, isolation: MssqlIsolationLevel.repeatableRead);
+```
+
 ---
 
 ## API reference
@@ -263,13 +274,16 @@ await for (final row in conn.queryStream(
 await conn.transaction((c) async {
   await c.execute('INSERT INTO accounts (id, balance) VALUES (1, 100)');
   await c.execute('INSERT INTO accounts (id, balance) VALUES (2, 200)');
-});
+}, isolation: MssqlIsolationLevel.serializable);
 
-// Manual form
-await conn.beginTransaction();
+// Manual form + savepoints (SQL Server SAVE / ROLLBACK TRANSACTION)
+await conn.beginTransaction(isolation: MssqlIsolationLevel.readCommitted);
 try {
   await conn.execute('UPDATE accounts SET balance = balance - 50 WHERE id = 1');
+  await conn.savepoint('after_debit');
   await conn.execute('UPDATE accounts SET balance = balance + 50 WHERE id = 2');
+  // undo only the credit:
+  await conn.rollbackTo('after_debit');
   await conn.commitTransaction();
 } catch (_) {
   await conn.rollbackTransaction();

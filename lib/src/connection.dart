@@ -10,6 +10,7 @@ import 'auth/sql_auth.dart';
 import 'connection_string.dart';
 import 'exception.dart';
 import 'info_message.dart';
+import 'isolation.dart';
 import 'params.dart';
 import 'result.dart';
 import 'server_endpoint.dart';
@@ -640,19 +641,56 @@ class MssqlConnection {
 
   // ── Transaction helpers ────────────────────────────────────────────────────
 
-  Future<void> beginTransaction() => execute('BEGIN TRANSACTION');
+  /// Begins a transaction.
+  ///
+  /// When [isolation] is set, runs `SET TRANSACTION ISOLATION LEVEL …` first
+  /// (session-scoped until changed again).
+  Future<void> beginTransaction({MssqlIsolationLevel? isolation}) async {
+    if (isolation != null) {
+      await execute(
+        'SET TRANSACTION ISOLATION LEVEL ${isolation.sqlName}',
+      );
+    }
+    await execute('BEGIN TRANSACTION');
+  }
+
   Future<void> commitTransaction() => execute('COMMIT TRANSACTION');
   Future<void> rollbackTransaction() => execute('ROLLBACK TRANSACTION');
 
+  /// Creates a SQL Server savepoint (`SAVE TRANSACTION [name]`).
+  ///
+  /// [name] must be a simple identifier (`^[A-Za-z_][A-Za-z0-9_]*$`, ≤32 chars).
+  /// Roll back to it with [rollbackTo] — the outer transaction stays open.
+  Future<void> savepoint(String name) async {
+    assertSavepointName(name);
+    await execute('SAVE TRANSACTION [$name]');
+  }
+
+  /// Rolls back to a [savepoint] (`ROLLBACK TRANSACTION [name]`).
+  ///
+  /// Does not end the outer transaction — call [commitTransaction] or
+  /// [rollbackTransaction] when finished.
+  Future<void> rollbackTo(String name) async {
+    assertSavepointName(name);
+    await execute('ROLLBACK TRANSACTION [$name]');
+  }
+
   /// Runs [fn] inside a transaction; commits on success, rolls back on error.
-  Future<T> transaction<T>(Future<T> Function(MssqlConnection conn) fn) async {
-    await beginTransaction();
+  ///
+  /// Optional [isolation] is applied before `BEGIN TRANSACTION`.
+  Future<T> transaction<T>(
+    Future<T> Function(MssqlConnection conn) fn, {
+    MssqlIsolationLevel? isolation,
+  }) async {
+    await beginTransaction(isolation: isolation);
     try {
       final result = await fn(this);
       await commitTransaction();
       return result;
     } catch (_) {
-      await rollbackTransaction();
+      try {
+        await rollbackTransaction();
+      } catch (_) {}
       rethrow;
     }
   }
