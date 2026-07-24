@@ -53,6 +53,10 @@
   `packFedAuthToken` (ADAL-style); skip safely when handler absent.
 * Live Attention cancel over TLS against Docker SQL Edge
   (`test/attention_tls_live_test.dart`): WAITFOR, stream, txn, back-to-back.
+* Live cancel scenarios: `queryMultiple`, parameterized RPC, pool acquire
+  (plain + TLS) — `test/cancel_scenarios_live_test.dart`.
+* LAN focus: login timeout covers full handshake; `queryTimeout` / per-call
+  timeout (Attention + drain); expose `appName` + `packetSize` on connect/pool.
 
 ## 0.1.1
 

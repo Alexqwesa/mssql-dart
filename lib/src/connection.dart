@@ -34,12 +34,17 @@ class MssqlConnection {
   final String _host;
   final int _port;
   final String _database;
+  final String _appName;
+  final int _packetSize;
   final SqlAuth? _sqlAuth;
   final AzureAdAuth? _azureAdAuth;
   final NtlmAuth? _ntlmAuth;
   final bool _encrypt;
   final bool _trustServerCertificate;
+  /// Covers TCP + PRELOGIN + optional TLS + LOGIN7 (+ NTLM) — not TCP alone.
   final Duration _timeout;
+  /// Default per-query deadline; null means no timeout. Overridable per call.
+  final Duration? _queryTimeout;
 
   late TdsBuffer _buf;
   late Socket _socket;
@@ -55,50 +60,72 @@ class MssqlConnection {
     required String host,
     required int port,
     required String database,
+    String appName = 'mssql-dart',
+    int packetSize = defaultPacketSize,
     SqlAuth? sqlAuth,
     AzureAdAuth? azureAdAuth,
     NtlmAuth? ntlmAuth,
     required bool encrypt,
     required bool trustServerCertificate,
     required Duration timeout,
+    Duration? queryTimeout,
   })  : _host = host,
         _port = port,
         _database = database,
+        _appName = appName,
+        _packetSize = packetSize,
         _sqlAuth = sqlAuth,
         _azureAdAuth = azureAdAuth,
         _ntlmAuth = ntlmAuth,
         _encrypt = encrypt,
         _trustServerCertificate = trustServerCertificate,
-        _timeout = timeout;
+        _timeout = timeout,
+        _queryTimeout = queryTimeout;
 
   // ── Factory constructors ───────────────────────────────────────────────────
 
   /// Connects using SQL Server authentication (username + password).
   ///
   /// [encrypt] — whether to negotiate TLS (default `true`). Set to `false`
-  /// only for local dev containers that don't support TLS.
+  /// only for local LAN / Docker instances that don't support TLS.
   ///
   /// [trustServerCertificate] — accept self-signed or untrusted certificates.
-  /// Required for local Docker SQL Server instances. Has no effect when
+  /// Required for typical local Docker SQL Server. Has no effect when
   /// [encrypt] is `false`.
+  ///
+  /// [timeout] — login deadline for the full handshake (TCP + PRELOGIN +
+  /// optional TLS + LOGIN7), not TCP connect alone.
+  ///
+  /// [queryTimeout] — default deadline for [query] / [queryMultiple] /
+  /// [execute] / [queryStream]. On expiry the driver sends Attention and
+  /// tries to keep the connection usable. Override per call with `timeout:`.
+  ///
+  /// [appName] — reported to SQL Server as the client application name
+  /// (`program_name` in `sys.dm_exec_sessions`).
   static Future<MssqlConnection> connect({
     required String host,
     int port = defaultPort,
     required String user,
     required String password,
     String database = '',
+    String appName = 'mssql-dart',
+    int packetSize = defaultPacketSize,
     bool encrypt = true,
     bool trustServerCertificate = false,
-    Duration timeout = const Duration(seconds: 30),
+    Duration timeout = const Duration(seconds: 15),
+    Duration? queryTimeout,
   }) {
     return MssqlConnection._(
       host: host,
       port: port,
       database: database,
+      appName: appName,
+      packetSize: packetSize,
       sqlAuth: SqlAuth(username: user, password: password),
       encrypt: encrypt,
       trustServerCertificate: trustServerCertificate,
       timeout: timeout,
+      queryTimeout: queryTimeout,
     )._open();
   }
 
@@ -108,17 +135,23 @@ class MssqlConnection {
     int port = defaultPort,
     required AzureAdAuth azureAdAuth,
     String database = '',
+    String appName = 'mssql-dart',
+    int packetSize = defaultPacketSize,
     bool trustServerCertificate = false,
-    Duration timeout = const Duration(seconds: 30),
+    Duration timeout = const Duration(seconds: 15),
+    Duration? queryTimeout,
   }) {
     return MssqlConnection._(
       host: host,
       port: port,
       database: database,
+      appName: appName,
+      packetSize: packetSize,
       azureAdAuth: azureAdAuth,
       encrypt: true, // Azure AD always requires TLS
       trustServerCertificate: trustServerCertificate,
       timeout: timeout,
+      queryTimeout: queryTimeout,
     )._open();
   }
 
@@ -126,7 +159,7 @@ class MssqlConnection {
   ///
   /// Sends LOGIN7 with a Type 1 negotiate blob, then completes the handshake
   /// when the server returns [tokenSSPI] (Type 2) by sending Type 3 as
-  /// [packSSPIMessage].
+  /// [packSSPIMessage]. Useful for domain-joined LAN SQL Servers.
   static Future<MssqlConnection> connectNtlm({
     required String host,
     int port = defaultPort,
@@ -135,14 +168,19 @@ class MssqlConnection {
     required String password,
     String? workstation,
     String database = '',
+    String appName = 'mssql-dart',
+    int packetSize = defaultPacketSize,
     bool encrypt = true,
     bool trustServerCertificate = false,
-    Duration timeout = const Duration(seconds: 30),
+    Duration timeout = const Duration(seconds: 15),
+    Duration? queryTimeout,
   }) {
     return MssqlConnection._(
       host: host,
       port: port,
       database: database,
+      appName: appName,
+      packetSize: packetSize,
       ntlmAuth: NtlmAuth(
         domain: domain,
         username: user,
@@ -152,6 +190,7 @@ class MssqlConnection {
       encrypt: encrypt,
       trustServerCertificate: trustServerCertificate,
       timeout: timeout,
+      queryTimeout: queryTimeout,
     )._open();
   }
 
@@ -163,16 +202,23 @@ class MssqlConnection {
   /// ```dart
   /// await conn.query('SELECT * FROM users WHERE id = @id', {'id': 42});
   /// ```
+  ///
+  /// [timeout] overrides the connection's default [queryTimeout] for this call
+  /// (pass an empty map when you need a timeout without parameters).
   Future<MssqlResult> query(
     String sql, [
     Map<String, Object?> parameters = const {},
+    Duration? timeout,
   ]) async {
     _assertOpen();
     _assertNotBusy();
     _busy = true;
     try {
       await _send(sql, parameters);
-      final internal = await TokenStream(_buf).processQueryResponse();
+      final internal = await _awaitQuery(
+        TokenStream(_buf).processQueryResponse(),
+        timeout: timeout,
+      );
       return MssqlResult(internal: internal);
     } finally {
       _busy = false;
@@ -191,13 +237,17 @@ class MssqlConnection {
   Future<MssqlMultiResult> queryMultiple(
     String sql, [
     Map<String, Object?> parameters = const {},
+    Duration? timeout,
   ]) async {
     _assertOpen();
     _assertNotBusy();
     _busy = true;
     try {
       await _send(sql, parameters);
-      final sets = await TokenStream(_buf).processAllQueryResponses();
+      final sets = await _awaitQuery(
+        TokenStream(_buf).processAllQueryResponses(),
+        timeout: timeout,
+      );
       return MssqlMultiResult(sets);
     } finally {
       _busy = false;
@@ -213,6 +263,9 @@ class MssqlConnection {
   /// async context (sends TDS Attention). Breaking out of the `await for`
   /// without cancel closes the connection to avoid protocol desync.
   ///
+  /// When [timeout] (or the connection [queryTimeout]) elapses, Attention is
+  /// sent so the stream can finish and the connection stay reusable.
+  ///
   /// ```dart
   /// await for (final row in conn.queryStream('SELECT * FROM bigTable')) {
   ///   process(row);
@@ -221,19 +274,28 @@ class MssqlConnection {
   Stream<MssqlRow> queryStream(
     String sql, [
     Map<String, Object?> parameters = const {},
+    Duration? timeout,
   ]) async* {
     _assertOpen();
     _assertNotBusy();
     _busy = true;
     bool streamCompleted = false;
+    final effective = timeout ?? _queryTimeout;
+    Timer? deadline;
     try {
       await _send(sql, parameters);
+      if (effective != null) {
+        deadline = Timer(effective, () {
+          unawaited(_buf.sendAttention());
+        });
+      }
       await for (final (cols, values)
           in TokenStream(_buf).streamQueryResponse()) {
         yield MssqlRow(cols, values);
       }
       streamCompleted = true;
     } finally {
+      deadline?.cancel();
       if (!streamCompleted && _connected) {
         // Caller broke out early — TDS buffer has unread tokens.
         // Kill the connection to prevent protocol desync and pool poisoning.
@@ -250,8 +312,9 @@ class MssqlConnection {
   Future<int> execute(
     String sql, [
     Map<String, Object?> parameters = const {},
+    Duration? timeout,
   ]) async {
-    final result = await query(sql, parameters);
+    final result = await query(sql, parameters, timeout);
     return result.rowsAffected;
   }
 
@@ -311,6 +374,24 @@ class MssqlConnection {
   // ── Internal ───────────────────────────────────────────────────────────────
 
   Future<MssqlConnection> _open() async {
+    try {
+      return await _openHandshake().timeout(
+        _timeout,
+        onTimeout: () {
+          unawaited(_forceClose());
+          throw MssqlException(
+            'Login timed out after ${_timeout.inMilliseconds}ms '
+            '(host=$_host port=$_port)',
+          );
+        },
+      );
+    } on SocketException catch (e) {
+      unawaited(_forceClose());
+      throw MssqlException('TCP connect failed: $e');
+    }
+  }
+
+  Future<MssqlConnection> _openHandshake() async {
     // 1. TCP
     _socket = await Socket.connect(_host, _port, timeout: _timeout);
     _buf = TdsBuffer(_socket);
@@ -331,7 +412,7 @@ class MssqlConnection {
     } else if (_encrypt && _azureAdAuth == null) {
       throw MssqlException(
         'Server does not support encryption. '
-        'Pass encrypt: false for local dev containers that do not have TLS.',
+        'Pass encrypt: false for local LAN / Docker instances without TLS.',
       );
     }
 
@@ -554,8 +635,10 @@ class MssqlConnection {
           host: _host,
           username: '',
           password: '',
+          appName: _appName,
           serverName: _host,
           database: _database,
+          packetSize: _packetSize,
           sspi: ntlm.negotiateMessage(),
         ),
       );
@@ -569,8 +652,10 @@ class MssqlConnection {
         host: _host,
         username: auth?.username ?? '',
         password: auth?.password ?? '',
+        appName: _appName,
         serverName: _host,
         database: _database,
+        packetSize: _packetSize,
         fedAuthToken: _azureAdAuth?.bearerToken,
       ),
     );
@@ -584,6 +669,41 @@ class MssqlConnection {
     } else {
       await RpcRequest.sendExecuteSql(_buf, sql, parameters);
     }
+  }
+
+  /// Awaits a query response, applying [timeout] or the connection default.
+  ///
+  /// On timeout: send Attention, drain the in-flight response, then throw.
+  Future<T> _awaitQuery<T>(
+    Future<T> response, {
+    Duration? timeout,
+  }) async {
+    final effective = timeout ?? _queryTimeout;
+    if (effective == null) return response;
+    try {
+      return await response.timeout(effective);
+    } on TimeoutException {
+      try {
+        await _buf.sendAttention();
+      } catch (_) {}
+      try {
+        await response.timeout(const Duration(seconds: 10));
+      } catch (_) {}
+      throw MssqlException(
+        'Query timed out after ${effective.inMilliseconds}ms',
+      );
+    }
+  }
+
+  Future<void> _forceClose() async {
+    _connected = false;
+    try {
+      await _socket.close();
+    } catch (_) {}
+    try {
+      await _rawTcpSocket?.close();
+    } catch (_) {}
+    _rawTcpSocket = null;
   }
 
   void _assertOpen() {

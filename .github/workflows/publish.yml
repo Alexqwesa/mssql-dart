@@ -59,6 +59,7 @@ jobs:
             test/pool_ntlm_config_test.dart \
             test/pool_azure_ad_config_test.dart \
             test/mock_fedauth_login_test.dart \
+            test/timeout_unit_test.dart \
             --timeout=60s
 
   # ════════════════════════════════════════════════════════════════════════════

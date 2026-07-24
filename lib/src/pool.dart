@@ -4,6 +4,7 @@ import 'auth/azure_ad_auth.dart';
 import 'connection.dart';
 import 'exception.dart';
 import 'result.dart';
+import 'tds/constants.dart';
 
 /// Configuration for [MssqlPool].
 class MssqlPoolConfig {
@@ -12,9 +13,14 @@ class MssqlPoolConfig {
   final String user;
   final String password;
   final String database;
+  final String appName;
+  final int packetSize;
   final bool encrypt;
   final bool trustServerCertificate;
   final Duration connectionTimeout;
+
+  /// Default query deadline applied to pooled connections (null = none).
+  final Duration? queryTimeout;
 
   /// When non-null, [MssqlPool] opens connections via
   /// [MssqlConnection.connectAzureAd] (FedAuth). Takes precedence over
@@ -46,9 +52,12 @@ class MssqlPoolConfig {
     required this.user,
     required this.password,
     this.database = '',
+    this.appName = 'mssql-dart',
+    this.packetSize = defaultPacketSize,
     this.encrypt = true,
     this.trustServerCertificate = false,
-    this.connectionTimeout = const Duration(seconds: 30),
+    this.connectionTimeout = const Duration(seconds: 15),
+    this.queryTimeout,
     this.azureAdAuth,
     this.ntlmDomain,
     this.ntlmWorkstation,
@@ -67,8 +76,11 @@ class MssqlPoolConfig {
     int port = 1433,
     required AzureAdAuth azureAdAuth,
     String database = '',
+    String appName = 'mssql-dart',
+    int packetSize = defaultPacketSize,
     bool trustServerCertificate = false,
-    Duration connectionTimeout = const Duration(seconds: 30),
+    Duration connectionTimeout = const Duration(seconds: 15),
+    Duration? queryTimeout,
     int min = 0,
     int max = 10,
     Duration idleTimeout = const Duration(seconds: 30),
@@ -80,9 +92,12 @@ class MssqlPoolConfig {
       user: '',
       password: '',
       database: database,
+      appName: appName,
+      packetSize: packetSize,
       encrypt: true,
       trustServerCertificate: trustServerCertificate,
       connectionTimeout: connectionTimeout,
+      queryTimeout: queryTimeout,
       azureAdAuth: azureAdAuth,
       min: min,
       max: max,
@@ -100,9 +115,12 @@ class MssqlPoolConfig {
     required String password,
     String? workstation,
     String database = '',
+    String appName = 'mssql-dart',
+    int packetSize = defaultPacketSize,
     bool encrypt = true,
     bool trustServerCertificate = false,
-    Duration connectionTimeout = const Duration(seconds: 30),
+    Duration connectionTimeout = const Duration(seconds: 15),
+    Duration? queryTimeout,
     int min = 0,
     int max = 10,
     Duration idleTimeout = const Duration(seconds: 30),
@@ -114,9 +132,12 @@ class MssqlPoolConfig {
       user: user,
       password: password,
       database: database,
+      appName: appName,
+      packetSize: packetSize,
       encrypt: encrypt,
       trustServerCertificate: trustServerCertificate,
       connectionTimeout: connectionTimeout,
+      queryTimeout: queryTimeout,
       ntlmDomain: domain,
       ntlmWorkstation: workstation,
       min: min,
@@ -346,8 +367,11 @@ class MssqlPool {
         port: config.port,
         azureAdAuth: aad,
         database: config.database,
+        appName: config.appName,
+        packetSize: config.packetSize,
         trustServerCertificate: config.trustServerCertificate,
         timeout: config.connectionTimeout,
+        queryTimeout: config.queryTimeout,
       );
     }
     final domain = config.ntlmDomain;
@@ -360,9 +384,12 @@ class MssqlPool {
         password: config.password,
         workstation: config.ntlmWorkstation,
         database: config.database,
+        appName: config.appName,
+        packetSize: config.packetSize,
         encrypt: config.encrypt,
         trustServerCertificate: config.trustServerCertificate,
         timeout: config.connectionTimeout,
+        queryTimeout: config.queryTimeout,
       );
     }
     return MssqlConnection.connect(
@@ -371,9 +398,12 @@ class MssqlPool {
       user: config.user,
       password: config.password,
       database: config.database,
+      appName: config.appName,
+      packetSize: config.packetSize,
       encrypt: config.encrypt,
       trustServerCertificate: config.trustServerCertificate,
       timeout: config.connectionTimeout,
+      queryTimeout: config.queryTimeout,
     );
   }
 
