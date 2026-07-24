@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:crypto/crypto.dart';
 import 'package:mssql/mssql.dart';
 import 'package:mssql/src/auth/md4.dart';
 import 'package:test/test.dart';
@@ -41,12 +42,14 @@ void main() {
       final flags = bd.getUint32(12, Endian.little);
       expect(flags & NtlmAuth.negotiateUnicode, isNot(0));
       expect(flags & NtlmAuth.negotiateNtlm, isNot(0));
+      expect(flags & NtlmAuth.negotiateVersion, isNot(0));
       expect(flags & NtlmAuth.negotiateOemDomainSupplied, isNot(0));
       expect(flags & NtlmAuth.negotiateOemWorkstationSupplied, isNot(0));
 
       final domainLen = bd.getUint16(16, Endian.little);
       final domainOff = bd.getUint32(20, Endian.little);
       expect(domainLen, equals(4));
+      expect(domainOff, equals(40)); // Version-aware Type 1 header
       expect(
         String.fromCharCodes(msg.sublist(domainOff, domainOff + domainLen)),
         equals('CORP'),
@@ -119,14 +122,15 @@ void main() {
         '72007600650072002e0064006f006d00'
         '610069006e002e0063006f006d0000000000',
       );
-      final challenge = NtlmChallenge(
+      final type2 = _type2(
         flags: NtlmAuth.negotiateUnicode |
             NtlmAuth.negotiateNtlm |
             NtlmAuth.negotiateTargetInfo,
-        serverChallenge: _hex('0123456789abcdef'),
-        targetName: 'DOMAIN',
+        challenge: _hex('0123456789abcdef'),
+        targetName: _ucs2('DOMAIN'),
         targetInfo: targetInfo,
       );
+      final challenge = NtlmChallenge.parse(type2);
 
       final auth = NtlmAuth(
         domain: 'DOMAIN',
@@ -148,6 +152,7 @@ void main() {
 
       final bd = ByteData.sublistView(type3);
       expect(bd.getUint32(8, Endian.little), equals(3));
+      expect(type3.length, greaterThanOrEqualTo(88));
 
       final ntLen = bd.getUint16(20, Endian.little);
       final ntOff = bd.getUint32(24, Endian.little);
@@ -160,12 +165,12 @@ void main() {
     });
 
     test('Type 3 embeds Unicode username and domain', () {
-      final challenge = NtlmChallenge(
+      final type2 = _type2(
         flags: NtlmAuth.negotiateUnicode | NtlmAuth.negotiateNtlm,
-        serverChallenge: _hex('0123456789abcdef'),
-        targetName: 'DOMAIN',
-        targetInfo: Uint8List(0),
+        challenge: _hex('0123456789abcdef'),
+        targetName: _ucs2('DOMAIN'),
       );
+      final challenge = NtlmChallenge.parse(type2);
       final type3 = NtlmAuth(
         domain: 'DOMAIN',
         username: 'user',
@@ -184,6 +189,135 @@ void main() {
 
       expect(_fromUcs2(type3.sublist(domOff, domOff + domLen)), equals('DOMAIN'));
       expect(_fromUcs2(type3.sublist(userOff, userOff + userLen)), equals('user'));
+    });
+
+    test('MIC present when TargetInfo has MsvAvTimestamp', () {
+      // TargetInfo: NbDomainName + Timestamp + EOL
+      final targetInfo = _hex(
+        '02000c0044004f004d00410049004e00' // MsvAvNbDomainName "DOMAIN"
+        '070008000090d336b734c301' // MsvAvTimestamp
+        '00000000', // EOL
+      );
+      final type2 = _type2(
+        flags: NtlmAuth.negotiateUnicode |
+            NtlmAuth.negotiateNtlm |
+            NtlmAuth.negotiateTargetInfo |
+            NtlmAuth.negotiateExtendedSessionSecurity,
+        challenge: _hex('0123456789abcdef'),
+        targetName: _ucs2('DOMAIN'),
+        targetInfo: targetInfo,
+      );
+      final challenge = NtlmChallenge.parse(type2);
+
+      final auth = NtlmAuth(
+        domain: 'DOMAIN',
+        username: 'user',
+        password: 'SecREt01',
+        workstation: 'WORKSTATION',
+      );
+      final type1 = auth.negotiateMessage();
+
+      final type3 = auth.authenticateMessage(
+        challenge,
+        clientChallenge: _hex('ffffff0011223344'),
+        timestamp: _hex('0090d336b734c301'),
+        negotiateMessage: type1,
+      );
+
+      final mic = type3.sublist(72, 88);
+      expect(mic, isNot(equals(Uint8List(16)))); // non-zero MIC
+
+      // Recompute MIC: HMAC_MD5(ExportedSessionKey, T1‖T2‖T3_with_MIC_zero)
+      final ntLen = ByteData.sublistView(type3).getUint16(20, Endian.little);
+      final ntOff = ByteData.sublistView(type3).getUint32(24, Endian.little);
+      final ntProof = type3.sublist(ntOff, ntOff + 16);
+      final ntHash = NtlmAuth.ntPasswordHash('SecREt01');
+      final v2 = NtlmAuth.ntowfV2(ntHash, 'user', 'DOMAIN');
+      final sessionBase = _hmacMd5(v2, ntProof);
+
+      final zeroed = Uint8List.fromList(type3);
+      zeroed.setRange(72, 88, Uint8List(16));
+      final expectedMic = _hmacMd5(sessionBase, [...type1, ...type2, ...zeroed]);
+      expect(mic, equals(expectedMic));
+
+      // NtChallengeResponse blob must include MsvAvFlags with MIC bit
+      final ntResp = type3.sublist(ntOff, ntOff + ntLen);
+      final blob = ntResp.sublist(16);
+      expect(_blobHasMicFlag(blob), isTrue);
+    });
+
+    test('KEY_EXCH encrypts ExportedSessionKey with RC4', () {
+      final type2 = _type2(
+        flags: NtlmAuth.negotiateUnicode |
+            NtlmAuth.negotiateNtlm |
+            NtlmAuth.negotiateKeyExch |
+            NtlmAuth.negotiateAlwaysSign |
+            NtlmAuth.negotiateExtendedSessionSecurity,
+        challenge: _hex('0123456789abcdef'),
+      );
+      final challenge = NtlmChallenge.parse(type2);
+      final exported = _hex('00112233445566778899aabbccddeeff');
+      final type3 = NtlmAuth(
+        domain: 'DOMAIN',
+        username: 'user',
+        password: 'SecREt01',
+      ).authenticateMessage(
+        challenge,
+        clientChallenge: _hex('aaaaaaaaaaaaaaaa'),
+        timestamp: _hex('0000000000000000'),
+        exportedSessionKey: exported,
+      );
+
+      final bd = ByteData.sublistView(type3);
+      expect(bd.getUint32(60, Endian.little) & NtlmAuth.negotiateKeyExch, isNot(0));
+      final keyLen = bd.getUint16(52, Endian.little);
+      final keyOff = bd.getUint32(56, Endian.little);
+      expect(keyLen, equals(16));
+
+      final ntOff = bd.getUint32(24, Endian.little);
+      final ntProof = type3.sublist(ntOff, ntOff + 16);
+      final ntHash = NtlmAuth.ntPasswordHash('SecREt01');
+      final v2 = NtlmAuth.ntowfV2(ntHash, 'user', 'DOMAIN');
+      final sessionBase = _hmacMd5(v2, ntProof);
+      final encrypted = type3.sublist(keyOff, keyOff + 16);
+      expect(encrypted, equals(NtlmAuth.rc4(sessionBase, exported)));
+      expect(NtlmAuth.rc4(sessionBase, encrypted), equals(exported));
+    });
+
+    test('MIC without prior negotiateMessage throws', () {
+      final targetInfo = _hex(
+        '070008000090d336b734c301'
+        '00000000',
+      );
+      final challenge = NtlmChallenge.parse(_type2(
+        flags: NtlmAuth.negotiateUnicode |
+            NtlmAuth.negotiateNtlm |
+            NtlmAuth.negotiateTargetInfo,
+        challenge: _hex('0123456789abcdef'),
+        targetInfo: targetInfo,
+      ));
+      expect(
+        () => NtlmAuth(
+          domain: 'D',
+          username: 'u',
+          password: 'p',
+        ).authenticateMessage(
+          challenge,
+          clientChallenge: _hex('aaaaaaaaaaaaaaaa'),
+          timestamp: _hex('0000000000000000'),
+        ),
+        throwsStateError,
+      );
+    });
+  });
+
+  group('NtlmAuth.rc4', () {
+    test('round-trip', () {
+      final key = _hex('0102030405060708090a0b0c0d0e0f10');
+      final plain = _hex('deadbeefcafebabe');
+      final cipher = NtlmAuth.rc4(key, plain);
+      expect(cipher, isNot(equals(plain)));
+      expect(NtlmAuth.rc4(key, cipher), equals(plain));
     });
   });
 }
@@ -213,6 +347,33 @@ String _fromUcs2(List<int> bytes) {
     codes.add(bytes[i] | (bytes[i + 1] << 8));
   }
   return String.fromCharCodes(codes);
+}
+
+Uint8List _hmacMd5(List<int> key, List<int> data) {
+  final hmac = Hmac(md5, key);
+  return Uint8List.fromList(hmac.convert(data).bytes);
+}
+
+bool _blobHasMicFlag(Uint8List blob) {
+  // blob = respversion(2) + hirespversion(2) + reserved(4) + time(8) +
+  //        clientChallenge(8) + reserved(4) + targetInfo + reserved(4)
+  if (blob.length < 28) return false;
+  var i = 28;
+  while (i + 4 <= blob.length) {
+    final id = blob[i] | (blob[i + 1] << 8);
+    final len = blob[i + 2] | (blob[i + 3] << 8);
+    i += 4;
+    if (id == 0) return false;
+    if (id == 0x0006 && len >= 4 && i + 4 <= blob.length) {
+      final flags = blob[i] |
+          (blob[i + 1] << 8) |
+          (blob[i + 2] << 16) |
+          (blob[i + 3] << 24);
+      return (flags & 0x2) != 0;
+    }
+    i += len;
+  }
+  return false;
 }
 
 Uint8List _type2({

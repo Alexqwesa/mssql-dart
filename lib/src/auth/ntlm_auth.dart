@@ -6,6 +6,14 @@ import 'package:crypto/crypto.dart';
 
 import 'md4.dart';
 
+/// AV_PAIR Ids ([MS-NLMP] §2.2.2.1).
+const int _avEol = 0x0000;
+const int _avFlags = 0x0006;
+const int _avTimestamp = 0x0007;
+
+/// MsvAvFlags bit: client provides a MIC ([MS-NLMP] §2.2.2.1).
+const int _avFlagMic = 0x00000002;
+
 /// Parsed NTLMSSP Type 2 CHALLENGE message ([MS-NLMP] CHALLENGE_MESSAGE).
 class NtlmChallenge {
   final int flags;
@@ -13,11 +21,15 @@ class NtlmChallenge {
   final String targetName;
   final Uint8List targetInfo;
 
+  /// Raw Type 2 bytes (needed for MIC over NEGOTIATE‖CHALLENGE‖AUTHENTICATE).
+  final Uint8List rawMessage;
+
   const NtlmChallenge({
     required this.flags,
     required this.serverChallenge,
     required this.targetName,
     required this.targetInfo,
+    required this.rawMessage,
   });
 
   static const int negotiateTargetInfo = 0x00800000;
@@ -63,6 +75,7 @@ class NtlmChallenge {
       serverChallenge: challenge,
       targetName: targetName,
       targetInfo: targetInfo,
+      rawMessage: Uint8List.fromList(msg),
     );
   }
 }
@@ -72,7 +85,10 @@ class NtlmChallenge {
 /// Supports:
 /// - Type 1 NEGOTIATE ([negotiateMessage])
 /// - Type 2 parse ([NtlmChallenge.parse])
-/// - Type 3 AUTHENTICATE with NTLMv2 ([authenticateMessage])
+/// - Type 3 AUTHENTICATE with NTLMv2 ([authenticateMessage]), including:
+///   - Version + MIC fields (88-byte header, go-mssqldb layout)
+///   - MIC when TargetInfo contains MsvAvTimestamp ([MS-NLMP] §3.1.5.1.2)
+///   - KEY_EXCH EncryptedRandomSessionKey (RC4) when negotiated
 ///
 /// Spec: [MS-NLMP]; vectors from curl/davenport NTLM docs.
 class NtlmAuth {
@@ -80,6 +96,9 @@ class NtlmAuth {
   final String username;
   final String password;
   final String? workstation;
+
+  /// Last Type 1 message from [negotiateMessage] (used for MIC).
+  Uint8List? _lastNegotiate;
 
   NtlmAuth({
     required this.domain,
@@ -92,12 +111,18 @@ class NtlmAuth {
   static const int negotiateUnicode = 0x00000001;
   static const int negotiateOem = 0x00000002;
   static const int requestTarget = 0x00000004;
+  static const int negotiateSign = 0x00000010;
+  static const int negotiateSeal = 0x00000020;
   static const int negotiateNtlm = 0x00000200;
   static const int negotiateAlwaysSign = 0x00008000;
   static const int negotiateOemDomainSupplied = 0x00001000;
   static const int negotiateOemWorkstationSupplied = 0x00002000;
   static const int negotiateExtendedSessionSecurity = 0x00080000;
   static const int negotiateTargetInfo = 0x00800000;
+  static const int negotiateVersion = 0x02000000;
+  static const int negotiate128 = 0x20000000;
+  static const int negotiateKeyExch = 0x40000000;
+  static const int negotiate56 = 0x80000000;
 
   /// Builds an NTLMSSP Type 1 NEGOTIATE message (OEM domain + workstation).
   Uint8List negotiateMessage() {
@@ -110,11 +135,13 @@ class NtlmAuth {
         requestTarget |
         negotiateNtlm |
         negotiateAlwaysSign |
-        negotiateExtendedSessionSecurity;
+        negotiateExtendedSessionSecurity |
+        negotiateVersion;
     if (domainBytes.isNotEmpty) flags |= negotiateOemDomainSupplied;
     if (wsBytes.isNotEmpty) flags |= negotiateOemWorkstationSupplied;
 
-    const headerLen = 32;
+    // 40-byte header with Version (go-mssqldb InitialBytes layout).
+    const headerLen = 40;
     final total = headerLen + domainBytes.length + wsBytes.length;
     final out = Uint8List(total);
     final bd = ByteData.sublistView(out);
@@ -139,17 +166,26 @@ class NtlmAuth {
       out.setRange(payloadOff, payloadOff + wsBytes.length, wsBytes);
     }
 
+    // Version zeros (ProductMajor/Minor/Build/Reserved/NTLMRevision).
+    // offsets 32..39 already zero-filled.
+
+    _lastNegotiate = out;
     return out;
   }
 
   /// Builds an NTLMSSP Type 3 AUTHENTICATE (NTLMv2) in response to [challenge].
   ///
-  /// [clientChallenge] and [timestamp] may be supplied for deterministic tests
-  /// (curl/davenport vectors); otherwise random / current FILETIME are used.
+  /// [clientChallenge], [timestamp], and [exportedSessionKey] may be supplied
+  /// for deterministic tests; otherwise random / current FILETIME are used.
+  ///
+  /// Uses the Type 1 from the last [negotiateMessage] call (and [challenge]'s
+  /// raw Type 2) when computing the MIC.
   Uint8List authenticateMessage(
     NtlmChallenge challenge, {
     Uint8List? clientChallenge,
     Uint8List? timestamp,
+    Uint8List? exportedSessionKey,
+    Uint8List? negotiateMessage,
   }) {
     final cc = clientChallenge ?? _randomBytes(8);
     if (cc.length != 8) {
@@ -160,30 +196,54 @@ class NtlmAuth {
       throw ArgumentError('timestamp must be 8 bytes');
     }
 
+    final wantMic = _targetInfoHasTimestamp(challenge.targetInfo);
+    final targetInfo = wantMic
+        ? _targetInfoWithMicFlag(challenge.targetInfo)
+        : challenge.targetInfo;
+
     final targetForHash =
         challenge.targetName.isNotEmpty ? challenge.targetName : domain;
     final ntHash = ntPasswordHash(password);
     final ntlmv2Hash = ntowfV2(ntHash, username, targetForHash);
 
-    final blob = _ntlmv2Blob(ts, cc, challenge.targetInfo);
+    final blob = _ntlmv2Blob(ts, cc, targetInfo);
     final ntProof = _hmacMd5(ntlmv2Hash, [...challenge.serverChallenge, ...blob]);
     final ntResponse = Uint8List.fromList([...ntProof, ...blob]);
 
     final lmProof = _hmacMd5(ntlmv2Hash, [...challenge.serverChallenge, ...cc]);
     final lmResponse = Uint8List.fromList([...lmProof, ...cc]);
 
+    // SessionBaseKey = HMAC_MD5(ResponseKeyNT, NTProofStr) ([MS-NLMP] §3.3.2).
+    final sessionBaseKey = _hmacMd5(ntlmv2Hash, ntProof);
+    final keyExchangeKey = sessionBaseKey;
+
+    final doKeyExch = (challenge.flags & negotiateKeyExch) != 0;
+    late final Uint8List exportedKey;
+    late final Uint8List encryptedSessionKey;
+    if (doKeyExch) {
+      exportedKey = exportedSessionKey ?? _randomBytes(16);
+      if (exportedKey.length != 16) {
+        throw ArgumentError('exportedSessionKey must be 16 bytes');
+      }
+      encryptedSessionKey = rc4(keyExchangeKey, exportedKey);
+    } else {
+      exportedKey = keyExchangeKey;
+      encryptedSessionKey = Uint8List(0);
+    }
+
     final domainU = _utf16Le(domain);
     final userU = _utf16Le(username);
     final wsU = _utf16Le(workstation ?? 'WORKSTATION');
 
-    // Authenticate message fixed header is 64 bytes (no MIC / Version).
-    const headerLen = 64;
+    // 88-byte header: fields + Version(8) + MIC(16) — go-mssqldb layout.
+    const headerLen = 88;
     final total = headerLen +
         lmResponse.length +
         ntResponse.length +
         domainU.length +
         userU.length +
-        wsU.length;
+        wsU.length +
+        encryptedSessionKey.length;
     final out = Uint8List(total);
     final bd = ByteData.sublistView(out);
 
@@ -199,19 +259,35 @@ class NtlmAuth {
       off += data.length;
     }
 
-    writeBuf(12, lmResponse); // LmChallengeResponse
-    writeBuf(20, ntResponse); // NtChallengeResponse
+    writeBuf(12, lmResponse);
+    writeBuf(20, ntResponse);
     writeBuf(28, domainU);
     writeBuf(36, userU);
     writeBuf(44, wsU);
-    // EncryptedRandomSessionKey — empty
-    bd.setUint16(52, 0, Endian.little);
-    bd.setUint16(54, 0, Endian.little);
-    bd.setUint32(56, 0, Endian.little);
+    writeBuf(52, encryptedSessionKey);
 
-    var flags = challenge.flags | negotiateUnicode | negotiateNtlm;
-    flags &= ~negotiateOem; // prefer Unicode in Type 3
+    var flags = challenge.flags | negotiateUnicode | negotiateNtlm | negotiateVersion;
+    flags &= ~negotiateOem;
+    if (doKeyExch) flags |= negotiateKeyExch;
     bd.setUint32(60, flags, Endian.little);
+
+    // Version (zeros) at 64..71; MIC placeholder zeros at 72..87.
+
+    if (wantMic) {
+      final type1 = negotiateMessage ?? _lastNegotiate;
+      if (type1 == null) {
+        throw StateError(
+          'NTLM MIC required (MsvAvTimestamp present) but negotiateMessage '
+          'was not provided — call negotiateMessage() first',
+        );
+      }
+      final mic = _hmacMd5(exportedKey, [
+        ...type1,
+        ...challenge.rawMessage,
+        ...out, // MIC field still zero
+      ]);
+      out.setRange(72, 88, mic);
+    }
 
     return out;
   }
@@ -223,6 +299,30 @@ class NtlmAuth {
   static Uint8List ntowfV2(Uint8List ntHash, String user, String domain) {
     final identity = _utf16Le('${user.toUpperCase()}$domain');
     return _hmacMd5(ntHash, identity);
+  }
+
+  /// RC4 encrypt/decrypt (same transform). Used for KEY_EXCH session key.
+  static Uint8List rc4(Uint8List key, Uint8List data) {
+    final s = List<int>.generate(256, (i) => i);
+    var j = 0;
+    for (var i = 0; i < 256; i++) {
+      j = (j + s[i] + key[i % key.length]) & 0xFF;
+      final t = s[i];
+      s[i] = s[j];
+      s[j] = t;
+    }
+    final out = Uint8List(data.length);
+    var i = 0;
+    j = 0;
+    for (var n = 0; n < data.length; n++) {
+      i = (i + 1) & 0xFF;
+      j = (j + s[i]) & 0xFF;
+      final t = s[i];
+      s[i] = s[j];
+      s[j] = t;
+      out[n] = data[n] ^ s[(s[i] + s[j]) & 0xFF];
+    }
+    return out;
   }
 
   static Uint8List _ntlmv2Blob(
@@ -238,6 +338,53 @@ class NtlmAuth {
     out.add([0x00, 0x00, 0x00, 0x00]); // unknown
     out.add(targetInfo);
     out.add([0x00, 0x00, 0x00, 0x00]); // unknown
+    return out.toBytes();
+  }
+
+  static bool _targetInfoHasTimestamp(Uint8List info) {
+    var i = 0;
+    while (i + 4 <= info.length) {
+      final id = info[i] | (info[i + 1] << 8);
+      final len = info[i + 2] | (info[i + 3] << 8);
+      i += 4;
+      if (id == _avEol) return false;
+      if (id == _avTimestamp) return true;
+      i += len;
+    }
+    return false;
+  }
+
+  /// Ensures MsvAvFlags includes MIC bit; inserts before EOL if missing.
+  static Uint8List _targetInfoWithMicFlag(Uint8List info) {
+    final out = BytesBuilder(copy: false);
+    var i = 0;
+    var sawFlags = false;
+    while (i + 4 <= info.length) {
+      final id = info[i] | (info[i + 1] << 8);
+      final len = info[i + 2] | (info[i + 3] << 8);
+      final valueStart = i + 4;
+      if (id == _avEol) break;
+      if (id == _avFlags && len >= 4 && valueStart + 4 <= info.length) {
+        sawFlags = true;
+        final flags = ByteData.sublistView(info, valueStart, valueStart + 4)
+                .getUint32(0, Endian.little) |
+            _avFlagMic;
+        out.add([_avFlags & 0xFF, (_avFlags >> 8) & 0xFF, 4, 0]);
+        final fb = Uint8List(4);
+        ByteData.sublistView(fb).setUint32(0, flags, Endian.little);
+        out.add(fb);
+      } else {
+        out.add(info.sublist(i, valueStart + len));
+      }
+      i = valueStart + len;
+    }
+    if (!sawFlags) {
+      out.add([_avFlags & 0xFF, (_avFlags >> 8) & 0xFF, 4, 0]);
+      final fb = Uint8List(4);
+      ByteData.sublistView(fb).setUint32(0, _avFlagMic, Endian.little);
+      out.add(fb);
+    }
+    out.add([0, 0, 0, 0]); // EOL
     return out.toBytes();
   }
 

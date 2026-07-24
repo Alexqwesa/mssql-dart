@@ -43,6 +43,8 @@
 * `MssqlPoolConfig.ntlm` / `ntlmDomain`: pool opens via `connectNtlm` (SSPI).
 * `MssqlPoolConfig.azureAd` / `azureAdAuth`: pool opens via `connectAzureAd`
   (FedAuth); Azure AD takes precedence over NTLM/SQL when set.
+* NTLM Type 3: Version+MIC header (go-mssqldb 88-byte layout); MIC when
+  TargetInfo has MsvAvTimestamp; KEY_EXCH EncryptedRandomSessionKey via RC4.
 
 ## 0.1.1
 
