@@ -38,10 +38,10 @@ import 'tds/token_stream.dart';
 /// await conn.close();
 /// ```
 class MssqlConnection {
-  final String _host;
+  String _host;
   int _port;
-  final String? _instanceName;
-  final bool _resolveNamedInstancePort;
+  String? _instanceName;
+  bool _resolveNamedInstancePort;
   final String _database;
   final String _appName;
   final int _packetSize;
@@ -54,6 +54,17 @@ class MssqlConnection {
   final Duration _timeout;
   /// Default per-query deadline; null means no timeout. Overridable per call.
   final Duration? _queryTimeout;
+
+  /// Always On ApplicationIntent=ReadOnly (LOGIN7 `fReadOnlyIntent`).
+  final bool _readOnlyIntent;
+
+  /// Database mirroring / partner host for initial-connect failover
+  /// (go-mssqldb `FailoverPartner`). Tried only when primary connect fails.
+  final String? _failoverPartner;
+  final int? _failoverPort;
+
+  /// Parallel dial all DNS A/AAAA records (AG multi-subnet listeners).
+  final bool _multiSubnetFailover;
 
   late TdsBuffer _buf;
   late Socket _socket;
@@ -87,6 +98,10 @@ class MssqlConnection {
     required bool trustServerCertificate,
     required Duration timeout,
     Duration? queryTimeout,
+    bool readOnlyIntent = false,
+    String? failoverPartner,
+    int? failoverPort,
+    bool multiSubnetFailover = false,
   })  : _host = host,
         _port = port,
         _instanceName = instanceName,
@@ -100,7 +115,11 @@ class MssqlConnection {
         _encrypt = encrypt,
         _trustServerCertificate = trustServerCertificate,
         _timeout = timeout,
-        _queryTimeout = queryTimeout;
+        _queryTimeout = queryTimeout,
+        _readOnlyIntent = readOnlyIntent,
+        _failoverPartner = failoverPartner,
+        _failoverPort = failoverPort,
+        _multiSubnetFailover = multiSubnetFailover;
 
   // ── Factory constructors ───────────────────────────────────────────────────
 
@@ -129,6 +148,14 @@ class MssqlConnection {
   ///
   /// [connectRetries] — extra attempts after a transient connect/login failure
   /// (see [MssqlTransient]). Default `0` (single attempt).
+  ///
+  /// Always On / HA:
+  /// - [readOnlyIntent] — `ApplicationIntent=ReadOnly` (LOGIN7 TypeFlags);
+  ///   [database] is required. Server may ENVCHANGE-route to a secondary.
+  /// - [failoverPartner] / [failoverPort] — tried only if primary connect fails
+  ///   (database mirroring partner / go-mssqldb `FailoverPartner`).
+  /// - [multiSubnetFailover] — parallel-dial all DNS A/AAAA records (AG
+  ///   multi-subnet listeners).
   static Future<MssqlConnection> connect({
     required String host,
     int port = defaultPort,
@@ -143,7 +170,16 @@ class MssqlConnection {
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
     int connectRetries = 0,
+    bool readOnlyIntent = false,
+    String? failoverPartner,
+    int? failoverPort,
+    bool multiSubnetFailover = false,
   }) {
+    _validateHaOptions(
+      database: database,
+      readOnlyIntent: readOnlyIntent,
+      failoverPartner: failoverPartner,
+    );
     final ep = ServerEndpoint.parse(host, port: port, instanceName: instanceName);
     return MssqlTransient.retry(
       () => MssqlConnection._(
@@ -159,6 +195,10 @@ class MssqlConnection {
         trustServerCertificate: trustServerCertificate,
         timeout: timeout,
         queryTimeout: queryTimeout,
+        readOnlyIntent: readOnlyIntent,
+        failoverPartner: failoverPartner,
+        failoverPort: failoverPort,
+        multiSubnetFailover: multiSubnetFailover,
       )._open(),
       retries: connectRetries,
     );
@@ -186,6 +226,10 @@ class MssqlConnection {
         trustServerCertificate: c.trustServerCertificate,
         timeout: c.connectionTimeout,
         queryTimeout: c.queryTimeout,
+        readOnlyIntent: c.readOnlyIntent,
+        failoverPartner: c.failoverPartner,
+        failoverPort: c.failoverPort,
+        multiSubnetFailover: c.multiSubnetFailover,
       );
     }
     return connect(
@@ -201,6 +245,10 @@ class MssqlConnection {
       trustServerCertificate: c.trustServerCertificate,
       timeout: c.connectionTimeout,
       queryTimeout: c.queryTimeout,
+      readOnlyIntent: c.readOnlyIntent,
+      failoverPartner: c.failoverPartner,
+      failoverPort: c.failoverPort,
+      multiSubnetFailover: c.multiSubnetFailover,
     );
   }
 
@@ -217,7 +265,16 @@ class MssqlConnection {
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
     int connectRetries = 0,
+    bool readOnlyIntent = false,
+    String? failoverPartner,
+    int? failoverPort,
+    bool multiSubnetFailover = false,
   }) {
+    _validateHaOptions(
+      database: database,
+      readOnlyIntent: readOnlyIntent,
+      failoverPartner: failoverPartner,
+    );
     final ep = ServerEndpoint.parse(host, port: port, instanceName: instanceName);
     return MssqlTransient.retry(
       () => MssqlConnection._(
@@ -233,6 +290,10 @@ class MssqlConnection {
         trustServerCertificate: trustServerCertificate,
         timeout: timeout,
         queryTimeout: queryTimeout,
+        readOnlyIntent: readOnlyIntent,
+        failoverPartner: failoverPartner,
+        failoverPort: failoverPort,
+        multiSubnetFailover: multiSubnetFailover,
       )._open(),
       retries: connectRetries,
     );
@@ -259,7 +320,16 @@ class MssqlConnection {
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
     int connectRetries = 0,
+    bool readOnlyIntent = false,
+    String? failoverPartner,
+    int? failoverPort,
+    bool multiSubnetFailover = false,
   }) {
+    _validateHaOptions(
+      database: database,
+      readOnlyIntent: readOnlyIntent,
+      failoverPartner: failoverPartner,
+    );
     final ep = ServerEndpoint.parse(host, port: port, instanceName: instanceName);
     return MssqlTransient.retry(
       () => MssqlConnection._(
@@ -280,6 +350,10 @@ class MssqlConnection {
         trustServerCertificate: trustServerCertificate,
         timeout: timeout,
         queryTimeout: queryTimeout,
+        readOnlyIntent: readOnlyIntent,
+        failoverPartner: failoverPartner,
+        failoverPort: failoverPort,
+        multiSubnetFailover: multiSubnetFailover,
       )._open(),
       retries: connectRetries,
     );
@@ -699,6 +773,59 @@ class MssqlConnection {
 
   Future<MssqlConnection> _open() async {
     try {
+      return await _openWithFailover();
+    } on SocketException catch (e) {
+      unawaited(_forceClose());
+      throw MssqlException('TCP connect failed: $e');
+    }
+  }
+
+  /// Primary connect (with Always On routing); on failure try [failoverPartner].
+  Future<MssqlConnection> _openWithFailover() async {
+    try {
+      return await _openWithRouting();
+    } catch (e) {
+      final partner = _failoverPartner;
+      if (partner == null || partner.isEmpty) rethrow;
+      await _forceClose();
+      final ep = ServerEndpoint.parse(
+        partner,
+        port: _failoverPort ?? defaultPort,
+      );
+      _host = ep.host;
+      _port = ep.port;
+      _instanceName = ep.instanceName;
+      _resolveNamedInstancePort = ep.shouldResolvePort;
+      return await _openWithRouting();
+    }
+  }
+
+  /// Completes handshake; if LOGIN ENVCHANGE routing is present, reconnect once.
+  Future<MssqlConnection> _openWithRouting() async {
+    var redirected = false;
+    while (true) {
+      final loginResult = await _openHandshakeTimed();
+      final routing = loginResult.routing;
+      if (routing == null) return this;
+      if (redirected) {
+        await _forceClose();
+        throw MssqlException(
+          'Server requested a second Always On routing redirect '
+          '(${routing.server}:${routing.port}); only one is allowed',
+        );
+      }
+      redirected = true;
+      await _forceClose();
+      final parts = routing.server.split(r'\');
+      _host = parts[0];
+      _instanceName = parts.length > 1 ? parts[1] : null;
+      _port = routing.port;
+      _resolveNamedInstancePort = false; // port is explicit from ENVCHANGE
+    }
+  }
+
+  Future<LoginResult> _openHandshakeTimed() async {
+    try {
       return await _openHandshake().timeout(
         _timeout,
         onTimeout: () {
@@ -715,14 +842,14 @@ class MssqlConnection {
     }
   }
 
-  Future<MssqlConnection> _openHandshake() async {
+  Future<LoginResult> _openHandshake() async {
     // 0. Named instance → SQL Browser (UDP 1434) when no explicit port
     if (_resolveNamedInstancePort && _instanceName != null) {
       _port = await SqlBrowser.resolveTcpPort(_host, _instanceName!);
     }
 
     // 1. TCP
-    _socket = await Socket.connect(_host, _port, timeout: _timeout);
+    _socket = await _dialTcp(_host, _port);
     _watchSocket(_socket);
     _buf = TdsBuffer(_socket);
 
@@ -766,8 +893,68 @@ class MssqlConnection {
     _initialDatabase =
         loginResult.database.isNotEmpty ? loginResult.database : _database;
     _buf.packetSize = loginResult.packetSize;
-    _connected = true;
-    return this;
+    // Routing: stay unconnected until caller reconnects to the alternate.
+    if (loginResult.routing == null) {
+      _connected = true;
+    }
+    return loginResult;
+  }
+
+  /// TCP dial — optionally races all DNS addresses ([multiSubnetFailover]).
+  Future<Socket> _dialTcp(String host, int port) async {
+    if (!_multiSubnetFailover) {
+      return Socket.connect(host, port, timeout: _timeout);
+    }
+    final addrs = await InternetAddress.lookup(host);
+    if (addrs.isEmpty) {
+      throw SocketException('Failed host lookup: "$host"');
+    }
+    final unique = <InternetAddress>[];
+    final seen = <String>{};
+    for (final a in addrs) {
+      if (seen.add(a.address)) unique.add(a);
+    }
+    if (unique.length == 1) {
+      return Socket.connect(unique.first, port, timeout: _timeout);
+    }
+
+    final completer = Completer<Socket>();
+    var failures = 0;
+    Object? lastError;
+    for (final addr in unique) {
+      unawaited(
+        Socket.connect(addr, port, timeout: _timeout).then((sock) {
+          if (completer.isCompleted) {
+            sock.destroy();
+          } else {
+            completer.complete(sock);
+          }
+        }, onError: (Object e) {
+          lastError = e;
+          failures++;
+          if (failures >= unique.length && !completer.isCompleted) {
+            completer.completeError(lastError!);
+          }
+        }),
+      );
+    }
+    return completer.future;
+  }
+
+  static void _validateHaOptions({
+    required String database,
+    required bool readOnlyIntent,
+    String? failoverPartner,
+  }) {
+    if (readOnlyIntent && database.isEmpty) {
+      throw ArgumentError(
+        'database must be specified when ApplicationIntent / readOnlyIntent '
+        'is ReadOnly (Always On read-only routing)',
+      );
+    }
+    if (failoverPartner != null && failoverPartner.isEmpty) {
+      throw ArgumentError('failoverPartner must not be empty when set');
+    }
   }
 
   TokenStream _tokenStream() => TokenStream(
@@ -989,6 +1176,11 @@ class MssqlConnection {
   }
 
   Future<void> _sendLogin7() async {
+    // go-mssqldb: ServerName includes instance when set (host\INSTANCE).
+    final serverName = _instanceName != null && _instanceName!.isNotEmpty
+        ? '$_host\\$_instanceName'
+        : _host;
+
     final ntlm = _ntlmAuth;
     if (ntlm != null) {
       await Login7.send(
@@ -998,10 +1190,11 @@ class MssqlConnection {
           username: '',
           password: '',
           appName: _appName,
-          serverName: _host,
+          serverName: serverName,
           database: _database,
           packetSize: _packetSize,
           sspi: ntlm.negotiateMessage(),
+          readOnlyIntent: _readOnlyIntent,
         ),
       );
       return;
@@ -1015,10 +1208,11 @@ class MssqlConnection {
         username: auth?.username ?? '',
         password: auth?.password ?? '',
         appName: _appName,
-        serverName: _host,
+        serverName: serverName,
         database: _database,
         packetSize: _packetSize,
         fedAuthToken: _azureAdAuth?.bearerToken,
+        readOnlyIntent: _readOnlyIntent,
       ),
     );
   }

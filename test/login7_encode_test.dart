@@ -76,8 +76,21 @@ void main() {
       expect(readUint32LE(body, 8), equals(defaultPacketSize));
       expect(body[24], equals(fUseDB | fSetLang)); // OptionFlags1
       expect(body[25], equals(fODBC)); // OptionFlags2 (SQL auth)
+      expect(body[26], equals(0)); // TypeFlags — no ReadOnlyIntent
       expect(body[27], equals(0)); // OptionFlags3 — no feature ext
       expect(readUint32LE(body, 32), equals(0x0409)); // ClientLCID en-US
+    });
+
+    test('ApplicationIntent ReadOnly sets TypeFlags fReadOnlyIntent', () async {
+      final body = await _captureLogin7Body(const LoginConfig(
+        host: host,
+        username: user,
+        password: pass,
+        serverName: server,
+        database: database,
+        readOnlyIntent: true,
+      ));
+      expect(body[26], equals(fReadOnlyIntent));
     });
 
     test('hostname / username / database land at declared offsets', () {

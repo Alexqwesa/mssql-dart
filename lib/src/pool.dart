@@ -68,6 +68,16 @@ class MssqlPoolConfig {
   /// [MssqlTransient].
   final int connectRetries;
 
+  /// Always On ApplicationIntent=ReadOnly.
+  final bool readOnlyIntent;
+
+  /// Database mirroring partner for initial-connect failover.
+  final String? failoverPartner;
+  final int? failoverPort;
+
+  /// Parallel-dial all DNS A/AAAA records (AG multi-subnet listeners).
+  final bool multiSubnetFailover;
+
   /// Optional INFO token handler applied to every pooled connection.
   final void Function(MssqlInfoMessage info)? onInfoMessage;
 
@@ -94,6 +104,10 @@ class MssqlPoolConfig {
     this.validateOnAcquire = true,
     this.resetOnRelease = true,
     this.connectRetries = 2,
+    this.readOnlyIntent = false,
+    this.failoverPartner,
+    this.failoverPort,
+    this.multiSubnetFailover = false,
     this.onInfoMessage,
   });
 
@@ -136,6 +150,10 @@ class MssqlPoolConfig {
         validateOnAcquire: validateOnAcquire,
         resetOnRelease: resetOnRelease,
         connectRetries: connectRetries,
+        readOnlyIntent: c.readOnlyIntent,
+        failoverPartner: c.failoverPartner,
+        failoverPort: c.failoverPort,
+        multiSubnetFailover: c.multiSubnetFailover,
         onInfoMessage: onInfoMessage,
       );
     }
@@ -159,6 +177,10 @@ class MssqlPoolConfig {
       validateOnAcquire: validateOnAcquire,
       resetOnRelease: resetOnRelease,
       connectRetries: connectRetries,
+      readOnlyIntent: c.readOnlyIntent,
+      failoverPartner: c.failoverPartner,
+      failoverPort: c.failoverPort,
+      multiSubnetFailover: c.multiSubnetFailover,
       onInfoMessage: onInfoMessage,
     );
   }
@@ -185,6 +207,10 @@ class MssqlPoolConfig {
     bool validateOnAcquire = true,
     bool resetOnRelease = true,
     int connectRetries = 2,
+    bool readOnlyIntent = false,
+    String? failoverPartner,
+    int? failoverPort,
+    bool multiSubnetFailover = false,
     void Function(MssqlInfoMessage info)? onInfoMessage,
   }) {
     return MssqlPoolConfig(
@@ -208,6 +234,10 @@ class MssqlPoolConfig {
       validateOnAcquire: validateOnAcquire,
       resetOnRelease: resetOnRelease,
       connectRetries: connectRetries,
+      readOnlyIntent: readOnlyIntent,
+      failoverPartner: failoverPartner,
+      failoverPort: failoverPort,
+      multiSubnetFailover: multiSubnetFailover,
       onInfoMessage: onInfoMessage,
     );
   }
@@ -235,6 +265,10 @@ class MssqlPoolConfig {
     bool validateOnAcquire = true,
     bool resetOnRelease = true,
     int connectRetries = 2,
+    bool readOnlyIntent = false,
+    String? failoverPartner,
+    int? failoverPort,
+    bool multiSubnetFailover = false,
     void Function(MssqlInfoMessage info)? onInfoMessage,
   }) {
     return MssqlPoolConfig(
@@ -259,6 +293,10 @@ class MssqlPoolConfig {
       validateOnAcquire: validateOnAcquire,
       resetOnRelease: resetOnRelease,
       connectRetries: connectRetries,
+      readOnlyIntent: readOnlyIntent,
+      failoverPartner: failoverPartner,
+      failoverPort: failoverPort,
+      multiSubnetFailover: multiSubnetFailover,
       onInfoMessage: onInfoMessage,
     );
   }
@@ -540,6 +578,10 @@ class MssqlPool {
         timeout: config.connectionTimeout,
         queryTimeout: config.queryTimeout,
         connectRetries: config.connectRetries,
+        readOnlyIntent: config.readOnlyIntent,
+        failoverPartner: config.failoverPartner,
+        failoverPort: config.failoverPort,
+        multiSubnetFailover: config.multiSubnetFailover,
       );
     } else {
       final domain = config.ntlmDomain;
@@ -560,6 +602,10 @@ class MssqlPool {
           timeout: config.connectionTimeout,
           queryTimeout: config.queryTimeout,
           connectRetries: config.connectRetries,
+          readOnlyIntent: config.readOnlyIntent,
+          failoverPartner: config.failoverPartner,
+          failoverPort: config.failoverPort,
+          multiSubnetFailover: config.multiSubnetFailover,
         );
       } else {
         conn = await MssqlConnection.connect(
@@ -576,6 +622,10 @@ class MssqlPool {
           timeout: config.connectionTimeout,
           queryTimeout: config.queryTimeout,
           connectRetries: config.connectRetries,
+          readOnlyIntent: config.readOnlyIntent,
+          failoverPartner: config.failoverPartner,
+          failoverPort: config.failoverPort,
+          multiSubnetFailover: config.multiSubnetFailover,
         );
       }
     }

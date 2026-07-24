@@ -188,6 +188,26 @@ await conn.query('SELECT @g, @m, @d, @dec', {
 });
 ```
 
+### Always On / HA
+
+```dart
+// Read-only routing via AG listener (database required)
+final ro = await MssqlConnection.connect(
+  host: 'ag-listener',
+  database: 'app',
+  user: 'sa',
+  password: '…',
+  readOnlyIntent: true,       // ApplicationIntent=ReadOnly
+  multiSubnetFailover: true,  // parallel-dial multi-subnet listener
+);
+
+// Mirroring partner if primary is down at connect time
+final conn = await MssqlConnection.connectFromString(
+  'Server=sql1;Failover Partner=sql2;Database=app;'
+  'User Id=sa;Password=…;Encrypt=true;TrustServerCertificate=true;',
+);
+```
+
 ---
 
 ## API reference

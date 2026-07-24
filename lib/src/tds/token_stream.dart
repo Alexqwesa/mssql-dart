@@ -25,16 +25,30 @@ class ColumnMeta {
   bool get nullable => (flags & 0x01) != 0;
 }
 
+/// Always On / Azure SQL routing target from ENVCHANGE type 20.
+class MssqlRoutingInfo {
+  /// Alternate server (may be `host` or `host\\instance`).
+  final String server;
+  final int port;
+
+  const MssqlRoutingInfo({required this.server, required this.port});
+}
+
 /// Result of processing the server token stream after LOGIN7.
 class LoginResult {
   final String database;
   final String serverVersion;
   final int packetSize;
 
+  /// Present when the server sent ENVCHANGE routing (type 20) — caller must
+  /// close and reconnect to [routing] (go-mssqldb / Tedious / ms-tds).
+  final MssqlRoutingInfo? routing;
+
   const LoginResult({
     required this.database,
     required this.serverVersion,
     required this.packetSize,
+    this.routing,
   });
 }
 
@@ -95,6 +109,7 @@ class TokenStream {
     String database = '';
     String serverVersion = '';
     int packetSize = defaultPacketSize;
+    MssqlRoutingInfo? routing;
 
     await _buf.beginRead();
 
@@ -103,12 +118,15 @@ class TokenStream {
       switch (tok) {
         case tokenEnvChange:
           final env = await _readEnvChange();
-          if (env.$1 == envDatabase) {
-            database = env.$2;
-            onDatabaseChanged?.call(env.$2);
+          if (env.type == envDatabase) {
+            database = env.newValue;
+            onDatabaseChanged?.call(env.newValue);
           }
-          if (env.$1 == envPacketSize) {
-            packetSize = int.tryParse(env.$2) ?? defaultPacketSize;
+          if (env.type == envPacketSize) {
+            packetSize = int.tryParse(env.newValue) ?? defaultPacketSize;
+          }
+          if (env.type == envRouting && env.routing != null) {
+            routing = env.routing;
           }
         case tokenLoginAck:
           serverVersion = await _readLoginAck();
@@ -156,6 +174,7 @@ class TokenStream {
               database: database,
               serverVersion: serverVersion,
               packetSize: packetSize,
+              routing: routing,
             );
           }
         default:
@@ -418,8 +437,8 @@ class TokenStream {
   /// Applies ENVCHANGE side effects (txn descriptor, database callback).
   Future<void> _applyEnvChange() async {
     final env = await _readEnvChange();
-    if (env.$1 == envDatabase) {
-      onDatabaseChanged?.call(env.$2);
+    if (env.type == envDatabase) {
+      onDatabaseChanged?.call(env.newValue);
     }
   }
 
@@ -547,14 +566,42 @@ class TokenStream {
     return out;
   }
 
-  Future<(int, String, String)> _readEnvChange() async {
+  Future<_EnvChange> _readEnvChange() async {
     final length = await _buf.readUint16LE();
     final data = await _buf.readBytes(length);
     final type = data[0];
     int i = 1;
 
-    if (type == envSqlCollation || type == envRouting) {
-      return (type, '', '');
+    if (type == envSqlCollation) {
+      return _EnvChange(type: type);
+    }
+
+    if (type == envRouting) {
+      // NEWVALUE = RoutingData: USHORT len + Protocol BYTE + Port USHORT +
+      // AlternateServer US_VARCHAR; OLDVALUE = 0x00 0x00
+      // (go-mssqldb processEnvChg / ms-tds §2.2.7.9 type 20).
+      if (data.length < 6) return _EnvChange(type: type);
+      i += 2; // RoutingDataValueLength
+      final protocol = data[i++];
+      if (protocol != 0) return _EnvChange(type: type);
+      final port = data[i] | (data[i + 1] << 8);
+      i += 2;
+      if (i + 2 > data.length) return _EnvChange(type: type);
+      final nameChars = data[i] | (data[i + 1] << 8);
+      i += 2;
+      final nameEnd = i + nameChars * 2;
+      if (nameEnd > data.length) return _EnvChange(type: type);
+      final chars = <int>[];
+      for (var j = i; j + 1 < nameEnd; j += 2) {
+        chars.add(data[j] | (data[j + 1] << 8));
+      }
+      return _EnvChange(
+        type: type,
+        routing: MssqlRoutingInfo(
+          server: String.fromCharCodes(chars),
+          port: port,
+        ),
+      );
     }
 
     if (type == envBeginTran) {
@@ -569,11 +616,11 @@ class TokenStream {
             (data[8] << 48) |
             (data[9] << 56);
       }
-      return (type, '', '');
+      return _EnvChange(type: type);
     }
     if (type == envCommitTran || type == envRollbackTran) {
       _buf.transactionDescriptor = 0;
-      return (type, '', '');
+      return _EnvChange(type: type);
     }
 
     String readBVarChar() {
@@ -588,7 +635,7 @@ class TokenStream {
 
     final newVal = readBVarChar();
     final oldVal = readBVarChar();
-    return (type, newVal, oldVal);
+    return _EnvChange(type: type, newValue: newVal, oldValue: oldVal);
   }
 
   Future<MssqlException> _readError() async {
@@ -755,4 +802,18 @@ class TokenStream {
     }
     return row;
   }
+}
+
+class _EnvChange {
+  final int type;
+  final String newValue;
+  final String oldValue;
+  final MssqlRoutingInfo? routing;
+
+  const _EnvChange({
+    required this.type,
+    this.newValue = '',
+    this.oldValue = '',
+    this.routing,
+  });
 }

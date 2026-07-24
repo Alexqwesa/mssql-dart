@@ -29,6 +29,16 @@ class MssqlConnectionString {
   final String? ntlmDomain;
   final String? workstation;
 
+  /// Always On `ApplicationIntent=ReadOnly`.
+  final bool readOnlyIntent;
+
+  /// Database mirroring partner (tried when primary connect fails).
+  final String? failoverPartner;
+  final int? failoverPort;
+
+  /// Parallel-dial all DNS A/AAAA records (AG multi-subnet listeners).
+  final bool multiSubnetFailover;
+
   const MssqlConnectionString({
     required this.host,
     this.port = defaultPort,
@@ -44,6 +54,10 @@ class MssqlConnectionString {
     this.queryTimeout,
     this.ntlmDomain,
     this.workstation,
+    this.readOnlyIntent = false,
+    this.failoverPartner,
+    this.failoverPort,
+    this.multiSubnetFailover = false,
   });
 
   bool get useNtlm => ntlmDomain != null;
@@ -133,13 +147,29 @@ class MssqlConnectionString {
         ? _parseBool(map['trustservercertificate'])
         : false;
 
+    final readOnly = _parseApplicationIntent(map['applicationintent']);
+    final database = map['database'] ?? '';
+    if (readOnly && database.isEmpty) {
+      throw FormatException(
+        'Database must be specified when ApplicationIntent is ReadOnly',
+      );
+    }
+
+    final failoverPort = map['failoverport'] != null
+        ? int.tryParse(map['failoverport']!)
+        : null;
+    if (map['failoverport'] != null &&
+        (failoverPort == null || failoverPort <= 0 || failoverPort > 65535)) {
+      throw FormatException('Invalid Failover Port "${map['failoverport']}"');
+    }
+
     return MssqlConnectionString(
       host: ep.host,
       port: ep.port,
       instanceName: instance,
       user: user,
       password: password,
-      database: map['database'] ?? '',
+      database: database,
       appName: map['appname'] ?? 'mssql-dart',
       packetSize: packetSize ?? defaultPacketSize,
       encrypt: encrypt,
@@ -151,6 +181,10 @@ class MssqlConnectionString {
           querySecs != null ? Duration(seconds: querySecs) : null,
       ntlmDomain: ntlmDomain,
       workstation: workstation,
+      readOnlyIntent: readOnly,
+      failoverPartner: map['failoverpartner'],
+      failoverPort: failoverPort,
+      multiSubnetFailover: _parseBool(map['multisubnetfailover']),
     );
   }
 
@@ -227,13 +261,24 @@ class MssqlConnectionString {
         ? _parseBool(q['trustservercertificate'])
         : false;
 
+    final readOnly = _parseApplicationIntent(q['applicationintent']);
+    final database = q['database'] ?? '';
+    if (readOnly && database.isEmpty) {
+      throw FormatException(
+        'Database must be specified when ApplicationIntent is ReadOnly',
+      );
+    }
+
+    final failoverPort =
+        q['failoverport'] != null ? int.tryParse(q['failoverport']!) : null;
+
     return MssqlConnectionString(
       host: uri.host,
       port: port,
       instanceName: instance ?? q['instancename'],
       user: user,
       password: password,
-      database: q['database'] ?? '',
+      database: database,
       appName: q['appname'] ?? 'mssql-dart',
       packetSize: packetSize ?? defaultPacketSize,
       encrypt: encrypt,
@@ -245,6 +290,10 @@ class MssqlConnectionString {
           querySecs != null ? Duration(seconds: querySecs) : null,
       ntlmDomain: ntlmDomain,
       workstation: q['workstation'],
+      readOnlyIntent: readOnly,
+      failoverPartner: q['failoverpartner'],
+      failoverPort: failoverPort,
+      multiSubnetFailover: _parseBool(q['multisubnetfailover']),
     );
   }
 
@@ -344,6 +393,14 @@ class MssqlConnectionString {
         return 'integratedsecurity';
       case 'trustedconnection':
         return 'trustedconnection';
+      case 'applicationintent':
+        return 'applicationintent';
+      case 'failoverpartner':
+        return 'failoverpartner';
+      case 'failoverport':
+        return 'failoverport';
+      case 'multisubnetfailover':
+        return 'multisubnetfailover';
       default:
         return null; // ignore unknown
     }
@@ -426,6 +483,17 @@ class MssqlConnectionString {
       default:
         throw FormatException('Invalid Encrypt value "$v"');
     }
+  }
+
+  /// `ApplicationIntent=ReadOnly` (case-insensitive); other values → false.
+  static bool _parseApplicationIntent(String? v) {
+    if (v == null || v.isEmpty) return false;
+    final t = v.trim().toLowerCase();
+    if (t == 'readonly') return true;
+    if (t == 'readwrite') return false;
+    throw FormatException(
+      'Invalid ApplicationIntent "$v" (expected ReadOnly or ReadWrite)',
+    );
   }
 
   static int? _parseSeconds(String? v) {

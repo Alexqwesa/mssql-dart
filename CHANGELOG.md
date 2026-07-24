@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* LAN Always On / HA: `ApplicationIntent=ReadOnly` (`readOnlyIntent` → LOGIN7
+  `fReadOnlyIntent`); ENVCHANGE type 20 routing reconnect (one hop);
+  `FailoverPartner` / `FailoverPort` on primary connect failure;
+  `MultiSubnetFailover` parallel DNS dial; connection-string + pool knobs.
 * LAN typed binders: `MssqlGuid`, `MssqlMoney`, `MssqlSmallMoney`,
   `MssqlDateTimeOffset`, `MssqlDecimal` for uniqueidentifier / money /
   datetimeoffset / decimal|numeric params.

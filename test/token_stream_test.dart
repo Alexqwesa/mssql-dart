@@ -318,16 +318,21 @@ Uint8List _rowLegacyLob(List<int> data, {bool isNull = false}) {
 }
 
 /// ENVCHANGE type 20 (routing) — binary payload, not B_VARCHAR strings.
-Uint8List _envChangeRouting() {
-  // go-mssqldb / ms-tds §2.2.7.9: Protocol + Port + Hostname; parser skips body.
+Uint8List _envChangeRouting({
+  String server = 'x',
+  int port = 1433,
+}) {
+  // go-mssqldb / ms-tds §2.2.7.9: Protocol + Port + Hostname US_VARCHAR.
+  final name = ucs2(server);
+  final routingValueLen = 1 + 2 + 2 + name.length; // proto+port+len+chars
   final payload = BytesBuilder(copy: false);
   payload.addByte(envRouting);
-  writeUint16LE(payload, 6); // newValue length
+  writeUint16LE(payload, routingValueLen);
   payload.addByte(0); // Protocol TCP
-  writeUint16LE(payload, 1433);
-  writeUint16LE(payload, 1); // hostname char count
-  payload.add(ucs2('x'));
-  writeUint16LE(payload, 0); // oldValue empty
+  writeUint16LE(payload, port);
+  writeUint16LE(payload, server.length);
+  payload.add(name);
+  writeUint16LE(payload, 0); // OLDVALUE = 0x00 0x00
   final data = payload.toBytes();
   final out = BytesBuilder(copy: false);
   out.addByte(tokenEnvChange);
@@ -907,8 +912,8 @@ void main() {
       expect(result.rows.single, equals([null]));
     });
 
-    // ms-tds ENVCHANGE type 20; go-mssqldb processEnvChg routing skip
-    test('ENVCHANGE routing is skipped without desync', () async {
+    // ms-tds ENVCHANGE type 20; go-mssqldb processEnvChg routing
+    test('ENVCHANGE routing is skipped without desync in query stream', () async {
       final body = [
         ..._envChangeRouting(),
         ..._colMetaInt('n'),
@@ -920,6 +925,21 @@ void main() {
 
       final result = await TokenStream(fed.buf).processQueryResponse();
       expect(result.rows.single, equals([4]));
+    });
+
+    test('login ENVCHANGE routing populates LoginResult.routing', () async {
+      final body = [
+        ..._loginAckToken('Microsoft SQL Server'),
+        ..._envChangeRouting(server: r'secondary\INST', port: 15001),
+        ..._doneToken(),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final login = await TokenStream(fed.buf).processLoginResponse();
+      expect(login.routing, isNotNull);
+      expect(login.routing!.server, equals(r'secondary\INST'));
+      expect(login.routing!.port, equals(15001));
     });
 
     // ms-tds ENVCHANGE type 7 binary collation (not B_VARCHAR)

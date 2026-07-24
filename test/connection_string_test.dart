@@ -93,6 +93,37 @@ void main() {
       expect(c.encrypt, isFalse);
     });
 
+    test('ApplicationIntent=ReadOnly requires Database', () {
+      expect(
+        () => MssqlConnectionString.parse(
+          'Server=ag;User Id=sa;Password=x;ApplicationIntent=ReadOnly',
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('ApplicationIntent + FailoverPartner + MultiSubnetFailover', () {
+      final c = MssqlConnectionString.parse(
+        'Server=ag-listener;Database=app;User Id=sa;Password=x;'
+        'ApplicationIntent=ReadOnly;Failover Partner=sql-mirror;'
+        'Failover Port=1434;MultiSubnetFailover=true;Encrypt=false',
+      );
+      expect(c.readOnlyIntent, isTrue);
+      expect(c.failoverPartner, 'sql-mirror');
+      expect(c.failoverPort, 1434);
+      expect(c.multiSubnetFailover, isTrue);
+      expect(c.database, 'app');
+    });
+
+    test('sqlserver URL ApplicationIntent', () {
+      final c = MssqlConnectionString.parse(
+        'sqlserver://sa:x@ag:1433?database=app&applicationintent=ReadOnly'
+        '&multisubnetfailover=yes',
+      );
+      expect(c.readOnlyIntent, isTrue);
+      expect(c.multiSubnetFailover, isTrue);
+    });
+
     test('np: rejected', () {
       expect(
         () => MssqlConnectionString.parse(
