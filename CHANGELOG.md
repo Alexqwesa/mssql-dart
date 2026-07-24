@@ -49,6 +49,8 @@
   after SecureSocket handshake (SQL Extended Protection).
 * Mock FedAuth login handshake: PreLogin(fedAuth) → Login7 FeatureExt →
   FEATUREEXTACK + LOGINACK (`test/mock_fedauth_login_test.dart`).
+* Parse `tokenFedAuthInfo` (STS URL / SPN); optional `onFedAuthInfo` sends
+  `packFedAuthToken` (ADAL-style); skip safely when handler absent.
 
 ## 0.1.1
 

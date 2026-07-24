@@ -2,6 +2,16 @@ import 'dart:convert';
 
 import 'package:http/http.dart' as http;
 
+/// STS URL + SPN from a TDS [tokenFedAuthInfo] (ADAL / interactive FedAuth).
+///
+/// Parsed per ms-tds §2.2.7.12 / go-mssqldb `parseFedAuthInfo`.
+class FedAuthInfo {
+  final String stsUrl;
+  final String serverSpn;
+
+  const FedAuthInfo({this.stsUrl = '', this.serverSpn = ''});
+}
+
 /// Azure AD authentication for Azure SQL Database.
 ///
 /// Acquires a bearer token from the Azure AD token endpoint and passes it

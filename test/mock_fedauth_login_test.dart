@@ -105,6 +105,30 @@ bool _containsBytes(List<int> haystack, List<int> needle) {
   return false;
 }
 
+/// FEDAUTHINFO token (ms-tds §2.2.7.12 / go-mssqldb parseFedAuthInfo).
+Uint8List _fedAuthInfoToken({
+  required String stsUrl,
+  required String serverSpn,
+}) {
+  final sts = ucs2(stsUrl);
+  final spn = ucs2(serverSpn);
+  const headerLen = 4 + 2 * 9; // count + two (id+len+off)
+  final size = headerLen + sts.length + spn.length;
+  final out = BytesBuilder(copy: false);
+  out.addByte(tokenFedAuthInfo);
+  writeUint32LE(out, size);
+  writeUint32LE(out, 2); // option count
+  out.addByte(fedAuthInfoStsUrl);
+  writeUint32LE(out, sts.length);
+  writeUint32LE(out, headerLen);
+  out.addByte(fedAuthInfoSpn);
+  writeUint32LE(out, spn.length);
+  writeUint32LE(out, headerLen + sts.length);
+  out.add(sts);
+  out.add(spn);
+  return Uint8List.fromList(out.toBytes());
+}
+
 void main() {
   test('PreLogin → Login7(FedAuth) → FEATUREEXTACK → LOGINACK', () async {
     final pair = await TdsSocketPair.open();
@@ -236,6 +260,86 @@ void main() {
     );
     final result = await TokenStream(buf).processLoginResponse();
     await serverDone;
+    expect(result.database, equals('master'));
+  });
+
+  test('FEDAUTHINFO → packFedAuthToken → LOGINACK (ADAL-style)', () async {
+    final pair = await TdsSocketPair.open();
+    addTearDown(pair.close);
+    final serverReader = ChunkedStreamReader(pair.server);
+
+    const sts = 'https://login.windows.net/common';
+    const spn = 'MSSQLSvc/myserver.database.windows.net:1433';
+    const accessToken = 'adal-access-token';
+
+    final serverDone = () async {
+      // Client may send PreLogin first in full flows; here we only drive login
+      // response tokens after Login7 was already "sent" conceptually — feed
+      // FEDAUTHINFO then wait for FEDAUTHTOKEN, then LOGINACK.
+      pair.server.add(tdsPacket(
+        type: packReply,
+        body: _fedAuthInfoToken(stsUrl: sts, serverSpn: spn),
+      ));
+      await pair.server.flush();
+
+      final fed = await _readPacketBody(serverReader, packFedAuthToken);
+      expect(fed.length, greaterThan(8));
+      final tokenLen = readUint32LE(fed, 4);
+      expect(tokenLen, equals(accessToken.length * 2));
+      expect(
+        fed.sublist(8, 8 + tokenLen),
+        equals(ucs2(accessToken)),
+      );
+
+      pair.server.add(tdsPacket(
+        type: packReply,
+        body: Uint8List.fromList([
+          ..._featureExtAck(),
+          ..._loginAckDone(
+            progName: 'Microsoft SQL Azure',
+            database: 'appdb',
+          ),
+        ]),
+      ));
+      await pair.server.flush();
+    }();
+
+    final buf = TdsBuffer(pair.client);
+    FedAuthInfo? seen;
+    final result = await TokenStream(buf).processLoginResponse(
+      onFedAuthInfo: (info) async {
+        seen = info;
+        return accessToken;
+      },
+    );
+    await serverDone;
+
+    expect(seen!.stsUrl, equals(sts));
+    expect(seen!.serverSpn, equals(spn));
+    expect(result.database, equals('appdb'));
+  });
+
+  test('FEDAUTHINFO without handler is skipped', () async {
+    final pair = await TdsSocketPair.open();
+    addTearDown(pair.close);
+
+    pair.server.add(tdsPacket(
+      type: packReply,
+      body: Uint8List.fromList([
+        ..._fedAuthInfoToken(
+          stsUrl: 'https://login.windows.net/common',
+          serverSpn: 'MSSQLSvc/x',
+        ),
+        ..._loginAckDone(
+          progName: 'Microsoft SQL Azure',
+          database: 'master',
+        ),
+      ]),
+    ));
+    await pair.server.flush();
+
+    final buf = TdsBuffer(pair.client);
+    final result = await TokenStream(buf).processLoginResponse();
     expect(result.database, equals('master'));
   });
 }

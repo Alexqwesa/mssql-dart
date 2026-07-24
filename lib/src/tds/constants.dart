@@ -55,6 +55,10 @@ const int featExtTerminator = 0xFF;
 const int fedAuthLibSecurityToken = 0x01; // ADAL / Azure AD with token
 const int fedAuthLibADAL = 0x02;
 
+// FEDAUTHINFO option IDs (ms-tds §2.2.7.12)
+const int fedAuthInfoStsUrl = 0x01;
+const int fedAuthInfoSpn = 0x02;
+
 // Response token IDs (ms-tds §2.2.7)
 const int tokenReturnStatus = 0x79;
 const int tokenColMetadata = 0x81;

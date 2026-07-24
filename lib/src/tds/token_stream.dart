@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:typed_data';
 
+import '../auth/azure_ad_auth.dart';
 import '../exception.dart';
 import 'buf.dart';
 import 'constants.dart';
@@ -58,10 +59,15 @@ class TokenStream {
   /// Process the server response after LOGIN7. Returns basic session metadata.
   ///
   /// [onSspi] is invoked when the server sends a [tokenSSPI] challenge (NTLM
-  /// Type 2). It must return the Type 3 blob to send as [packSSPIMessage], or
-  /// an empty list if nothing further should be sent.
+  /// Type 2). The returned bytes are sent as [packSSPIMessage] (Type 3).
+  ///
+  /// [onFedAuthInfo] is invoked when the server sends [tokenFedAuthInfo]
+  /// (ADAL). The returned bearer token is sent as [packFedAuthToken]. If null,
+  /// the FEDAUTHINFO payload is skipped (SecurityToken / pre-acquired token
+  /// path does not need it).
   Future<LoginResult> processLoginResponse({
     Future<List<int>> Function(Uint8List challenge)? onSspi,
+    Future<String> Function(FedAuthInfo info)? onFedAuthInfo,
   }) async {
     String database = '';
     String serverVersion = '';
@@ -105,6 +111,14 @@ class TokenStream {
           }
           // SSPI reply continues in the next server message.
           await _buf.beginRead();
+        case tokenFedAuthInfo:
+          // ULONG size + options (go-mssqldb parseFedAuthInfo / ms-tds §2.2.7.12)
+          final info = await _readFedAuthInfo();
+          if (onFedAuthInfo != null) {
+            final token = await onFedAuthInfo(info);
+            await _sendFedAuthToken(token);
+            await _buf.beginRead();
+          }
         case tokenDone:
         case tokenDoneProc:
         case tokenDoneInProc:
@@ -408,6 +422,86 @@ class TokenStream {
       final len = await _buf.readUint32LE();
       await _buf.readBytes(len);
     }
+  }
+
+  /// Parses [tokenFedAuthInfo] body (size already unread — reads ULONG size).
+  Future<FedAuthInfo> _readFedAuthInfo() async {
+    final size = await _buf.readUint32LE();
+    if (size < 4) {
+      if (size > 0) await _buf.readBytes(size);
+      return const FedAuthInfo();
+    }
+    final count = await _buf.readUint32LE();
+    var offset = 4; // bytes consumed within [size] after reading count
+    final opts = <({int id, int dataLength, int dataOffset})>[];
+    for (var i = 0; i < count; i++) {
+      final id = await _buf.readUint8();
+      final dataLength = await _buf.readUint32LE();
+      final dataOffset = await _buf.readUint32LE();
+      offset += 1 + 4 + 4;
+      opts.add((id: id, dataLength: dataLength, dataOffset: dataOffset));
+    }
+    final remaining = size - offset;
+    final data = remaining > 0
+        ? await _buf.readBytes(remaining)
+        : <int>[];
+
+    var stsUrl = '';
+    var spn = '';
+    for (final opt in opts) {
+      if (opt.dataOffset < offset) {
+        throw FormatException(
+          'FEDAUTHINFO dataOffset ${opt.dataOffset} < header end $offset',
+        );
+      }
+      final start = opt.dataOffset - offset;
+      final end = start + opt.dataLength;
+      if (end > data.length) {
+        throw FormatException('FEDAUTHINFO option exceeds token size');
+      }
+      final raw = data.sublist(start, end);
+      final text = _ucs2String(raw);
+      switch (opt.id) {
+        case fedAuthInfoStsUrl:
+          stsUrl = text;
+        case fedAuthInfoSpn:
+          spn = text;
+        default:
+          // Unknown option — ignore (forward compatible).
+          break;
+      }
+    }
+    return FedAuthInfo(stsUrl: stsUrl, serverSpn: spn);
+  }
+
+  Future<void> _sendFedAuthToken(String token, {List<int> nonce = const []}) async {
+    // go-mssqldb sendFedAuthToken / ms-tds packFedAuthToken (type 8)
+    final tokenBytes = _ucs2Bytes(token);
+    final dataLen = 4 + tokenBytes.length + nonce.length;
+    _buf.beginPacket(packFedAuthToken);
+    _buf.writeUint32LE(dataLen);
+    _buf.writeUint32LE(tokenBytes.length);
+    _buf.writeBytes(tokenBytes);
+    if (nonce.isNotEmpty) _buf.writeBytes(nonce);
+    await _buf.finishPacket(packFedAuthToken);
+  }
+
+  static String _ucs2String(List<int> bytes) {
+    final codes = <int>[];
+    for (var i = 0; i + 1 < bytes.length; i += 2) {
+      codes.add(bytes[i] | (bytes[i + 1] << 8));
+    }
+    return String.fromCharCodes(codes);
+  }
+
+  static Uint8List _ucs2Bytes(String s) {
+    final out = Uint8List(s.length * 2);
+    for (var i = 0; i < s.length; i++) {
+      final c = s.codeUnitAt(i);
+      out[i * 2] = c & 0xFF;
+      out[i * 2 + 1] = (c >> 8) & 0xFF;
+    }
+    return out;
   }
 
   Future<(int, String, String)> _readEnvChange() async {
