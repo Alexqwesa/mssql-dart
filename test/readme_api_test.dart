@@ -445,6 +445,8 @@ void main() {
         database: 'master',
         encrypt: false,
         trustServerCertificate: true,
+        // Temp tables must survive release (RESETCONNECTION would drop them).
+        resetOnRelease: false,
       ));
       await pool.execute(
           'IF OBJECT_ID(\'tempdb..##readme_tx\') IS NOT NULL DROP TABLE ##readme_tx');

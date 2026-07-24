@@ -109,6 +109,8 @@ void main() {
         trustServerCertificate: true,
         min: 1,
         max: 3,
+        // Temp tables must survive release (RESETCONNECTION would drop them).
+        resetOnRelease: false,
       ));
     });
     tearDownAll(() async => pool.close());

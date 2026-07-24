@@ -28,6 +28,107 @@ await conn.close();
 
 ---
 
+## LAN / on-prem cookbook
+
+Defaults favor local SQL Server / Docker Edge as well as production. Common LAN patterns:
+
+### Connection strings
+
+```dart
+final conn = await MssqlConnection.connectFromString(
+  'Server=10.0.0.5,1433;Database=app;User Id=sa;Password=…;'
+  'Encrypt=false;TrustServerCertificate=true;App Name=my-pos;',
+);
+// Named instance (SQL Browser UDP 1434 when port omitted):
+// Server=sql01\SQLEXPRESS;User Id=sa;Password=…;Encrypt=false;
+// URL form: sqlserver://sa:…@10.0.0.5:1433?database=app&encrypt=false
+```
+
+`User Id=DOMAIN\user` opens NTLM. Pool: `MssqlPoolConfig.fromConnectionString(…, max: 10)`.
+
+### Timeouts & identity
+
+```dart
+final conn = await MssqlConnection.connect(
+  host: '10.0.0.5',
+  user: 'sa',
+  password: '…',
+  database: 'app',
+  encrypt: false, // or true + trustServerCertificate for LAN TLS
+  appName: 'my-pos',          // sys.dm_exec_sessions.program_name
+  timeout: Duration(seconds: 10),       // full login handshake
+  queryTimeout: Duration(seconds: 30),  // Attention + drain on expiry
+);
+await conn.query('SELECT 1', const {}, Duration(seconds: 2)); // per-call
+```
+
+### Pool health & session reset
+
+```dart
+final pool = MssqlPool(MssqlPoolConfig(
+  host: '10.0.0.5',
+  user: 'sa',
+  password: '…',
+  database: 'app',
+  encrypt: false,
+  validateOnAcquire: true, // default — SELECT 1; discard dead sockets
+  resetOnRelease: true,    // default — TDS RESETCONNECTION (clears #temp / USE)
+));
+final conn = await pool.acquire();
+try {
+  await conn.execute('…');
+} finally {
+  await pool.release(conn); // async — always await
+}
+```
+
+`resetOnRelease` clears session temp tables and restores the login database. Disable only if you intentionally share `#temp` across borrowers.
+
+### Named instances
+
+```dart
+await MssqlConnection.connect(
+  host: r'sql01\SQLEXPRESS', // or host: 'sql01', instanceName: 'SQLEXPRESS'
+  user: 'sa',
+  password: '…',
+  encrypt: false,
+);
+// Explicit port skips Browser: r'sql01\SQLEXPRESS,15001'
+```
+
+### Bulk insert & TVP
+
+```dart
+await conn.bulkInsert('dbo.Items', ['Id', 'Name'], [
+  [1, 'a'],
+  [2, 'b'],
+]);
+
+// Requires: CREATE TYPE dbo.IdList AS TABLE (Id BIGINT);
+await conn.query('SELECT Id FROM @ids', {
+  'ids': MssqlTvp(
+    typeName: 'dbo.IdList',
+    columns: [BulkColumn('Id', BulkColumnType.bigInt)],
+    rows: [[1], [2], [3]],
+  ),
+});
+```
+
+### NTLM (domain SQL)
+
+```dart
+await MssqlConnection.connectNtlm(
+  host: 'sql01',
+  domain: 'CONTOSO',
+  user: 'bob',
+  password: '…',
+  encrypt: true,
+  trustServerCertificate: true,
+);
+```
+
+---
+
 ## API reference
 
 ### MssqlConnection
@@ -44,7 +145,9 @@ final conn = await MssqlConnection.connect(
   database: 'MyDb',       // optional, default ''
   encrypt: true,          // optional, default true; set false for local dev containers
   trustServerCertificate: false, // optional, accept self-signed certs
-  timeout: Duration(seconds: 30), // optional, connection timeout
+  timeout: Duration(seconds: 15), // optional, full login handshake (default 15s)
+  queryTimeout: Duration(seconds: 30), // optional, default query deadline
+  appName: 'mssql-dart',  // optional, program_name in DMVs
 );
 
 // Azure AD authentication
@@ -141,9 +244,14 @@ try {
 #### Connection state
 
 ```dart
-conn.isOpen;    // bool — false after close() or a fatal error
-conn.database;  // String — current database name
+conn.isOpen;           // bool — false after close() or a fatal error
+conn.database;         // String — current database (tracks USE / ENVCHANGE)
+conn.initialDatabase;  // String — database from login
+conn.appName;          // String — login program_name
 
+await conn.resetSession();   // TDS RESETCONNECTION + SELECT 1
+await conn.resetDatabase();  // USE back to initialDatabase
+await conn.cancel();         // Attention cancel in-flight query
 await conn.close();
 ```
 
@@ -170,7 +278,9 @@ final pool = MssqlPool(MssqlPoolConfig(
   max: 10,                             // maximum total connections (default 10)
   idleTimeout: Duration(seconds: 30),  // close idle connections after (default 30s)
   acquireTimeout: Duration(seconds: 15), // throw if no connection within (default 15s)
-  connectionTimeout: Duration(seconds: 30), // TCP connect timeout (default 30s)
+  connectionTimeout: Duration(seconds: 15), // full login handshake (default 15s)
+  validateOnAcquire: true,               // probe idle sockets (default true)
+  resetOnRelease: true,                  // TDS RESETCONNECTION (default true)
 ));
 
 // Pre-warm min connections (optional)
@@ -248,6 +358,7 @@ Named parameters use `@name` placeholders. Supported Dart → SQL type mappings:
 | `String`     | NVARCHAR(MAX) or NVARCHAR   |
 | `List<int>`  | VARBINARY(MAX)              |
 | `DateTime`   | DATETIME2(7)                |
+| `MssqlTvp`   | user-defined table type (`… READONLY`) |
 | `null`       | NULL (any type)             |
 
 ---

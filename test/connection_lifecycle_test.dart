@@ -157,6 +157,8 @@ void main() {
         trustServerCertificate: true,
         min: 0,
         max: 2,
+        // Temp tables must survive release (RESETCONNECTION would drop them).
+        resetOnRelease: false,
       ));
       await pool.open();
 
@@ -265,6 +267,8 @@ void main() {
         password: _password,
         encrypt: false,
         trustServerCertificate: true,
+        // Temp tables must survive release (RESETCONNECTION would drop them).
+        resetOnRelease: false,
       ));
       await pool.open();
       await pool.execute('CREATE TABLE #pool_exec (v INT)');

@@ -36,6 +36,8 @@ MssqlPool makePool({int min = 0, int max = 5}) => MssqlPool(MssqlPoolConfig(
       trustServerCertificate: true,
       min: min,
       max: max,
+      // Temp tables must survive release (RESETCONNECTION would drop them).
+      resetOnRelease: false,
     ));
 
 void main() {
