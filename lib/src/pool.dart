@@ -46,6 +46,11 @@ class MssqlPoolConfig {
   /// Throw [MssqlException] if a connection cannot be acquired within this duration (default 15s).
   final Duration acquireTimeout;
 
+  /// When true (default), idle connections are probed with `SELECT 1` before
+  /// reuse so half-open LAN sockets (server KILL, reboot, firewall) are
+  /// discarded instead of handed to callers.
+  final bool validateOnAcquire;
+
   const MssqlPoolConfig({
     required this.host,
     this.port = 1433,
@@ -65,6 +70,7 @@ class MssqlPoolConfig {
     this.max = 10,
     this.idleTimeout = const Duration(seconds: 30),
     this.acquireTimeout = const Duration(seconds: 15),
+    this.validateOnAcquire = true,
   });
 
   /// Pool config that opens connections with Azure AD (FedAuth).
@@ -85,6 +91,7 @@ class MssqlPoolConfig {
     int max = 10,
     Duration idleTimeout = const Duration(seconds: 30),
     Duration acquireTimeout = const Duration(seconds: 15),
+    bool validateOnAcquire = true,
   }) {
     return MssqlPoolConfig(
       host: host,
@@ -103,6 +110,7 @@ class MssqlPoolConfig {
       max: max,
       idleTimeout: idleTimeout,
       acquireTimeout: acquireTimeout,
+      validateOnAcquire: validateOnAcquire,
     );
   }
 
@@ -125,6 +133,7 @@ class MssqlPoolConfig {
     int max = 10,
     Duration idleTimeout = const Duration(seconds: 30),
     Duration acquireTimeout = const Duration(seconds: 15),
+    bool validateOnAcquire = true,
   }) {
     return MssqlPoolConfig(
       host: host,
@@ -144,6 +153,7 @@ class MssqlPoolConfig {
       max: max,
       idleTimeout: idleTimeout,
       acquireTimeout: acquireTimeout,
+      validateOnAcquire: validateOnAcquire,
     );
   }
 }
@@ -203,14 +213,27 @@ class MssqlPool {
   /// Returns immediately if an idle connection is available or total < max.
   /// Otherwise queues the caller until a connection is released.
   /// Throws [MssqlException] if [config.acquireTimeout] is exceeded.
+  ///
+  /// When [MssqlPoolConfig.validateOnAcquire] is true, idle connections are
+  /// probed before reuse; dead ones are discarded and replaced.
   Future<MssqlConnection> acquire() async {
     if (_closed) throw StateError('Pool is closed');
 
-    // Return an idle connection if available.
+    // Return an idle connection if available (and still healthy).
     while (_idle.isNotEmpty) {
       final entry = _idle.removeLast();
-      if (entry.connection.isOpen) return entry.connection;
-      _total--; // connection died silently — don't reuse
+      if (!entry.connection.isOpen) {
+        _total--;
+        continue;
+      }
+      if (config.validateOnAcquire) {
+        final ok = await entry.connection.validate();
+        if (!ok) {
+          _total--;
+          continue;
+        }
+      }
+      return entry.connection;
     }
 
     // Create a new connection if under the cap.

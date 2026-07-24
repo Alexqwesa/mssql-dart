@@ -50,5 +50,16 @@ void main() {
     expect(c.appName, 'lan-app');
     expect(c.queryTimeout, const Duration(seconds: 8));
     expect(c.connectionTimeout, const Duration(seconds: 12));
+    expect(c.validateOnAcquire, isTrue);
+  });
+
+  test('validateOnAcquire can be disabled', () {
+    const c = MssqlPoolConfig(
+      host: '10.0.0.5',
+      user: 'sa',
+      password: 'x',
+      validateOnAcquire: false,
+    );
+    expect(c.validateOnAcquire, isFalse);
   });
 }

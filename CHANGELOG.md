@@ -57,6 +57,8 @@
   (plain + TLS) — `test/cancel_scenarios_live_test.dart`.
 * LAN focus: login timeout covers full handshake; `queryTimeout` / per-call
   timeout (Attention + drain); expose `appName` + `packetSize` on connect/pool.
+* LAN pool health: socket-done marks connection dead; `validateOnAcquire`
+  (default true) probes idle connections with `SELECT 1` before reuse.
 
 ## 0.1.1
 

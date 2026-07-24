@@ -333,7 +333,31 @@ class MssqlConnection {
   String get database => _currentDatabase;
 
   /// Whether this connection is open.
+  ///
+  /// Becomes `false` after [close], login failure, or when the underlying
+  /// socket reports done/error (server KILL, firewall drop, etc.).
   bool get isOpen => _connected;
+
+  /// Application name sent at login (`program_name` in DMVs).
+  String get appName => _appName;
+
+  /// Runs a cheap `SELECT 1` to verify the session is still alive.
+  ///
+  /// Returns `false` and closes the connection on failure. Used by
+  /// [MssqlPool] when [MssqlPoolConfig.validateOnAcquire] is enabled.
+  Future<bool> validate({
+    Duration timeout = const Duration(seconds: 3),
+  }) async {
+    if (!_connected) return false;
+    if (_busy) return true; // in use — assume still valid
+    try {
+      final r = await query('SELECT 1 AS ok', const {}, timeout);
+      return !r.isEmpty && r[0]['ok'] == 1;
+    } catch (_) {
+      await close();
+      return false;
+    }
+  }
 
   /// Closes the connection.
   ///
@@ -394,6 +418,7 @@ class MssqlConnection {
   Future<MssqlConnection> _openHandshake() async {
     // 1. TCP
     _socket = await Socket.connect(_host, _port, timeout: _timeout);
+    _watchSocket(_socket);
     _buf = TdsBuffer(_socket);
 
     // 2. PRELOGIN
@@ -432,6 +457,15 @@ class MssqlConnection {
     _buf.packetSize = loginResult.packetSize;
     _connected = true;
     return this;
+  }
+
+  /// Marks the connection dead when the peer closes or errors.
+  void _watchSocket(Socket sock) {
+    sock.done.then((_) {
+      _connected = false;
+    }, onError: (_) {
+      _connected = false;
+    });
   }
 
   /// Performs the TDS-wrapped TLS handshake (ms-tds §2.1.1 PRELOGIN encryption).
@@ -514,6 +548,8 @@ class MssqlConnection {
     // Reads:  server → rawSocket → bridge loop → bridgeSide → secSide → tls (decrypt) → _buf
     _socket = tls;
     _rawTcpSocket = rawSocket; // retained so close() can tear down the bridge
+    _watchSocket(rawSocket);
+    _watchSocket(tls);
     _buf.replaceSocket(tls);
   }
 
