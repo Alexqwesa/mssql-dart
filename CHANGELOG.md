@@ -70,6 +70,8 @@
   uses it to clear temp tables and session settings.
 * LAN connection strings: ADO.NET keyword + `sqlserver://` URL parse
   (`MssqlConnectionString`, `connectFromString`, `MssqlPoolConfig.fromConnectionString`).
+* LAN bulk insert: TDS Bulk Load BCP (`INSERT BULK` + COLMETADATA/ROW) via
+  `MssqlConnection.bulkInsert` (`test/bulk_encode_test.dart`, `bulk_live_test.dart`).
 
 ## 0.1.1
 

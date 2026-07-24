@@ -12,6 +12,7 @@ import 'exception.dart';
 import 'result.dart';
 import 'server_endpoint.dart';
 import 'tds/buf.dart';
+import 'tds/bulk.dart';
 import 'tds/constants.dart';
 import 'tds/login7.dart';
 import 'tds/prelogin.dart';
@@ -383,6 +384,72 @@ class MssqlConnection {
   ]) async {
     final result = await query(sql, parameters, timeout);
     return result.rowsAffected;
+  }
+
+  /// High-performance multi-row insert via TDS Bulk Load BCP.
+  ///
+  /// Sends `INSERT BULK` then a [packBulkLoadBCP] stream (COLMETADATA + ROW +
+  /// DONE) — same path as go-mssqldb `CopyIn` / `Bulk`. Column SQL types are
+  /// inferred from the first non-null value in each column (`int`→bigint,
+  /// `String`→nvarchar(4000), `bool`→bit, `double`→float, `DateTime`→datetime2).
+  ///
+  /// [table] may be `dbo.MyTable` (not escaped). [columns] are bracket-quoted.
+  /// Returns rows inserted. Empty [rows] is a no-op (returns 0).
+  ///
+  /// ```dart
+  /// await conn.bulkInsert(
+  ///   'dbo.Items',
+  ///   ['Id', 'Name', 'Active'],
+  ///   [
+  ///     [1, 'a', true],
+  ///     [2, 'b', false],
+  ///   ],
+  /// );
+  /// ```
+  Future<int> bulkInsert(
+    String table,
+    List<String> columns,
+    List<List<Object?>> rows, {
+    List<BulkColumn>? columnTypes,
+    Duration? timeout,
+  }) async {
+    _assertOpen();
+    _assertNotBusy();
+    if (columns.isEmpty) {
+      throw ArgumentError('columns must not be empty');
+    }
+    if (rows.isEmpty) return 0;
+    for (final row in rows) {
+      if (row.length != columns.length) {
+        throw ArgumentError(
+          'Each row must have ${columns.length} values (got ${row.length})',
+        );
+      }
+    }
+
+    final cols = columnTypes ?? BulkLoad.inferColumns(columns, rows);
+    if (cols.length != columns.length) {
+      throw ArgumentError('columnTypes length must match columns');
+    }
+
+    _busy = true;
+    try {
+      final sql = BulkLoad.insertBulkSql(table, cols);
+      await RpcRequest.sendBatch(_buf, sql);
+      await _awaitQuery(
+        _tokenStream().processQueryResponse(),
+        timeout: timeout,
+      );
+
+      await BulkLoad.send(_buf, cols, rows);
+      final result = await _awaitQuery(
+        _tokenStream().processQueryResponse(),
+        timeout: timeout,
+      );
+      return result.rowsAffected > 0 ? result.rowsAffected : rows.length;
+    } finally {
+      _busy = false;
+    }
   }
 
   /// Cancels the query currently in progress by sending a TDS Attention packet.

@@ -311,5 +311,5 @@ final conn = await MssqlConnection.connect(
 ## Limitations
 
 - Azure AD authentication requires a bearer token supplied by the caller (e.g. obtained via `azure_identity`); the driver does not fetch tokens itself.
-- Bulk copy (`BULK INSERT` / TDS bulk-load protocol) is not supported.
+- TVP (table-valued parameters) are not supported. Use [MssqlConnection.bulkInsert] for multi-row loads.
 - Prepared statement handles (`sp_prepare` / `sp_execute`) are not supported. All parameterized queries use `sp_executesql`, which SQL Server plan-caches by query hash, so repeated-query performance is similar in practice.

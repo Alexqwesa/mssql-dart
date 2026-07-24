@@ -10,4 +10,5 @@ export 'src/exception.dart';
 export 'src/pool.dart';
 export 'src/result.dart';
 export 'src/server_endpoint.dart';
+export 'src/tds/bulk.dart';
 export 'src/tds/sql_browser.dart';
