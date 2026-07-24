@@ -59,6 +59,9 @@
   timeout (Attention + drain); expose `appName` + `packetSize` on connect/pool.
 * LAN pool health: socket-done marks connection dead; `validateOnAcquire`
   (default true) probes idle connections with `SELECT 1` before reuse.
+* LAN named instances: parse `HOST\INSTANCE` / `HOST\INSTANCE,port`; SQL
+  Browser (UDP 1434) port lookup; PRELOGIN INSTOPT; `instanceName` on
+  connect / pool (`test/named_instance_test.dart`).
 
 ## 0.1.1
 

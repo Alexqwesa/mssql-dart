@@ -10,6 +10,10 @@ import 'tds/constants.dart';
 class MssqlPoolConfig {
   final String host;
   final int port;
+
+  /// Optional named instance (`SQLEXPRESS`, etc.). Also parsed from
+  /// `host\INSTANCE` / `host\INSTANCE,port` in [host].
+  final String? instanceName;
   final String user;
   final String password;
   final String database;
@@ -54,6 +58,7 @@ class MssqlPoolConfig {
   const MssqlPoolConfig({
     required this.host,
     this.port = 1433,
+    this.instanceName,
     required this.user,
     required this.password,
     this.database = '',
@@ -80,6 +85,7 @@ class MssqlPoolConfig {
   factory MssqlPoolConfig.azureAd({
     required String host,
     int port = 1433,
+    String? instanceName,
     required AzureAdAuth azureAdAuth,
     String database = '',
     String appName = 'mssql-dart',
@@ -96,6 +102,7 @@ class MssqlPoolConfig {
     return MssqlPoolConfig(
       host: host,
       port: port,
+      instanceName: instanceName,
       user: '',
       password: '',
       database: database,
@@ -118,6 +125,7 @@ class MssqlPoolConfig {
   factory MssqlPoolConfig.ntlm({
     required String host,
     int port = 1433,
+    String? instanceName,
     required String domain,
     required String user,
     required String password,
@@ -138,6 +146,7 @@ class MssqlPoolConfig {
     return MssqlPoolConfig(
       host: host,
       port: port,
+      instanceName: instanceName,
       user: user,
       password: password,
       database: database,
@@ -388,6 +397,7 @@ class MssqlPool {
       return MssqlConnection.connectAzureAd(
         host: config.host,
         port: config.port,
+        instanceName: config.instanceName,
         azureAdAuth: aad,
         database: config.database,
         appName: config.appName,
@@ -402,6 +412,7 @@ class MssqlPool {
       return MssqlConnection.connectNtlm(
         host: config.host,
         port: config.port,
+        instanceName: config.instanceName,
         domain: domain,
         user: config.user,
         password: config.password,
@@ -418,6 +429,7 @@ class MssqlPool {
     return MssqlConnection.connect(
       host: config.host,
       port: config.port,
+      instanceName: config.instanceName,
       user: config.user,
       password: config.password,
       database: config.database,

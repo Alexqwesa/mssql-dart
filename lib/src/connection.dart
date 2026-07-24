@@ -9,11 +9,13 @@ import 'auth/ntlm_auth.dart';
 import 'auth/sql_auth.dart';
 import 'exception.dart';
 import 'result.dart';
+import 'server_endpoint.dart';
 import 'tds/buf.dart';
 import 'tds/constants.dart';
 import 'tds/login7.dart';
 import 'tds/prelogin.dart';
 import 'tds/rpc.dart';
+import 'tds/sql_browser.dart';
 import 'tds/token_stream.dart';
 
 /// Opens and manages a single connection to SQL Server.
@@ -32,7 +34,9 @@ import 'tds/token_stream.dart';
 /// ```
 class MssqlConnection {
   final String _host;
-  final int _port;
+  int _port;
+  final String? _instanceName;
+  final bool _resolveNamedInstancePort;
   final String _database;
   final String _appName;
   final int _packetSize;
@@ -59,6 +63,8 @@ class MssqlConnection {
   MssqlConnection._({
     required String host,
     required int port,
+    String? instanceName,
+    bool resolveNamedInstancePort = false,
     required String database,
     String appName = 'mssql-dart',
     int packetSize = defaultPacketSize,
@@ -71,6 +77,8 @@ class MssqlConnection {
     Duration? queryTimeout,
   })  : _host = host,
         _port = port,
+        _instanceName = instanceName,
+        _resolveNamedInstancePort = resolveNamedInstancePort,
         _database = database,
         _appName = appName,
         _packetSize = packetSize,
@@ -102,9 +110,14 @@ class MssqlConnection {
   ///
   /// [appName] — reported to SQL Server as the client application name
   /// (`program_name` in `sys.dm_exec_sessions`).
+  ///
+  /// Named instances: pass `host: r'HOST\INSTANCE'` (or [instanceName]) and
+  /// the driver queries SQL Browser (UDP 1434) unless [port] / `host,port` is
+  /// explicit. PRELOGIN INSTOPT always carries the instance name when set.
   static Future<MssqlConnection> connect({
     required String host,
     int port = defaultPort,
+    String? instanceName,
     required String user,
     required String password,
     String database = '',
@@ -115,9 +128,12 @@ class MssqlConnection {
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
   }) {
+    final ep = ServerEndpoint.parse(host, port: port, instanceName: instanceName);
     return MssqlConnection._(
-      host: host,
-      port: port,
+      host: ep.host,
+      port: ep.port,
+      instanceName: ep.instanceName,
+      resolveNamedInstancePort: ep.shouldResolvePort,
       database: database,
       appName: appName,
       packetSize: packetSize,
@@ -133,6 +149,7 @@ class MssqlConnection {
   static Future<MssqlConnection> connectAzureAd({
     required String host,
     int port = defaultPort,
+    String? instanceName,
     required AzureAdAuth azureAdAuth,
     String database = '',
     String appName = 'mssql-dart',
@@ -141,9 +158,12 @@ class MssqlConnection {
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
   }) {
+    final ep = ServerEndpoint.parse(host, port: port, instanceName: instanceName);
     return MssqlConnection._(
-      host: host,
-      port: port,
+      host: ep.host,
+      port: ep.port,
+      instanceName: ep.instanceName,
+      resolveNamedInstancePort: ep.shouldResolvePort,
       database: database,
       appName: appName,
       packetSize: packetSize,
@@ -163,6 +183,7 @@ class MssqlConnection {
   static Future<MssqlConnection> connectNtlm({
     required String host,
     int port = defaultPort,
+    String? instanceName,
     required String domain,
     required String user,
     required String password,
@@ -175,9 +196,12 @@ class MssqlConnection {
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
   }) {
+    final ep = ServerEndpoint.parse(host, port: port, instanceName: instanceName);
     return MssqlConnection._(
-      host: host,
-      port: port,
+      host: ep.host,
+      port: ep.port,
+      instanceName: ep.instanceName,
+      resolveNamedInstancePort: ep.shouldResolvePort,
       database: database,
       appName: appName,
       packetSize: packetSize,
@@ -416,6 +440,11 @@ class MssqlConnection {
   }
 
   Future<MssqlConnection> _openHandshake() async {
+    // 0. Named instance → SQL Browser (UDP 1434) when no explicit port
+    if (_resolveNamedInstancePort && _instanceName != null) {
+      _port = await SqlBrowser.resolveTcpPort(_host, _instanceName!);
+    }
+
     // 1. TCP
     _socket = await Socket.connect(_host, _port, timeout: _timeout);
     _watchSocket(_socket);
@@ -427,8 +456,12 @@ class MssqlConnection {
     final wantEncrypt =
         (_encrypt || _azureAdAuth != null) ? encryptOn : encryptNotSupported;
 
-    await Prelogin.send(_buf,
-        requestEncrypt: wantEncrypt, fedAuthRequired: _azureAdAuth != null);
+    await Prelogin.send(
+      _buf,
+      requestEncrypt: wantEncrypt,
+      fedAuthRequired: _azureAdAuth != null,
+      instanceName: _instanceName,
+    );
     final prelogin = await Prelogin.read(_buf);
 
     // 3. TLS upgrade (only if both sides agreed to encrypt)

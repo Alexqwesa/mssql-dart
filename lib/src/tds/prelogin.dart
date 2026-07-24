@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'buf.dart';
@@ -31,12 +32,17 @@ class Prelogin {
     TdsBuffer buf, {
     int requestEncrypt = encryptOn,
     bool fedAuthRequired = false,
+    String? instanceName,
   }) async {
+    final inst = instanceName == null || instanceName.isEmpty
+        ? <int>[0x00]
+        : <int>[...utf8.encode(instanceName), 0x00];
+
     final fields = <int, List<int>>{
       preloginVersion: _clientVersion,
       preloginEncryption: [requestEncrypt],
       // INSTOPT: null-terminated instance name — empty means default instance.
-      preloginInstopt: [0x00],
+      preloginInstopt: inst,
       // THREADID: client thread/process ID (4 bytes big-endian), zero is fine.
       preloginThreadId: [0x00, 0x00, 0x00, 0x00],
       preloginMars: [0x00],
