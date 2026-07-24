@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
@@ -309,6 +310,65 @@ void main() {
         throwsStateError,
       );
     });
+
+    test('MsvAvChannelBindings embedded in Type 3 blob', () {
+      final cbind = _hex('00112233445566778899aabbccddeeff');
+      final targetInfo = _hex(
+        '02000c0044004f004d00410049004e00'
+        '00000000',
+      );
+      final challenge = NtlmChallenge.parse(_type2(
+        flags: NtlmAuth.negotiateUnicode |
+            NtlmAuth.negotiateNtlm |
+            NtlmAuth.negotiateTargetInfo,
+        challenge: _hex('0123456789abcdef'),
+        targetName: _ucs2('DOMAIN'),
+        targetInfo: targetInfo,
+      ));
+      final type3 = NtlmAuth(
+        domain: 'DOMAIN',
+        username: 'user',
+        password: 'SecREt01',
+        channelBindings: cbind,
+      ).authenticateMessage(
+        challenge,
+        clientChallenge: _hex('aaaaaaaaaaaaaaaa'),
+        timestamp: _hex('0000000000000000'),
+      );
+
+      final bd = ByteData.sublistView(type3);
+      final ntLen = bd.getUint16(20, Endian.little);
+      final ntOff = bd.getUint32(24, Endian.little);
+      final blob = type3.sublist(ntOff + 16, ntOff + ntLen);
+      expect(_blobHasChannelBindings(blob, cbind), isTrue);
+    });
+  });
+
+  group('NtlmAuth channel binding token', () {
+    test('channelBindingTokenFromCertificate is 16 bytes and deterministic', () {
+      final der = _hex('3082010a020100300d06092a864886f70d0101050500');
+      final a = NtlmAuth.channelBindingTokenFromCertificate(der);
+      final b = NtlmAuth.channelBindingTokenFromCertificate(der);
+      expect(a.length, equals(16));
+      expect(a, equals(b));
+      expect(
+        a,
+        isNot(equals(NtlmAuth.channelBindingTokenFromCertificate(_hex('00')))),
+      );
+    });
+
+    test('gss struct MD5 matches manual layout', () {
+      final app = Uint8List.fromList(utf8.encode('tls-server-end-point:deadbeef'));
+      final token = NtlmAuth.channelBindingTokenFromApplicationData(app);
+      final expected = BytesBuilder(copy: false)
+        ..add(Uint8List(8))
+        ..add(Uint8List(8));
+      final len = Uint8List(4);
+      ByteData.sublistView(len).setUint32(0, app.length, Endian.little);
+      expected.add(len);
+      expected.add(app);
+      expect(token, equals(md5.convert(expected.toBytes()).bytes));
+    });
   });
 
   group('NtlmAuth.rc4', () {
@@ -374,6 +434,30 @@ bool _blobHasMicFlag(Uint8List blob) {
     i += len;
   }
   return false;
+}
+
+bool _blobHasChannelBindings(Uint8List blob, Uint8List expected) {
+  if (blob.length < 28) return false;
+  var i = 28;
+  while (i + 4 <= blob.length) {
+    final id = blob[i] | (blob[i + 1] << 8);
+    final len = blob[i + 2] | (blob[i + 3] << 8);
+    i += 4;
+    if (id == 0) return false;
+    if (id == 0x000A && len == expected.length && i + len <= blob.length) {
+      return _listEq(blob.sublist(i, i + len), expected);
+    }
+    i += len;
+  }
+  return false;
+}
+
+bool _listEq(List<int> a, List<int> b) {
+  if (a.length != b.length) return false;
+  for (var i = 0; i < a.length; i++) {
+    if (a[i] != b[i]) return false;
+  }
+  return true;
 }
 
 Uint8List _type2({

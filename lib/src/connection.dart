@@ -420,6 +420,14 @@ class MssqlConnection {
     );
     handshakeDone = true;
 
+    // Extended Protection: bind NTLM to the TLS peer certificate when present.
+    final ntlm = _ntlmAuth;
+    final peer = tls.peerCertificate;
+    if (ntlm != null && peer != null) {
+      ntlm.channelBindings =
+          NtlmAuth.channelBindingTokenFromCertificate(peer.der);
+    }
+
     // Swap _socket and _buf to the SecureSocket.
     // Writes: _buf → tls (encrypt) → secSide → loopback → bridgeSide → rawSocket → server
     // Reads:  server → rawSocket → bridge loop → bridgeSide → secSide → tls (decrypt) → _buf

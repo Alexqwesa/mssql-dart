@@ -45,6 +45,8 @@
   (FedAuth); Azure AD takes precedence over NTLM/SQL when set.
 * NTLM Type 3: Version+MIC header (go-mssqldb 88-byte layout); MIC when
   TargetInfo has MsvAvTimestamp; KEY_EXCH EncryptedRandomSessionKey via RC4.
+* NTLM TLS channel bindings: `tls-server-end-point` CBT → MsvAvChannelBindings
+  after SecureSocket handshake (SQL Extended Protection).
 
 ## 0.1.1
 

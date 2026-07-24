@@ -10,6 +10,7 @@ import 'md4.dart';
 const int _avEol = 0x0000;
 const int _avFlags = 0x0006;
 const int _avTimestamp = 0x0007;
+const int _avChannelBindings = 0x000A;
 
 /// MsvAvFlags bit: client provides a MIC ([MS-NLMP] §2.2.2.1).
 const int _avFlagMic = 0x00000002;
@@ -89,6 +90,7 @@ class NtlmChallenge {
 ///   - Version + MIC fields (88-byte header, go-mssqldb layout)
 ///   - MIC when TargetInfo contains MsvAvTimestamp ([MS-NLMP] §3.1.5.1.2)
 ///   - KEY_EXCH EncryptedRandomSessionKey (RC4) when negotiated
+///   - MsvAvChannelBindings for TLS Extended Protection ([RFC 5929])
 ///
 /// Spec: [MS-NLMP]; vectors from curl/davenport NTLM docs.
 class NtlmAuth {
@@ -100,11 +102,16 @@ class NtlmAuth {
   /// Last Type 1 message from [negotiateMessage] (used for MIC).
   Uint8List? _lastNegotiate;
 
+  /// 16-byte [MsvAvChannelBindings] hash ([MS-NLMP] §2.2.2.1), typically from
+  /// [channelBindingTokenFromCertificate] after TLS. Null = omit AV_PAIR.
+  Uint8List? channelBindings;
+
   NtlmAuth({
     required this.domain,
     required this.username,
     required this.password,
     this.workstation,
+    this.channelBindings,
   });
 
   // Common negotiate flags (MS-NLMP §2.2.2.5).
@@ -179,7 +186,8 @@ class NtlmAuth {
   /// for deterministic tests; otherwise random / current FILETIME are used.
   ///
   /// Uses the Type 1 from the last [negotiateMessage] call (and [challenge]'s
-  /// raw Type 2) when computing the MIC.
+  /// raw Type 2) when computing the MIC. When [channelBindings] is set, embeds
+  /// MsvAvChannelBindings in the NTLMv2 blob TargetInfo.
   Uint8List authenticateMessage(
     NtlmChallenge challenge, {
     Uint8List? clientChallenge,
@@ -197,9 +205,15 @@ class NtlmAuth {
     }
 
     final wantMic = _targetInfoHasTimestamp(challenge.targetInfo);
-    final targetInfo = wantMic
-        ? _targetInfoWithMicFlag(challenge.targetInfo)
-        : challenge.targetInfo;
+    final cbind = channelBindings;
+    if (cbind != null && cbind.length != 16) {
+      throw ArgumentError('channelBindings must be 16 bytes (MD5 CBT)');
+    }
+    final targetInfo = _clientTargetInfo(
+      challenge.targetInfo,
+      mic: wantMic,
+      channelBindingHash: cbind,
+    );
 
     final targetForHash =
         challenge.targetName.isNotEmpty ? challenge.targetName : domain;
@@ -301,6 +315,33 @@ class NtlmAuth {
     return _hmacMd5(ntHash, identity);
   }
 
+  /// Builds the 16-byte MsvAvChannelBindings value for `tls-server-end-point`
+  /// from a peer certificate DER encoding ([RFC 5929] + [MS-NLMP] §2.2.2.1).
+  ///
+  /// Steps: SHA-256(cert DER) → `tls-server-end-point:` + hash → wrap in a
+  /// zero-address gss_channel_bindings_struct → MD5.
+  static Uint8List channelBindingTokenFromCertificate(Uint8List certDer) {
+    final certHash = Uint8List.fromList(sha256.convert(certDer).bytes);
+    final appData = utf8.encode('tls-server-end-point:') + certHash;
+    return channelBindingTokenFromApplicationData(Uint8List.fromList(appData));
+  }
+
+  /// MD5 of a Windows-style gss_channel_bindings_struct with zero addresses
+  /// and the given [applicationData] (already including any type prefix).
+  static Uint8List channelBindingTokenFromApplicationData(
+    Uint8List applicationData,
+  ) {
+    final struct = BytesBuilder(copy: false);
+    struct.add(Uint8List(8)); // initiator_addtype + initiator_addr_len
+    struct.add(Uint8List(8)); // acceptor_addtype + acceptor_addr_len
+    final len = Uint8List(4);
+    ByteData.sublistView(len)
+        .setUint32(0, applicationData.length, Endian.little);
+    struct.add(len);
+    struct.add(applicationData);
+    return Uint8List.fromList(md5.convert(struct.toBytes()).bytes);
+  }
+
   /// RC4 encrypt/decrypt (same transform). Used for KEY_EXCH session key.
   static Uint8List rc4(Uint8List key, Uint8List data) {
     final s = List<int>.generate(256, (i) => i);
@@ -354,17 +395,29 @@ class NtlmAuth {
     return false;
   }
 
-  /// Ensures MsvAvFlags includes MIC bit; inserts before EOL if missing.
-  static Uint8List _targetInfoWithMicFlag(Uint8List info) {
+  /// Rebuilds TargetInfo for the client response: optional MIC flag and
+  /// optional MsvAvChannelBindings, always terminated with EOL.
+  static Uint8List _clientTargetInfo(
+    Uint8List info, {
+    required bool mic,
+    Uint8List? channelBindingHash,
+  }) {
+    if (!mic && channelBindingHash == null) return info;
+
     final out = BytesBuilder(copy: false);
-    var i = 0;
     var sawFlags = false;
+    var i = 0;
     while (i + 4 <= info.length) {
       final id = info[i] | (info[i + 1] << 8);
       final len = info[i + 2] | (info[i + 3] << 8);
       final valueStart = i + 4;
       if (id == _avEol) break;
-      if (id == _avFlags && len >= 4 && valueStart + 4 <= info.length) {
+      // Drop any server ChannelBindings; we supply our own.
+      if (id == _avChannelBindings) {
+        i = valueStart + len;
+        continue;
+      }
+      if (mic && id == _avFlags && len >= 4 && valueStart + 4 <= info.length) {
         sawFlags = true;
         final flags = ByteData.sublistView(info, valueStart, valueStart + 4)
                 .getUint32(0, Endian.little) |
@@ -378,11 +431,20 @@ class NtlmAuth {
       }
       i = valueStart + len;
     }
-    if (!sawFlags) {
+    if (mic && !sawFlags) {
       out.add([_avFlags & 0xFF, (_avFlags >> 8) & 0xFF, 4, 0]);
       final fb = Uint8List(4);
       ByteData.sublistView(fb).setUint32(0, _avFlagMic, Endian.little);
       out.add(fb);
+    }
+    if (channelBindingHash != null) {
+      out.add([
+        _avChannelBindings & 0xFF,
+        (_avChannelBindings >> 8) & 0xFF,
+        16,
+        0,
+      ]);
+      out.add(channelBindingHash);
     }
     out.add([0, 0, 0, 0]); // EOL
     return out.toBytes();
