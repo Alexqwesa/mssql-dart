@@ -90,5 +90,65 @@ void main() {
       expect(result.rows, isEmpty);
       expect(buf.attentionSent, isFalse);
     });
+
+    test('streamQueryResponse completes on Attention ACK (two messages)',
+        () async {
+      final pair = await TdsSocketPair.open();
+      addTearDown(pair.close);
+      final buf = TdsBuffer(pair.client);
+
+      final done = () async {
+        await for (final _ in TokenStream(buf).streamQueryResponse()) {}
+      }();
+
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      await buf.sendAttention();
+
+      await tdsSend(
+        pair.server,
+        tdsPacket(
+          type: packReply,
+          body: () {
+            final out = BytesBuilder(copy: false);
+            out.addByte(tokenDone);
+            writeUint16LE(out, doneFlagFinal);
+            writeUint16LE(out, 0);
+            writeUint64LE(out, 0);
+            return out.toBytes();
+          }(),
+        ),
+      );
+      await tdsSend(pair.server, tdsPacket(type: packReply, body: _doneAttn()));
+
+      await done.timeout(const Duration(seconds: 2));
+      expect(buf.attentionSent, isFalse);
+    });
+
+    test('drainUntilAttentionAck after beginRead', () async {
+      final pair = await TdsSocketPair.open();
+      addTearDown(pair.close);
+      final buf = TdsBuffer(pair.client);
+      buf.attentionSent = true;
+
+      await tdsSend(
+        pair.server,
+        tdsPacket(
+          type: packReply,
+          body: () {
+            final out = BytesBuilder(copy: false);
+            out.addByte(tokenDone);
+            writeUint16LE(out, doneFlagFinal);
+            writeUint16LE(out, 0);
+            writeUint64LE(out, 0);
+            return out.toBytes();
+          }(),
+        ),
+      );
+      await tdsSend(pair.server, tdsPacket(type: packReply, body: _doneAttn()));
+
+      await buf.beginRead();
+      await TokenStream(buf).drainUntilAttentionAck();
+      expect(buf.attentionSent, isFalse);
+    });
   });
 }

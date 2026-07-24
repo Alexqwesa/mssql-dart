@@ -70,6 +70,63 @@ void main() {
       final r = await conn.query('SELECT 42 AS n');
       expect(r[0]['n'], equals(42));
     });
+
+    test('cancel during queryStream WAITFOR keeps connection', () async {
+      if (!available) {
+        markTestSkipped('SQL Server not available on :$_port');
+        return;
+      }
+
+      final rows = <MssqlRow>[];
+      final streaming = () async {
+        await for (final row in conn.queryStream(
+          "WAITFOR DELAY '00:00:15'; SELECT 1 AS v",
+        )) {
+          rows.add(row);
+        }
+      }();
+
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+      await conn.cancel();
+      await streaming.timeout(const Duration(seconds: 10));
+
+      expect(rows, isEmpty);
+      expect(conn.isOpen, isTrue);
+      final r = await conn.query('SELECT 7 AS n');
+      expect(r[0]['n'], equals(7));
+    });
+
+    test('cancel during queryStream after first rows keeps connection',
+        () async {
+      if (!available) {
+        markTestSkipped('SQL Server not available on :$_port');
+        return;
+      }
+
+      final rows = <int>[];
+      final streaming = () async {
+        await for (final row in conn.queryStream(
+          'SELECT TOP 2000 ROW_NUMBER() OVER (ORDER BY (SELECT NULL)) AS n '
+          'FROM sys.all_objects a CROSS JOIN sys.all_objects b',
+        )) {
+          rows.add(row['n'] as int);
+          if (rows.length == 1) {
+            // Cancel from inside the loop via microtask so Attention is concurrent.
+            scheduleMicrotask(() {
+              unawaited(conn.cancel());
+            });
+          }
+        }
+      }();
+
+      await streaming.timeout(const Duration(seconds: 30));
+      expect(rows, isNotEmpty);
+      expect(rows.length, lessThan(2000));
+      expect(conn.isOpen, isTrue);
+
+      final r = await conn.query('SELECT 9 AS n');
+      expect(r[0]['n'], equals(9));
+    });
   });
 
   group('live large multi-packet result (PR #3)', () {

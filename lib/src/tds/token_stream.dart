@@ -286,6 +286,64 @@ class TokenStream {
     }
   }
 
+  /// Drains tokens from the current (or next) response until Attention is ACKed
+  /// or a final DONE arrives with [attentionSent] already clear.
+  ///
+  /// Does not call [TdsBuffer.beginRead] first — caller must already be inside a
+  /// message (e.g. after a cancelled [streamQueryResponse]), or must beginRead
+  /// themselves before invoking this.
+  Future<void> drainUntilAttentionAck() async {
+    List<ColumnMeta>? columns;
+    while (true) {
+      final tok = await _buf.readUint8();
+      switch (tok) {
+        case tokenColMetadata:
+          columns = await _readColMetadata();
+        case tokenRow:
+          if (columns == null) {
+            throw StateError('ROW token before COLMETADATA while draining');
+          }
+          await _readRow(columns);
+        case tokenNbcRow:
+          if (columns == null) {
+            throw StateError('NBCROW token before COLMETADATA while draining');
+          }
+          await _readNbcRow(columns);
+        case tokenOrder:
+          await _skipOrder();
+        case tokenEnvChange:
+          await _readEnvChange();
+        case tokenReturnStatus:
+          await _buf.readUint32LE();
+        case tokenReturnValue:
+          await _skipReturnValue();
+        case tokenInfo:
+          await _skipInfoOrError();
+        case tokenError:
+          await _skipInfoOrError();
+        case tokenDone:
+        case tokenDoneProc:
+        case tokenDoneInProc:
+          final flags = await _buf.readUint16LE();
+          await _buf.readUint16LE();
+          await _buf.readUint64LE();
+          if ((flags & doneFlagMore) == 0) {
+            final attnAck = (flags & doneFlagAttn) != 0;
+            if (attnAck) _buf.attentionSent = false;
+            if (_buf.attentionSent && !attnAck) {
+              columns = null;
+              await _buf.beginRead();
+              continue;
+            }
+            return;
+          }
+        default:
+          throw StateError(
+              'Unexpected token 0x${tok.toRadixString(16)} while draining');
+      }
+    }
+  }
+
   // ── Token readers ──────────────────────────────────────────────────────────
 
   /// Builds the exception to throw when a response contains one or more errors.

@@ -172,6 +172,10 @@ class MssqlConnection {
   /// Rows are yielded as they arrive from the network. Useful for large result
   /// sets. Only the first result set is streamed; extras are drained silently.
   ///
+  /// To stop early and keep the connection open, call [cancel] from another
+  /// async context (sends TDS Attention). Breaking out of the `await for`
+  /// without cancel closes the connection to avoid protocol desync.
+  ///
   /// ```dart
   /// await for (final row in conn.queryStream('SELECT * FROM bigTable')) {
   ///   process(row);
@@ -196,6 +200,7 @@ class MssqlConnection {
       if (!streamCompleted && _connected) {
         // Caller broke out early — TDS buffer has unread tokens.
         // Kill the connection to prevent protocol desync and pool poisoning.
+        // Prefer [cancel] instead of breaking when reuse is required.
         _connected = false;
         unawaited(_socket.close().catchError((_) {}));
         unawaited(_rawTcpSocket?.close().catchError((_) {}));
