@@ -9,6 +9,9 @@
 * Add Login7 golden encode, token-stream, and TypeInfo decode offline unit tests
   (`test/login7_encode_test.dart`, `test/token_stream_test.dart`,
   `test/type_decode_test.dart`) with shared `test/helpers/tds_socket.dart`.
+* Add RPC encode tests, DATETIME2/OFFSET/DECIMAL/PLP multi-chunk decode coverage,
+  and mock PreLogin→Login7→LOGINACK handshake (`test/rpc_encode_test.dart`,
+  `test/mock_full_login_test.dart`).
 * CI: run unit tests without Docker before the SQL Server 2022 integration suite.
 
 ## 0.1.1

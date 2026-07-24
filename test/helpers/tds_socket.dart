@@ -86,6 +86,12 @@ int readUint32LE(List<int> b, int offset) =>
     (b[offset + 2] << 16) |
     (b[offset + 3] << 24);
 
+int readUint64LE(List<int> b, int offset) {
+  final lo = readUint32LE(b, offset);
+  final hi = readUint32LE(b, offset + 4);
+  return lo | (hi << 32);
+}
+
 void writeUint16LE(BytesBuilder b, int v) {
   b.addByte(v & 0xFF);
   b.addByte((v >> 8) & 0xFF);

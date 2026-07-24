@@ -164,6 +164,101 @@ void main() {
         equals('6f9619ff-8b86-d011-b42d-00c04fc964ff'),
       );
     });
+
+    test('DECIMAL(5,2) positive', () async {
+      // 123.45 → sign=1, integer 12345
+      const scaled = 12345;
+      final v = await _decode(
+        typeInfoBytes: [typeDecimalN, 5, 5, 2], // MaxLen, prec, scale
+        valueBytes: [
+          5, // len
+          1, // positive
+          scaled & 0xFF,
+          (scaled >> 8) & 0xFF,
+          (scaled >> 16) & 0xFF,
+          (scaled >> 24) & 0xFF,
+        ],
+      );
+      expect(v as double, closeTo(123.45, 0.001));
+    });
+
+    test('NUMERIC negative', () async {
+      const scaled = 500; // -5.00 at scale 2
+      final v = await _decode(
+        typeInfoBytes: [typeNumericN, 5, 5, 2],
+        valueBytes: [
+          5,
+          0, // negative
+          scaled & 0xFF,
+          (scaled >> 8) & 0xFF,
+          (scaled >> 16) & 0xFF,
+          (scaled >> 24) & 0xFF,
+        ],
+      );
+      expect(v as double, closeTo(-5.0, 0.001));
+    });
+
+    test('DATETIME2 scale 3', () async {
+      final days =
+          DateTime.utc(2024, 6, 1).difference(DateTime.utc(1, 1, 1)).inDays;
+      // 12:30:45.123 at scale 3 → millisecond ticks
+      const ticks = ((12 * 3600 + 30 * 60 + 45) * 1000) + 123;
+      final v = await _decode(
+        typeInfoBytes: [typeDateTime2N, 3],
+        valueBytes: [
+          7, // 4 time + 3 date
+          ticks & 0xFF,
+          (ticks >> 8) & 0xFF,
+          (ticks >> 16) & 0xFF,
+          (ticks >> 24) & 0xFF,
+          days & 0xFF,
+          (days >> 8) & 0xFF,
+          (days >> 16) & 0xFF,
+        ],
+      );
+      final d = v as DateTime;
+      expect(d.year, equals(2024));
+      expect(d.month, equals(6));
+      expect(d.day, equals(1));
+      expect(d.hour, equals(12));
+      expect(d.minute, equals(30));
+      expect(d.second, equals(45));
+      expect(d.millisecond, equals(123));
+    });
+
+    test('DATETIMEOFFSET scale 0 returns UTC', () async {
+      // Local 12:30 +05:30 → UTC 07:00; driver stores UTC and ignores offset.
+      final days =
+          DateTime.utc(2024, 6, 1).difference(DateTime.utc(1, 1, 1)).inDays;
+      const seconds = 7 * 3600; // UTC 07:00:00
+      const offsetMinutes = 5 * 60 + 30;
+      final v = await _decode(
+        typeInfoBytes: [typeDateTimeOffsetN, 0],
+        valueBytes: [
+          8, // 3 time + 3 date + 2 offset
+          seconds & 0xFF,
+          (seconds >> 8) & 0xFF,
+          (seconds >> 16) & 0xFF,
+          days & 0xFF,
+          (days >> 8) & 0xFF,
+          (days >> 16) & 0xFF,
+          offsetMinutes & 0xFF,
+          (offsetMinutes >> 8) & 0xFF,
+        ],
+      );
+      final d = v as DateTime;
+      expect(d.isUtc, isTrue);
+      expect(d.hour, equals(7));
+      expect(d.minute, equals(0));
+    });
+
+    test('DATETIME2 null', () async {
+      final v = await _decode(
+        typeInfoBytes: [typeDateTime2N, 7],
+        valueBytes: [0],
+      );
+      expect(v, isNull);
+    });
   });
 
   group('TypeInfo short-len / PLP decode', () {
@@ -211,6 +306,27 @@ void main() {
         ],
       );
       expect(v, equals('ab'));
+    });
+
+    test('NVARCHAR(MAX) PLP multi-chunk', () async {
+      final c1 = ucs2('ab');
+      final c2 = ucs2('cd');
+      final v = await _decode(
+        typeInfoBytes: [
+          typeNVarChar,
+          0xFF, 0xFF,
+          ..._collation,
+        ],
+        valueBytes: [
+          0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+          4, 0, 0, 0,
+          ...c1,
+          4, 0, 0, 0,
+          ...c2,
+          0, 0, 0, 0,
+        ],
+      );
+      expect(v, equals('abcd'));
     });
 
     test('VARBINARY(MAX) PLP null', () async {

@@ -50,6 +50,8 @@ jobs:
             test/login7_encode_test.dart \
             test/token_stream_test.dart \
             test/type_decode_test.dart \
+            test/rpc_encode_test.dart \
+            test/mock_full_login_test.dart \
             --timeout=60s
 
   # ════════════════════════════════════════════════════════════════════════════
