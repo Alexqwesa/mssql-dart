@@ -35,6 +35,8 @@
 * Add live cancel + large multi-packet / many-row tests (`attention_live_test.dart`).
 * Add `drainUntilAttentionAck`; live `queryStream` cancel (WAITFOR + mid-rows);
   offline stream Attention drain; document that bare stream break still closes.
+* Implement NTLM Type 2 parse + Type 3 NTLMv2 authenticate (MD4 + HMAC-MD5)
+  with curl/davenport golden vectors; add `package:crypto` dependency.
 * CI: run unit tests without Docker before the SQL Server 2022 integration suite.
 
 ## 0.1.1
