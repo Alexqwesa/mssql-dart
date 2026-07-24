@@ -37,6 +37,8 @@
   offline stream Attention drain; document that bare stream break still closes.
 * Implement NTLM Type 2 parse + Type 3 NTLMv2 authenticate (MD4 + HMAC-MD5)
   with curl/davenport golden vectors; add `package:crypto` dependency.
+* Wire NTLM SSPI into login: `MssqlConnection.connectNtlm`, `tokenSSPI` →
+  `packSSPIMessage` in `processLoginResponse`; mock SSPI handshake test.
 * CI: run unit tests without Docker before the SQL Server 2022 integration suite.
 
 ## 0.1.1

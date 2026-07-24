@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import '../exception.dart';
 import 'buf.dart';
@@ -55,7 +56,13 @@ class TokenStream {
   TokenStream(this._buf);
 
   /// Process the server response after LOGIN7. Returns basic session metadata.
-  Future<LoginResult> processLoginResponse() async {
+  ///
+  /// [onSspi] is invoked when the server sends a [tokenSSPI] challenge (NTLM
+  /// Type 2). It must return the Type 3 blob to send as [packSSPIMessage], or
+  /// an empty list if nothing further should be sent.
+  Future<LoginResult> processLoginResponse({
+    Future<List<int>> Function(Uint8List challenge)? onSspi,
+  }) async {
     String database = '';
     String serverVersion = '';
     int packetSize = defaultPacketSize;
@@ -81,6 +88,23 @@ class TokenStream {
           final err = await _readError();
           // Login errors are always fatal and always single; throw immediately.
           throw MssqlException(err.$1, errorCode: err.$2);
+        case tokenSSPI:
+          // USHORT length + SSPI blob (go-mssqldb parseSSPIMsg / ms-tds §2.2.7.22)
+          final sspiLen = await _buf.readUint16LE();
+          final challenge = Uint8List.fromList(await _buf.readBytes(sspiLen));
+          if (onSspi == null) {
+            throw StateError(
+              'Server sent SSPI challenge but no NTLM/SSPI handler was provided',
+            );
+          }
+          final response = await onSspi(challenge);
+          if (response.isNotEmpty) {
+            _buf.beginPacket(packSSPIMessage);
+            _buf.writeBytes(response);
+            await _buf.finishPacket(packSSPIMessage);
+          }
+          // SSPI reply continues in the next server message.
+          await _buf.beginRead();
         case tokenDone:
         case tokenDoneProc:
         case tokenDoneInProc:

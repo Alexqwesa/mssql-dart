@@ -55,6 +55,7 @@ jobs:
             test/attention_cancel_test.dart \
             test/ntlm_auth_test.dart \
             test/azure_ad_auth_test.dart \
+            test/mock_sspi_login_test.dart \
             --timeout=60s
 
   # ════════════════════════════════════════════════════════════════════════════

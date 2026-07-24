@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:async/async.dart';
 
 import 'auth/azure_ad_auth.dart';
+import 'auth/ntlm_auth.dart';
 import 'auth/sql_auth.dart';
 import 'exception.dart';
 import 'result.dart';
@@ -35,6 +36,7 @@ class MssqlConnection {
   final String _database;
   final SqlAuth? _sqlAuth;
   final AzureAdAuth? _azureAdAuth;
+  final NtlmAuth? _ntlmAuth;
   final bool _encrypt;
   final bool _trustServerCertificate;
   final Duration _timeout;
@@ -55,6 +57,7 @@ class MssqlConnection {
     required String database,
     SqlAuth? sqlAuth,
     AzureAdAuth? azureAdAuth,
+    NtlmAuth? ntlmAuth,
     required bool encrypt,
     required bool trustServerCertificate,
     required Duration timeout,
@@ -63,6 +66,7 @@ class MssqlConnection {
         _database = database,
         _sqlAuth = sqlAuth,
         _azureAdAuth = azureAdAuth,
+        _ntlmAuth = ntlmAuth,
         _encrypt = encrypt,
         _trustServerCertificate = trustServerCertificate,
         _timeout = timeout;
@@ -113,6 +117,39 @@ class MssqlConnection {
       database: database,
       azureAdAuth: azureAdAuth,
       encrypt: true, // Azure AD always requires TLS
+      trustServerCertificate: trustServerCertificate,
+      timeout: timeout,
+    )._open();
+  }
+
+  /// Connects using Windows NTLM (SSPI) authentication.
+  ///
+  /// Sends LOGIN7 with a Type 1 negotiate blob, then completes the handshake
+  /// when the server returns [tokenSSPI] (Type 2) by sending Type 3 as
+  /// [packSSPIMessage].
+  static Future<MssqlConnection> connectNtlm({
+    required String host,
+    int port = defaultPort,
+    required String domain,
+    required String user,
+    required String password,
+    String? workstation,
+    String database = '',
+    bool encrypt = true,
+    bool trustServerCertificate = false,
+    Duration timeout = const Duration(seconds: 30),
+  }) {
+    return MssqlConnection._(
+      host: host,
+      port: port,
+      database: database,
+      ntlmAuth: NtlmAuth(
+        domain: domain,
+        username: user,
+        password: password,
+        workstation: workstation,
+      ),
+      encrypt: encrypt,
       trustServerCertificate: trustServerCertificate,
       timeout: timeout,
     )._open();
@@ -301,8 +338,15 @@ class MssqlConnection {
     // 4. LOGIN7
     await _sendLogin7();
 
-    // 5. Login response
-    final loginResult = await TokenStream(_buf).processLoginResponse();
+    // 5. Login response (may include SSPI challenge for NTLM)
+    final loginResult = await TokenStream(_buf).processLoginResponse(
+      onSspi: _ntlmAuth == null
+          ? null
+          : (challengeBytes) async {
+              final challenge = NtlmChallenge.parse(challengeBytes);
+              return _ntlmAuth!.authenticateMessage(challenge);
+            },
+    );
     _currentDatabase = loginResult.database;
     _buf.packetSize = loginResult.packetSize;
     _connected = true;
@@ -494,6 +538,22 @@ class MssqlConnection {
   }
 
   Future<void> _sendLogin7() async {
+    final ntlm = _ntlmAuth;
+    if (ntlm != null) {
+      await Login7.send(
+        _buf,
+        LoginConfig(
+          host: _host,
+          username: '',
+          password: '',
+          serverName: _host,
+          database: _database,
+          sspi: ntlm.negotiateMessage(),
+        ),
+      );
+      return;
+    }
+
     final auth = _sqlAuth;
     await Login7.send(
       _buf,
