@@ -268,6 +268,90 @@ Uint8List _featureExtAck({int featureId = featExtFedAuth}) {
   return Uint8List.fromList(out.toBytes());
 }
 
+/// Multi-part TableName after TEXT/NTEXT/IMAGE TYPE_INFO (ms-tds §2.2.7.4).
+void _writeTableName(BytesBuilder out, List<String> parts) {
+  out.addByte(parts.length);
+  for (final part in parts) {
+    writeUint16LE(out, part.length);
+    out.add(ucs2(part));
+  }
+}
+
+List<int> get _zeroCollation => [0, 0, 0, 0, 0];
+
+/// COLMETADATA for one TEXT/NTEXT/IMAGE column with optional TableName parts.
+Uint8List _colMetaLegacyLob(
+  int typeId,
+  String name, {
+  List<String> tableParts = const [],
+}) {
+  final out = BytesBuilder(copy: false);
+  out.addByte(tokenColMetadata);
+  writeUint16LE(out, 1);
+  writeUint32LE(out, 0); // userType
+  writeUint16LE(out, 0); // flags
+  out.addByte(typeId);
+  writeUint32LE(out, 0x7FFFFFFF); // MaxLen
+  if (typeId == typeText || typeId == typeNText) {
+    out.add(_zeroCollation);
+  }
+  _writeTableName(out, tableParts);
+  out.addByte(name.length);
+  out.add(ucs2(name));
+  return Uint8List.fromList(out.toBytes());
+}
+
+/// ROW for TEXT/NTEXT/IMAGE: textPtr + timestamp + LONGLEN data (or null).
+Uint8List _rowLegacyLob(List<int> data, {bool isNull = false}) {
+  final out = BytesBuilder(copy: false);
+  out.addByte(tokenRow);
+  if (isNull) {
+    out.addByte(0); // textPtrLen 0 → NULL
+    return Uint8List.fromList(out.toBytes());
+  }
+  out.addByte(16); // text pointer length
+  out.add(List.filled(16, 0x11));
+  out.add(List.filled(8, 0x22)); // timestamp
+  writeUint32LE(out, data.length);
+  out.add(data);
+  return Uint8List.fromList(out.toBytes());
+}
+
+/// ENVCHANGE type 20 (routing) — binary payload, not B_VARCHAR strings.
+Uint8List _envChangeRouting() {
+  // go-mssqldb / ms-tds §2.2.7.9: Protocol + Port + Hostname; parser skips body.
+  final payload = BytesBuilder(copy: false);
+  payload.addByte(envRouting);
+  writeUint16LE(payload, 6); // newValue length
+  payload.addByte(0); // Protocol TCP
+  writeUint16LE(payload, 1433);
+  writeUint16LE(payload, 1); // hostname char count
+  payload.add(ucs2('x'));
+  writeUint16LE(payload, 0); // oldValue empty
+  final data = payload.toBytes();
+  final out = BytesBuilder(copy: false);
+  out.addByte(tokenEnvChange);
+  writeUint16LE(out, data.length);
+  out.add(data);
+  return Uint8List.fromList(out.toBytes());
+}
+
+/// ENVCHANGE type 7 (SQL collation) — 5-byte binary new/old values.
+Uint8List _envChangeSqlCollation() {
+  final payload = BytesBuilder(copy: false);
+  payload.addByte(envSqlCollation);
+  payload.addByte(5);
+  payload.add([0x09, 0x04, 0xD0, 0x00, 0x34]); // new
+  payload.addByte(5);
+  payload.add([0, 0, 0, 0, 0]); // old
+  final data = payload.toBytes();
+  final out = BytesBuilder(copy: false);
+  out.addByte(tokenEnvChange);
+  writeUint16LE(out, data.length);
+  out.add(data);
+  return Uint8List.fromList(out.toBytes());
+}
+
 typedef _Fed = ({TdsBuffer buf, TdsSocketPair pair});
 
 Future<_Fed> _openWithBody(List<int> body) async {
@@ -661,6 +745,118 @@ void main() {
       final result = await TokenStream(fed.buf).processQueryResponse();
       expect(result.rows.single, equals([3]));
       expect(result.rowsAffected, equals(1));
+    });
+
+    // ms-tds §2.2.7.4 TableName; tedious colmetadata-token-parser; go-mssqldb types.go
+    test('TEXT COLMETADATA multi-part TableName + ROW', () async {
+      final body = [
+        ..._colMetaLegacyLob(
+          typeText,
+          'v',
+          tableParts: ['db', 'dbo', 'text_t'],
+        ),
+        ..._rowLegacyLob('hi'.codeUnits),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.columns.single.name, equals('v'));
+      expect(result.columns.single.typeInfo.typeId, equals(typeText));
+      expect(result.rows.single, equals(['hi']));
+    });
+
+    // Same TableName skip path for NTEXT (UTF-16LE ROW payload)
+    test('NTEXT COLMETADATA TableName + ROW', () async {
+      final body = [
+        ..._colMetaLegacyLob(typeNText, 'n', tableParts: ['dbo', 'ntext_t']),
+        ..._rowLegacyLob(ucs2('αβ')),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.columns.single.typeInfo.typeId, equals(typeNText));
+      expect(result.rows.single, equals(['αβ']));
+    });
+
+    // IMAGE: MaxLen only (no collation) + TableName + binary ROW
+    test('IMAGE COLMETADATA TableName + ROW', () async {
+      final body = [
+        ..._colMetaLegacyLob(typeImage, 'img', tableParts: ['dbo', 'img_t']),
+        ..._rowLegacyLob([0xDE, 0xAD]),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.columns.single.typeInfo.typeId, equals(typeImage));
+      expect(result.rows.single, equals([
+        [0xDE, 0xAD],
+      ]));
+    });
+
+    // CAST/computed LOB columns send numParts = 0 (ms-tds §2.2.7.4)
+    test('computed TEXT COLMETADATA numParts=0 + NULL ROW', () async {
+      final body = [
+        ..._colMetaLegacyLob(typeText, '', tableParts: const []),
+        ..._rowLegacyLob(const [], isNull: true),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.columns.single.typeInfo.typeId, equals(typeText));
+      expect(result.rows.single, equals([null]));
+    });
+
+    // ms-tds ENVCHANGE type 20; go-mssqldb processEnvChg routing skip
+    test('ENVCHANGE routing is skipped without desync', () async {
+      final body = [
+        ..._envChangeRouting(),
+        ..._colMetaInt('n'),
+        ..._rowInt(4),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.rows.single, equals([4]));
+    });
+
+    // ms-tds ENVCHANGE type 7 binary collation (not B_VARCHAR)
+    test('ENVCHANGE SQL collation is skipped without desync', () async {
+      final body = [
+        ..._envChangeSqlCollation(),
+        ..._colMetaInt('n'),
+        ..._rowInt(5),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.rows.single, equals([5]));
+    });
+
+    // INFO alone on success path (vs INFO+ERROR); go-mssqldb / Tedious skip
+    test('INFO token alone is skipped before COLMETADATA', () async {
+      final body = [
+        ..._infoToken('rowcount info'),
+        ..._colMetaInt('n'),
+        ..._rowInt(8),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.rows.single, equals([8]));
     });
   });
 }

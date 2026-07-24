@@ -398,4 +398,51 @@ void main() {
       expect(v, isNull);
     });
   });
+
+  group('TypeInfo TEXT/NTEXT/IMAGE decode', () {
+    // ms-tds §2.2.5.2.3 long-len; go-mssqldb types.go text/image; Tedious text
+    List<int> lobValue(List<int> data, {bool isNull = false}) {
+      if (isNull) return [0];
+      return [
+        16, // textPtrLen
+        ...List.filled(16, 0x01),
+        ...List.filled(8, 0x00), // timestamp
+        data.length & 0xFF,
+        (data.length >> 8) & 0xFF,
+        (data.length >> 16) & 0xFF,
+        (data.length >> 24) & 0xFF,
+        ...data,
+      ];
+    }
+
+    test('TEXT value', () async {
+      final v = await _decode(
+        typeInfoBytes: [typeText, 0xFF, 0xFF, 0xFF, 0x7F, ..._collation],
+        valueBytes: lobValue('ok'.codeUnits),
+      );
+      expect(v, equals('ok'));
+    });
+
+    test('NTEXT value', () async {
+      final v = await _decode(
+        typeInfoBytes: [typeNText, 0xFF, 0xFF, 0xFF, 0x7F, ..._collation],
+        valueBytes: lobValue(ucs2('xy')),
+      );
+      expect(v, equals('xy'));
+    });
+
+    test('IMAGE value and NULL', () async {
+      final bytes = await _decode(
+        typeInfoBytes: [typeImage, 0xFF, 0xFF, 0xFF, 0x7F],
+        valueBytes: lobValue([0xCA, 0xFE]),
+      );
+      expect(bytes, equals([0xCA, 0xFE]));
+
+      final n = await _decode(
+        typeInfoBytes: [typeImage, 0xFF, 0xFF, 0xFF, 0x7F],
+        valueBytes: lobValue(const [], isNull: true),
+      );
+      expect(n, isNull);
+    });
+  });
 }

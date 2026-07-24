@@ -20,6 +20,9 @@
 * Extend offline coverage: DONE_PROC/DONE_IN_PROC/RETURNSTATUS, unknown token,
   multi-set `rowsAffected` sum, 9-col NBCROW bitmap boundary, sql_variant INT/
   NVARCHAR/NULL decode, empty Attention packet framing.
+* Extend offline coverage: TEXT/NTEXT/IMAGE COLMETADATA TableName skip + ROW,
+  computed TEXT `numParts=0`, ENVCHANGE routing/collation skip, INFO-before-row,
+  TEXT/NTEXT/IMAGE TypeInfo decode.
 * CI: run unit tests without Docker before the SQL Server 2022 integration suite.
 
 ## 0.1.1
