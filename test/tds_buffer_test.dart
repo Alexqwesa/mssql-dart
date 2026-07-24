@@ -62,6 +62,72 @@ void main() {
         ]),
       );
     });
+
+    // go-mssqldb BeginPacket(resetSession) / ms-tds RESETCONNECTION 0x08
+    test('RESETCONNECTION status bit on first SQLBatch packet', () async {
+      final pair = await TdsSocketPair.open();
+      addTearDown(pair.close);
+
+      final received = BytesBuilder(copy: false);
+      pair.server.listen(received.add);
+
+      final buf = TdsBuffer(pair.client, packetSize: 4096);
+      buf.resetConnectionPending = true;
+      buf.beginPacket(packSQLBatch);
+      buf.writeByte(0x41);
+      await buf.finishPacket(packSQLBatch);
+
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final bytes = received.toBytes();
+      expect(bytes[0], packSQLBatch);
+      expect(bytes[1], statusEOM | statusResetConn); // 0x09
+      expect(buf.resetConnectionPending, isFalse);
+      expect(buf.transactionDescriptor, 0);
+    });
+
+    test('RESETCONNECTION only on first packet of multi-packet Batch', () async {
+      final pair = await TdsSocketPair.open();
+      addTearDown(pair.close);
+
+      final received = BytesBuilder(copy: false);
+      pair.server.listen(received.add);
+
+      final buf = TdsBuffer(pair.client, packetSize: 11);
+      buf.transactionDescriptor = 99;
+      buf.resetConnectionPending = true;
+      buf.beginPacket(packSQLBatch);
+      buf.writeBytes([3, 4, 5, 6]);
+      await buf.finishPacket(packSQLBatch);
+
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final bytes = received.toBytes();
+      // First packet: status = 0x00 | 0x08 = 0x08 (not EOM)
+      expect(bytes[0], packSQLBatch);
+      expect(bytes[1], statusResetConn);
+      // Second packet: EOM only
+      expect(bytes[11], packSQLBatch);
+      expect(bytes[12], statusEOM);
+      expect(buf.resetConnectionPending, isFalse);
+      expect(buf.transactionDescriptor, 0);
+    });
+
+    test('RESETCONNECTION is ignored for Attention packets', () async {
+      final pair = await TdsSocketPair.open();
+      addTearDown(pair.close);
+
+      final received = BytesBuilder(copy: false);
+      pair.server.listen(received.add);
+
+      final buf = TdsBuffer(pair.client);
+      buf.resetConnectionPending = true;
+      await buf.sendAttention();
+
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final bytes = received.toBytes();
+      expect(bytes[0], packAttention);
+      expect(bytes[1], statusEOM); // no 0x08
+      expect(buf.resetConnectionPending, isTrue); // still pending for next Batch
+    });
   });
 
   group('TdsBuffer read — header validation', () {

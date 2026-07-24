@@ -38,6 +38,11 @@ class TdsBuffer {
   /// Sent in ALL_HEADERS; 0 = autocommit (no active transaction).
   int transactionDescriptor = 0;
 
+  /// When true, the next SQLBatch / RPC / TransMgr request sets TDS
+  /// [statusResetConn] (0x08) on its first packet (ms-tds / go-mssqldb
+  /// `ResetSession`). Cleared after that packet is written.
+  bool resetConnectionPending = false;
+
   TdsBuffer(Socket socket, {this.packetSize = defaultPacketSize})
       : _socket = socket,
         _reader = ChunkedStreamReader(socket);
@@ -104,6 +109,17 @@ class TdsBuffer {
     // Body = everything after the 8-byte header placeholder.
     final body = payload.sublist(headerSize);
 
+    // RESETCONNECTION only on first packet of Batch / RPC / TM request.
+    final applyReset = resetConnectionPending &&
+        (packetType == packSQLBatch ||
+            packetType == packRPCRequest ||
+            packetType == packTransMgrReq);
+    if (applyReset) {
+      resetConnectionPending = false;
+      // Server will clear session state; drop local txn descriptor too.
+      transactionDescriptor = 0;
+    }
+
     int offset = 0;
     int seq = 1;
     while (true) {
@@ -113,7 +129,12 @@ class TdsBuffer {
 
       final pkt = Uint8List(totalSize);
       pkt[0] = packetType;
-      pkt[1] = isLast ? statusEOM : statusNormal;
+      var status = isLast ? statusEOM : statusNormal;
+      // ms-tds: RESETCONNECTION must be on the first packet of the message.
+      if (applyReset && seq == 1) {
+        status |= statusResetConn;
+      }
+      pkt[1] = status;
       pkt[2] = (totalSize >> 8) & 0xFF;
       pkt[3] = totalSize & 0xFF;
       pkt[4] = 0; // SPID hi

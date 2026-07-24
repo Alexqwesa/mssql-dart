@@ -65,6 +65,9 @@
 * LAN session DB: track ENVCHANGE database (`conn.database` / `initialDatabase`);
   `resetDatabase()`; pool `resetOnRelease` (default true) runs `USE` before
   reuse (`test/session_db_live_test.dart`).
+* LAN TDS RESETCONNECTION: `requestSessionReset` / `resetSession` set status
+  `0x08` on next Batch/RPC (go-mssqldb ResetSession); pool `resetOnRelease`
+  uses it to clear temp tables and session settings.
 
 ## 0.1.1
 

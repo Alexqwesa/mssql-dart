@@ -1,7 +1,7 @@
 import 'package:mssql/mssql.dart';
 import 'package:test/test.dart';
 
-/// Live USE / ENVCHANGE database tracking + pool resetOnRelease.
+/// Live USE / ENVCHANGE + TDS RESETCONNECTION pool reset.
 ///
 /// Requires `dart-mssql` on 127.0.0.1:14330. Skips when unreachable.
 
@@ -125,6 +125,76 @@ void main() {
 
     final b = await pool.acquire();
     expect(b.database.toLowerCase(), 'tempdb');
+    await pool.release(b);
+  });
+
+  test('resetSession clears temp table and restores database', () async {
+    if (!available) {
+      markTestSkipped('SQL Server not available on :$_port');
+      return;
+    }
+    final c = await MssqlConnection.connect(
+      host: _host,
+      port: _port,
+      user: _user,
+      password: _password,
+      database: 'master',
+      encrypt: false,
+      trustServerCertificate: true,
+    );
+    addTearDown(c.close);
+
+    await c.query('USE tempdb');
+    // Temp tables need a SQL batch (not sp_executesql) for session scope.
+    await c.query(
+      'CREATE TABLE #reset_probe (id INT); INSERT INTO #reset_probe VALUES (1)',
+    );
+    final before = await c.query('SELECT id FROM #reset_probe');
+    expect(before[0]['id'], 1);
+
+    expect(await c.resetSession(), isTrue);
+    expect(c.database.toLowerCase(), 'master');
+
+    await expectLater(
+      c.query('SELECT id FROM #reset_probe'),
+      throwsA(isA<MssqlException>()),
+    );
+  });
+
+  test('pool resetOnRelease clears temp table for next borrower', () async {
+    if (!available) {
+      markTestSkipped('SQL Server not available on :$_port');
+      return;
+    }
+
+    final pool = MssqlPool(const MssqlPoolConfig(
+      host: _host,
+      port: _port,
+      user: _user,
+      password: _password,
+      database: 'master',
+      encrypt: false,
+      trustServerCertificate: true,
+      min: 0,
+      max: 1,
+      validateOnAcquire: false,
+      resetOnRelease: true,
+    ));
+    await pool.open();
+    addTearDown(pool.close);
+
+    final a = await pool.acquire();
+    await a.query(
+      'CREATE TABLE #pool_probe (id INT); INSERT INTO #pool_probe VALUES (42)',
+    );
+    await pool.release(a);
+
+    final b = await pool.acquire();
+    expect(identical(a, b), isTrue);
+    await expectLater(
+      b.query('SELECT id FROM #pool_probe'),
+      throwsA(isA<MssqlException>()),
+    );
     await pool.release(b);
   });
 }

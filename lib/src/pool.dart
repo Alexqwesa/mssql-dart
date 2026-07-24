@@ -55,9 +55,9 @@ class MssqlPoolConfig {
   /// discarded instead of handed to callers.
   final bool validateOnAcquire;
 
-  /// When true (default), [MssqlPool.release] runs `USE` back to [database]
-  /// (or the connection's login database) so a caller that switched databases
-  /// does not poison the next acquire.
+  /// When true (default), [MssqlPool.release] runs [MssqlConnection.resetSession]
+  /// (TDS RESETCONNECTION) so temp tables / `SET` options / `USE` from the
+  /// previous borrower do not leak to the next acquire.
   final bool resetOnRelease;
 
   const MssqlPoolConfig({
@@ -289,9 +289,9 @@ class MssqlPool {
 
   /// Releases a connection back to the pool.
   ///
-  /// When [MssqlPoolConfig.resetOnRelease] is true, switches the session back
-  /// to the pool database (or login database) via `USE` before reuse. Failed
-  /// resets discard the connection.
+  /// When [MssqlPoolConfig.resetOnRelease] is true, runs
+  /// [MssqlConnection.resetSession] (TDS RESETCONNECTION + `SELECT 1`) before
+  /// reuse. Failed resets discard the connection.
   ///
   /// If there are pending callers, the connection is handed directly to the
   /// next waiter. Otherwise it goes to the idle list.
@@ -302,11 +302,16 @@ class MssqlPool {
     }
 
     if (config.resetOnRelease) {
-      final target =
-          config.database.isNotEmpty ? config.database : conn.initialDatabase;
-      if (target.isNotEmpty) {
-        final ok = await conn.resetDatabase(target);
-        if (!ok || !conn.isOpen) {
+      final ok = await conn.resetSession();
+      if (!ok || !conn.isOpen) {
+        _discard(conn);
+        return;
+      }
+      // If pool config pins a database and reset left us elsewhere, USE.
+      if (config.database.isNotEmpty &&
+          conn.database.toLowerCase() != config.database.toLowerCase()) {
+        final dbOk = await conn.resetDatabase(config.database);
+        if (!dbOk || !conn.isOpen) {
           _discard(conn);
           return;
         }

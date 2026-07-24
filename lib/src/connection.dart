@@ -375,8 +375,7 @@ class MssqlConnection {
   /// Switches the session database with `USE` if needed.
   ///
   /// [database] defaults to [initialDatabase]. No-op when already on target
-  /// (case-insensitive). Returns `false` and closes the connection on failure
-  /// (used by [MssqlPool] session reset).
+  /// (case-insensitive). Returns `false` and closes the connection on failure.
   Future<bool> resetDatabase([String? database]) async {
     final target = (database == null || database.isEmpty)
         ? _initialDatabase
@@ -390,6 +389,46 @@ class MssqlConnection {
     try {
       await query('USE ${_bracketIdent(target)}');
       return _connected && _dbEquals(_currentDatabase, target);
+    } catch (_) {
+      await close();
+      return false;
+    }
+  }
+
+  /// Marks the next Batch/RPC packet with TDS [statusResetConn] (0x08).
+  ///
+  /// The server clears session state (temp tables, `SET` options, context,
+  /// database → login default) before running that request — same as
+  /// go-mssqldb `ResetSession`. Prefer [resetSession] when the wipe must
+  /// happen immediately (e.g. pool release).
+  void requestSessionReset() {
+    _assertOpen();
+    _buf.resetConnectionPending = true;
+  }
+
+  /// Resets session state via TDS RESETCONNECTION, then a cheap `SELECT 1`.
+  ///
+  /// Clears temp tables and most session settings; restores the login
+  /// database (ENVCHANGE). Returns `false` and closes on failure. Used by
+  /// [MssqlPool] when [MssqlPoolConfig.resetOnRelease] is enabled.
+  Future<bool> resetSession() async {
+    if (!_connected) return false;
+    if (_busy) {
+      throw StateError('Cannot resetSession while a query is in progress');
+    }
+    try {
+      requestSessionReset();
+      final r = await query('SELECT 1 AS ok');
+      if (r.isEmpty || r[0]['ok'] != 1) {
+        await close();
+        return false;
+      }
+      // Prefer ENVCHANGE; fall back to known login DB if server omitted it.
+      if (_initialDatabase.isNotEmpty &&
+          !_dbEquals(_currentDatabase, _initialDatabase)) {
+        _currentDatabase = _initialDatabase;
+      }
+      return true;
     } catch (_) {
       await close();
       return false;
