@@ -174,10 +174,10 @@ await conn.transaction((c) async {
 }, isolation: MssqlIsolationLevel.repeatableRead);
 ```
 
-### Typed GUID / money / datetimeoffset / decimal
+### Typed GUID / money / datetimeoffset / decimal / varchar / date / time
 
 ```dart
-await conn.query('SELECT @g, @m, @d, @dec', {
+await conn.query('SELECT @g, @m, @d, @dec, @v, @day, @tod', {
   'g': MssqlGuid('6F9619FF-8B86-D011-B42D-00C04FC964FF'),
   'm': MssqlMoney(1234.56),
   'd': MssqlDateTimeOffset(
@@ -185,6 +185,10 @@ await conn.query('SELECT @g, @m, @d, @dec', {
     offset: Duration(hours: 5, minutes: 30),
   ),
   'dec': MssqlDecimal(19.99, precision: 10, scale: 2),
+  // Bare String → nvarchar; use MssqlVarchar for varchar columns (LAN collations)
+  'v': MssqlVarchar('bob'),
+  'day': MssqlDate(2024, 7, 24),
+  'tod': MssqlTime(hour: 14, minute: 30, second: 0),
 });
 ```
 
@@ -446,6 +450,9 @@ Named parameters use `@name` placeholders. Supported Dart → SQL type mappings:
 | `MssqlMoney` / `MssqlSmallMoney` | money / smallmoney |
 | `MssqlDateTimeOffset` | datetimeoffset       |
 | `MssqlDecimal` | decimal(p,s) / numeric(p,s) |
+| `MssqlVarchar` | varchar (Latin-1; bare `String` → nvarchar) |
+| `MssqlDate`    | date |
+| `MssqlTime`    | time(s) |
 | `MssqlTvp`   | user-defined table type (`… READONLY`) |
 | `MssqlOutput`| OUTPUT / INPUT-OUTPUT (with [call]) |
 | `null`       | NULL (any type)             |

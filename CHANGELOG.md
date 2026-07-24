@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+* LAN typed binders: `MssqlVarchar`, `MssqlDate`, `MssqlTime` for varchar /
+  date / time params (bare `String`/`DateTime` stay nvarchar/datetime2).
 * LAN Always On / HA: `ApplicationIntent=ReadOnly` (`readOnlyIntent` → LOGIN7
   `fReadOnlyIntent`); ENVCHANGE type 20 routing reconnect (one hop);
   `FailoverPartner` / `FailoverPort` on primary connect failure;

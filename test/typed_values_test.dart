@@ -9,10 +9,10 @@ import 'package:test/test.dart';
 
 import 'helpers/tds_socket.dart';
 
-/// Offline encode tests for [MssqlGuid] / [MssqlMoney] / [MssqlDateTimeOffset].
+/// Offline encode tests for typed SQL binders.
 ///
 /// Sources: go-mssqldb UniqueIdentifier.Value, makeMoneyParam,
-/// encodeDateTimeOffset; ms-tds TYPE_INFO for GUID / MONEYN / DATETIMEOFFSETN.
+/// encodeDateTimeOffset, VarChar / civil.Date / civil.Time; ms-tds TYPE_INFO.
 
 Future<Uint8List> _capture(Future<void> Function(TdsBuffer buf) send) async {
   final pair = await TdsSocketPair.open();
@@ -135,6 +135,52 @@ void main() {
       final body = _body(pkt);
       expect(_containsUcs2(body, '@d decimal(10,2)'), isTrue);
       expect(body.contains(typeDecimalN), isTrue);
+    });
+
+    test('varchar / date / time decls + wire types', () async {
+      final pkt = await _capture(
+        (buf) => RpcRequest.sendExecuteSql(
+          buf,
+          'SELECT @v, @d, @t',
+          {
+            'v': const MssqlVarchar('hi'),
+            'd': MssqlDate(2024, 3, 15),
+            't': MssqlTime(hour: 14, minute: 30, second: 45, scale: 7),
+          },
+        ),
+      );
+      final body = _body(pkt);
+      expect(_containsUcs2(body, '@v varchar(8000)'), isTrue);
+      expect(_containsUcs2(body, '@d date'), isTrue);
+      expect(_containsUcs2(body, '@t time(7)'), isTrue);
+      expect(body.contains(typeBigVarChar), isTrue);
+      expect(body.contains(typeDateN), isTrue);
+      expect(body.contains(typeTimeN), isTrue);
+      // Latin-1 'hi' appears as raw bytes, not UCS-2
+      expect(body.contains(0x68) && body.contains(0x69), isTrue);
+    });
+  });
+
+  group('MssqlVarchar / MssqlDate / MssqlTime', () {
+    test('varchar rejects non-Latin-1', () {
+      expect(
+        () => const MssqlVarchar('café€').toWireBytes(),
+        throwsArgumentError,
+      );
+    });
+
+    test('date daysSinceYear1 for 0001-01-01 is 0', () {
+      expect(MssqlDate(1, 1, 1).daysSinceYear1, equals(0));
+    });
+
+    test('time fromDuration midnight + 1h', () {
+      final t = MssqlTime.fromDuration(const Duration(hours: 1, minutes: 2));
+      expect(t.hour, equals(1));
+      expect(t.minute, equals(2));
+    });
+
+    test('invalid date throws', () {
+      expect(() => MssqlDate(2024, 2, 30), throwsArgumentError);
     });
   });
 

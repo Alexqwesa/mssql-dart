@@ -120,6 +120,9 @@ class RpcRequest {
     if (v is MssqlSmallMoney) return 'smallmoney';
     if (v is MssqlDateTimeOffset) return 'datetimeoffset';
     if (v is MssqlDecimal) return v.sqlDecl;
+    if (v is MssqlVarchar) return v.sqlDecl;
+    if (v is MssqlDate) return 'date';
+    if (v is MssqlTime) return v.sqlDecl;
     if (v is int) return 'bigint';
     if (v is double) return 'float';
     if (v is bool) return 'bit';
@@ -183,6 +186,12 @@ class RpcRequest {
         _writeDateTimeOffsetParam(buf, v);
       case MssqlDecimal v:
         _writeDecimalParam(buf, v);
+      case MssqlVarchar v:
+        _writeVarCharParam(buf, v);
+      case MssqlDate v:
+        _writeDateParam(buf, v);
+      case MssqlTime v:
+        _writeTimeParam(buf, v);
       case int v:
         buf.writeByte(typeIntN);
         buf.writeByte(8); // max len
@@ -251,6 +260,17 @@ class RpcRequest {
     }
     if (t.startsWith('datetimeoffset')) {
       buf.writeByte(typeDateTimeOffsetN);
+      buf.writeByte(7);
+      buf.writeByte(0);
+      return;
+    }
+    if (t == 'date') {
+      buf.writeByte(typeDateN);
+      buf.writeByte(0);
+      return;
+    }
+    if (t.startsWith('time')) {
+      buf.writeByte(typeTimeN);
       buf.writeByte(7);
       buf.writeByte(0);
       return;
@@ -348,6 +368,56 @@ class RpcRequest {
     buf.writeByte(d.scale);
     buf.writeByte(bytes.length); // value len
     buf.writeBytes(bytes);
+  }
+
+  /// `varchar` / typeBigVarChar (go-mssqldb VarChar) — Latin-1, not UCS-2.
+  static void _writeVarCharParam(TdsBuffer buf, MssqlVarchar v) {
+    final valueBytes = Uint8List.fromList(v.toWireBytes());
+    final isMax = v.max || valueBytes.length > 8000;
+
+    buf.writeByte(typeBigVarChar);
+    buf.writeUint16LE(isMax ? 0xFFFF : 8000);
+    _writeCollation(buf);
+
+    if (isMax) {
+      buf.writeUint64LE(valueBytes.length);
+      buf.writeUint32LE(valueBytes.length);
+      buf.writeBytes(valueBytes);
+      buf.writeUint32LE(plpTerminator);
+    } else {
+      buf.writeUint16LE(valueBytes.length);
+      buf.writeBytes(valueBytes);
+    }
+  }
+
+  /// `date` / typeDateN — 3-byte days since 0001-01-01.
+  static void _writeDateParam(TdsBuffer buf, MssqlDate d) {
+    final days = d.daysSinceYear1;
+    buf.writeByte(typeDateN);
+    buf.writeByte(3);
+    buf.writeByte(days & 0xFF);
+    buf.writeByte((days >> 8) & 0xFF);
+    buf.writeByte((days >> 16) & 0xFF);
+  }
+
+  /// `time(s)` / typeTimeN — scale + time ticks (no date).
+  static void _writeTimeParam(TdsBuffer buf, MssqlTime t) {
+    final scale = t.scale.clamp(0, 7);
+    final dt = DateTime.utc(
+      1970,
+      1,
+      1,
+      t.hour,
+      t.minute,
+      t.second,
+      t.microsecond ~/ 1000,
+      t.microsecond % 1000,
+    );
+    final timeBytes = _encodeTimeBytes(dt, scale);
+    buf.writeByte(typeTimeN);
+    buf.writeByte(scale);
+    buf.writeByte(timeBytes.length);
+    buf.writeBytes(timeBytes);
   }
 
   static void _writeGuidParam(TdsBuffer buf, MssqlGuid guid) {

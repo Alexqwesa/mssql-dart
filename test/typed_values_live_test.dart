@@ -1,7 +1,8 @@
 import 'package:mssql/mssql.dart';
 import 'package:test/test.dart';
 
-/// Live round-trips for typed GUID / money / datetimeoffset binders.
+/// Live round-trips for typed SQL binders (GUID / money / DTO / decimal /
+/// varchar / date / time).
 ///
 /// Skips when 127.0.0.1:14330 is unreachable.
 
@@ -129,5 +130,54 @@ void main() {
     );
     expect(r[0]['d'] as double, closeTo(1234.56, 0.001));
     expect(r[0]['n'] as double, closeTo(-99.99, 0.0001));
+  });
+
+  test('MssqlVarchar / MssqlDate / MssqlTime round-trip', () async {
+    if (!available) {
+      markTestSkipped('SQL Server not available on :$_port');
+      return;
+    }
+    final r = await conn.query(
+      'SELECT @v AS v, @d AS d, @t AS t, '
+      "SQL_VARIANT_PROPERTY(CAST(@v AS sql_variant), 'BaseType') AS vb, "
+      "SQL_VARIANT_PROPERTY(CAST(@d AS sql_variant), 'BaseType') AS db, "
+      "SQL_VARIANT_PROPERTY(CAST(@t AS sql_variant), 'BaseType') AS tb",
+      {
+        'v': const MssqlVarchar('lan-ascii'),
+        'd': MssqlDate(2024, 7, 24),
+        't': MssqlTime(hour: 14, minute: 30, second: 45, microsecond: 123000),
+      },
+    );
+    expect(r[0]['v'], equals('lan-ascii'));
+    expect((r[0]['vb'] as String).toLowerCase(), equals('varchar'));
+    expect((r[0]['db'] as String).toLowerCase(), equals('date'));
+    expect((r[0]['tb'] as String).toLowerCase(), equals('time'));
+
+    final d = r[0]['d'] as DateTime;
+    expect(d.year, equals(2024));
+    expect(d.month, equals(7));
+    expect(d.day, equals(24));
+
+    final t = r[0]['t'] as DateTime;
+    expect(t.hour, equals(14));
+    expect(t.minute, equals(30));
+    expect(t.second, equals(45));
+  });
+
+  test('MssqlVarchar into varchar column avoids nvarchar mismatch', () async {
+    if (!available) {
+      markTestSkipped('SQL Server not available on :$_port');
+      return;
+    }
+    await conn.execute(
+      'IF OBJECT_ID(\'tempdb..#vt\') IS NOT NULL DROP TABLE #vt;'
+      'CREATE TABLE #vt (name varchar(32) NOT NULL);',
+    );
+    await conn.execute(
+      'INSERT INTO #vt (name) VALUES (@n)',
+      {'n': const MssqlVarchar('bob')},
+    );
+    final r = await conn.query('SELECT name FROM #vt');
+    expect(r[0]['name'], equals('bob'));
   });
 }

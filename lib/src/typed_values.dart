@@ -244,3 +244,158 @@ class MssqlDecimal {
     return '$neg${abs.substring(0, split)}.${abs.substring(split)}';
   }
 }
+
+/// SQL `varchar` parameter (8-bit / collation bytes) — not `nvarchar`.
+///
+/// Bare [String] params are sent as `nvarchar`. Use this when the column or
+/// SP parameter is `varchar` / `char` so the server avoids implicit conversions
+/// (go-mssqldb `mssql.VarChar`).
+///
+/// Values are encoded as Latin-1 (`0x00`–`0xFF` code units). Non-Latin-1
+/// characters throw [ArgumentError].
+class MssqlVarchar {
+  final String value;
+
+  /// Force `varchar(max)` / PLP (also used automatically when length > 8000).
+  final bool max;
+
+  const MssqlVarchar(this.value, {this.max = false});
+
+  /// Latin-1 wire bytes (same decode path as [typeBigVarChar] reads).
+  List<int> toWireBytes() {
+    final out = <int>[];
+    for (final c in value.codeUnits) {
+      if (c > 0xFF) {
+        throw ArgumentError.value(
+          value,
+          'value',
+          'MssqlVarchar requires Latin-1 (code unit ≤ 0xFF); got U+${c.toRadixString(16)}',
+        );
+      }
+      out.add(c);
+    }
+    return out;
+  }
+
+  String get sqlDecl {
+    if (max || value.length > 8000) return 'varchar(max)';
+    return 'varchar(8000)';
+  }
+
+  @override
+  String toString() => value;
+}
+
+/// SQL `date` parameter (date-only, no time) — go-mssqldb / civil.Date.
+///
+/// Prefer this over bare [DateTime] when the column is `date` (bare [DateTime]
+/// is sent as `datetime2`).
+class MssqlDate {
+  final int year;
+  final int month;
+  final int day;
+
+  MssqlDate(this.year, this.month, this.day) {
+    if (month < 1 || month > 12) {
+      throw ArgumentError.value(month, 'month', 'must be 1–12');
+    }
+    if (day < 1 || day > 31) {
+      throw ArgumentError.value(day, 'day', 'must be 1–31');
+    }
+    // Dart DateTime overflows invalid days (Feb 30 → Mar); reject those.
+    final dt = DateTime.utc(year, month, day);
+    if (dt.year != year || dt.month != month || dt.day != day) {
+      throw ArgumentError('Invalid calendar date $year-$month-$day');
+    }
+  }
+
+  factory MssqlDate.fromDateTime(DateTime dt) =>
+      MssqlDate(dt.year, dt.month, dt.day);
+
+  /// Days since 0001-01-01 (ms-tds DATE).
+  int get daysSinceYear1 =>
+      DateTime.utc(year, month, day).difference(DateTime.utc(1, 1, 1)).inDays;
+
+  @override
+  String toString() =>
+      '${year.toString().padLeft(4, '0')}-'
+      '${month.toString().padLeft(2, '0')}-'
+      '${day.toString().padLeft(2, '0')}';
+}
+
+/// SQL `time` parameter (time-of-day, no date) — go-mssqldb / civil.Time.
+///
+/// Prefer this over bare [DateTime] when the column is `time`.
+class MssqlTime {
+  final int hour;
+  final int minute;
+  final int second;
+
+  /// Fractional seconds as microseconds (0–999999); truncated to [scale].
+  final int microsecond;
+
+  /// Scale 0–7 (default 7).
+  final int scale;
+
+  MssqlTime({
+    required this.hour,
+    required this.minute,
+    this.second = 0,
+    this.microsecond = 0,
+    this.scale = 7,
+  }) {
+    if (hour < 0 || hour > 23) {
+      throw ArgumentError.value(hour, 'hour', 'must be 0–23');
+    }
+    if (minute < 0 || minute > 59) {
+      throw ArgumentError.value(minute, 'minute', 'must be 0–59');
+    }
+    if (second < 0 || second > 59) {
+      throw ArgumentError.value(second, 'second', 'must be 0–59');
+    }
+    if (microsecond < 0 || microsecond > 999999) {
+      throw ArgumentError.value(microsecond, 'microsecond', 'must be 0–999999');
+    }
+    if (scale < 0 || scale > 7) {
+      throw ArgumentError.value(scale, 'scale', 'must be 0–7');
+    }
+  }
+
+  factory MssqlTime.fromDateTime(DateTime dt, {int scale = 7}) => MssqlTime(
+        hour: dt.hour,
+        minute: dt.minute,
+        second: dt.second,
+        microsecond: dt.millisecond * 1000 + dt.microsecond,
+        scale: scale,
+      );
+
+  factory MssqlTime.fromDuration(Duration d, {int scale = 7}) {
+    final us = d.inMicroseconds;
+    if (us < 0 || us >= Duration.microsecondsPerDay) {
+      throw ArgumentError.value(d, 'd', 'must be within 00:00:00–23:59:59.999999');
+    }
+    final h = us ~/ Duration.microsecondsPerHour;
+    final rem = us % Duration.microsecondsPerHour;
+    final m = rem ~/ Duration.microsecondsPerMinute;
+    final rem2 = rem % Duration.microsecondsPerMinute;
+    final s = rem2 ~/ Duration.microsecondsPerSecond;
+    final micros = rem2 % Duration.microsecondsPerSecond;
+    return MssqlTime(
+      hour: h,
+      minute: m,
+      second: s,
+      microsecond: micros,
+      scale: scale,
+    );
+  }
+
+  String get sqlDecl => 'time($scale)';
+
+  @override
+  String toString() {
+    final frac = microsecond.toString().padLeft(6, '0');
+    return '${hour.toString().padLeft(2, '0')}:'
+        '${minute.toString().padLeft(2, '0')}:'
+        '${second.toString().padLeft(2, '0')}.$frac';
+  }
+}
