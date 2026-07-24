@@ -130,14 +130,15 @@ class BulkLoad {
     for (final col in columns) {
       buf.writeUint32LE(0); // userType
       buf.writeUint16LE(_colFlags);
-      _writeTypeInfo(buf, col);
+      writeTypeInfo(buf, col);
       final name = _ucs2(col.name);
       buf.writeByte(name.length >> 1);
       buf.writeBytes(name);
     }
   }
 
-  static void _writeTypeInfo(TdsBuffer buf, BulkColumn col) {
+  /// TYPE_INFO for bulk / TVP columns (ms-tds §2.2.5.4).
+  static void writeTypeInfo(TdsBuffer buf, BulkColumn col) {
     switch (col.type) {
       case BulkColumnType.bigInt:
         buf.writeByte(typeIntN);
@@ -166,11 +167,12 @@ class BulkLoad {
   ) {
     buf.writeByte(tokenRow);
     for (var i = 0; i < columns.length; i++) {
-      _writeValue(buf, columns[i], values[i]);
+      writeCell(buf, columns[i], values[i]);
     }
   }
 
-  static void _writeValue(TdsBuffer buf, BulkColumn col, Object? value) {
+  /// One cell value (null / INTN / NVARCHAR / …) for bulk or TVP rows.
+  static void writeCell(TdsBuffer buf, BulkColumn col, Object? value) {
     if (value == null) {
       switch (col.type) {
         case BulkColumnType.bigInt:

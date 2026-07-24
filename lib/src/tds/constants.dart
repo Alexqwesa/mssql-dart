@@ -142,6 +142,10 @@ const int plpNull = 0xFFFFFFFFFFFFFFFF;
 const int unknownPlpLen = 0xFFFFFFFFFFFFFFFE;
 const int plpTerminator = 0x00000000;
 
+// TVP stream tokens (ms-tds §2.2.5.5.5 / go-mssqldb)
+const int tvpEndToken = 0x00;
+const int tvpRowToken = 0x01;
+
 // Default values
 const int defaultPacketSize = 4096;
 const int defaultPort = 1433;

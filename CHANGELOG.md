@@ -72,6 +72,8 @@
   (`MssqlConnectionString`, `connectFromString`, `MssqlPoolConfig.fromConnectionString`).
 * LAN bulk insert: TDS Bulk Load BCP (`INSERT BULK` + COLMETADATA/ROW) via
   `MssqlConnection.bulkInsert` (`test/bulk_encode_test.dart`, `bulk_live_test.dart`).
+* LAN TVP: `MssqlTvp` as `sp_executesql` parameter (type 0xF3) for user-defined
+  table types (`test/tvp_encode_test.dart`, `tvp_live_test.dart`).
 
 ## 0.1.1
 

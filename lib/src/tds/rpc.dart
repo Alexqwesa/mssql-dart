@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'buf.dart';
 import 'constants.dart';
+import 'tvp.dart';
 
 /// Sends an RPC request using sp_executesql for parameterised queries.
 ///
@@ -77,6 +78,7 @@ class RpcRequest {
 
   static String _dartTypeToSql(Object? v) {
     if (v == null) return 'nvarchar(max)';
+    if (v is MssqlTvp) return v.readonlyDecl;
     if (v is int) return 'bigint';
     if (v is double) return 'float';
     if (v is bool) return 'bit';
@@ -105,6 +107,8 @@ class RpcRequest {
     }
 
     switch (value) {
+      case MssqlTvp v:
+        v.writeTypeAndValue(buf);
       case int v:
         buf.writeByte(typeIntN);
         buf.writeByte(8); // max len

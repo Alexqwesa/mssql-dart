@@ -12,3 +12,4 @@ export 'src/result.dart';
 export 'src/server_endpoint.dart';
 export 'src/tds/bulk.dart';
 export 'src/tds/sql_browser.dart';
+export 'src/tds/tvp.dart';

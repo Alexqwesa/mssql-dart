@@ -63,6 +63,7 @@ jobs:
             test/named_instance_test.dart \
             test/connection_string_test.dart \
             test/bulk_encode_test.dart \
+            test/tvp_encode_test.dart \
             --timeout=60s
 
   # ════════════════════════════════════════════════════════════════════════════
