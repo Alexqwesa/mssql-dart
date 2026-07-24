@@ -47,6 +47,8 @@
   TargetInfo has MsvAvTimestamp; KEY_EXCH EncryptedRandomSessionKey via RC4.
 * NTLM TLS channel bindings: `tls-server-end-point` CBT → MsvAvChannelBindings
   after SecureSocket handshake (SQL Extended Protection).
+* Mock FedAuth login handshake: PreLogin(fedAuth) → Login7 FeatureExt →
+  FEATUREEXTACK + LOGINACK (`test/mock_fedauth_login_test.dart`).
 
 ## 0.1.1
 
