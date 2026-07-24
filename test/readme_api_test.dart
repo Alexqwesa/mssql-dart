@@ -319,6 +319,25 @@ void main() {
       // Don't open — just verify the config compiles.
     });
 
+    test('MssqlPoolConfig.ntlm params compile', () {
+      final pool = MssqlPool(MssqlPoolConfig.ntlm(
+        host: _host,
+        port: _port,
+        domain: 'CORP',
+        user: _user,
+        password: _pass,
+        workstation: 'DEV',
+        database: 'master',
+        encrypt: false,
+        trustServerCertificate: true,
+        min: 0,
+        max: 2,
+      ));
+      expect(pool.config.ntlmDomain, 'CORP');
+      expect(pool.config.ntlmWorkstation, 'DEV');
+      // Don't open — needs domain SQL / NTLM.
+    });
+
     test('pool.open() pre-warms min connections', () async {
       final pool = MssqlPool(MssqlPoolConfig(
         host: _host,

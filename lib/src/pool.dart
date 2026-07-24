@@ -15,6 +15,13 @@ class MssqlPoolConfig {
   final bool trustServerCertificate;
   final Duration connectionTimeout;
 
+  /// When non-null, [MssqlPool] opens connections via
+  /// [MssqlConnection.connectNtlm] (Windows SSPI / NTLMv2) instead of SQL auth.
+  final String? ntlmDomain;
+
+  /// Optional workstation name for NTLM (used only when [ntlmDomain] is set).
+  final String? ntlmWorkstation;
+
   /// Minimum number of idle connections to keep open (default 0).
   final int min;
 
@@ -36,11 +43,48 @@ class MssqlPoolConfig {
     this.encrypt = true,
     this.trustServerCertificate = false,
     this.connectionTimeout = const Duration(seconds: 30),
+    this.ntlmDomain,
+    this.ntlmWorkstation,
     this.min = 0,
     this.max = 10,
     this.idleTimeout = const Duration(seconds: 30),
     this.acquireTimeout = const Duration(seconds: 15),
   });
+
+  /// Pool config that opens connections with Windows NTLM (SSPI).
+  factory MssqlPoolConfig.ntlm({
+    required String host,
+    int port = 1433,
+    required String domain,
+    required String user,
+    required String password,
+    String? workstation,
+    String database = '',
+    bool encrypt = true,
+    bool trustServerCertificate = false,
+    Duration connectionTimeout = const Duration(seconds: 30),
+    int min = 0,
+    int max = 10,
+    Duration idleTimeout = const Duration(seconds: 30),
+    Duration acquireTimeout = const Duration(seconds: 15),
+  }) {
+    return MssqlPoolConfig(
+      host: host,
+      port: port,
+      user: user,
+      password: password,
+      database: database,
+      encrypt: encrypt,
+      trustServerCertificate: trustServerCertificate,
+      connectionTimeout: connectionTimeout,
+      ntlmDomain: domain,
+      ntlmWorkstation: workstation,
+      min: min,
+      max: max,
+      idleTimeout: idleTimeout,
+      acquireTimeout: acquireTimeout,
+    );
+  }
 }
 
 class _IdleEntry {
@@ -67,6 +111,9 @@ class _IdleEntry {
 ///
 /// await pool.close();
 /// ```
+///
+/// For Windows auth, use [MssqlPoolConfig.ntlm] (requires a domain-joined SQL
+/// Server that accepts NTLM/SSPI).
 class MssqlPool {
   final MssqlPoolConfig config;
 
@@ -249,16 +296,33 @@ class MssqlPool {
 
   // ── Internals ──────────────────────────────────────────────────────────────
 
-  Future<MssqlConnection> _openConnection() => MssqlConnection.connect(
+  Future<MssqlConnection> _openConnection() {
+    final domain = config.ntlmDomain;
+    if (domain != null) {
+      return MssqlConnection.connectNtlm(
         host: config.host,
         port: config.port,
+        domain: domain,
         user: config.user,
         password: config.password,
+        workstation: config.ntlmWorkstation,
         database: config.database,
         encrypt: config.encrypt,
         trustServerCertificate: config.trustServerCertificate,
         timeout: config.connectionTimeout,
       );
+    }
+    return MssqlConnection.connect(
+      host: config.host,
+      port: config.port,
+      user: config.user,
+      password: config.password,
+      database: config.database,
+      encrypt: config.encrypt,
+      trustServerCertificate: config.trustServerCertificate,
+      timeout: config.connectionTimeout,
+    );
+  }
 
   Future<void> _createAndIdle() async {
     _total++;
