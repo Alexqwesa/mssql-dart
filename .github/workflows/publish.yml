@@ -47,6 +47,9 @@ jobs:
             test/unit_test.dart \
             test/tds_buffer_test.dart \
             test/mock_prelogin_test.dart \
+            test/login7_encode_test.dart \
+            test/token_stream_test.dart \
+            test/type_decode_test.dart \
             --timeout=60s
 
   # ════════════════════════════════════════════════════════════════════════════

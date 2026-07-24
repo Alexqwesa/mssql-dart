@@ -6,6 +6,9 @@
   (carry unread remainder into the next packet — upstream PR #3).
 * Add protocol unit tests inspired by microsoft/go-mssqldb (`buf_test.go`,
   `bad_server_test.go`): `test/tds_buffer_test.dart`, `test/mock_prelogin_test.dart`.
+* Add Login7 golden encode, token-stream, and TypeInfo decode offline unit tests
+  (`test/login7_encode_test.dart`, `test/token_stream_test.dart`,
+  `test/type_decode_test.dart`) with shared `test/helpers/tds_socket.dart`.
 * CI: run unit tests without Docker before the SQL Server 2022 integration suite.
 
 ## 0.1.1

@@ -1,0 +1,157 @@
+import 'dart:async';
+import 'dart:typed_data';
+
+import 'package:mssql/src/tds/buf.dart';
+import 'package:mssql/src/tds/constants.dart';
+import 'package:mssql/src/tds/login7.dart';
+import 'package:test/test.dart';
+
+import 'helpers/tds_socket.dart';
+
+/// Golden Login7 encoding tests inspired by go-mssqldb login fixtures.
+
+Future<Uint8List> _captureLogin7Body(LoginConfig cfg) async {
+  final pair = await TdsSocketPair.open();
+  final completer = Completer<Uint8List>();
+  final chunks = BytesBuilder(copy: false);
+
+  pair.server.listen((data) {
+    chunks.add(data);
+    final all = chunks.toBytes();
+    if (all.length >= headerSize) {
+      final size = (all[2] << 8) | all[3];
+      if (all.length >= size && !completer.isCompleted) {
+        completer.complete(Uint8List.fromList(all.sublist(headerSize, size)));
+      }
+    }
+  });
+
+  final buf = TdsBuffer(pair.client);
+  await Login7.send(buf, cfg);
+  final body = await completer.future.timeout(const Duration(seconds: 2));
+  await pair.close();
+  return body;
+}
+
+String _ucs2At(List<int> body, int byteOffset, int charCount) {
+  final bytes = body.sublist(byteOffset, byteOffset + charCount * 2);
+  return String.fromCharCodes([
+    for (var i = 0; i < bytes.length; i += 2)
+      bytes[i] | (bytes[i + 1] << 8),
+  ]);
+}
+
+void main() {
+  const host = 'localhost';
+  const user = 'sa';
+  const pass = 'Secret1';
+  const server = 'localhost';
+  const database = 'master';
+  const appName = 'mssql-dart';
+
+  group('Login7 encoding', () {
+    late Uint8List body;
+
+    setUpAll(() async {
+      body = await _captureLogin7Body(const LoginConfig(
+        host: host,
+        username: user,
+        password: pass,
+        appName: appName,
+        serverName: server,
+        database: database,
+        packetSize: defaultPacketSize,
+      ));
+    });
+
+    test('fixed header: length, TDS 7.4, packet size, option flags', () {
+      expect(readUint32LE(body, 0), equals(body.length));
+      expect(readUint32LE(body, 4), equals(verTDS74));
+      expect(readUint32LE(body, 8), equals(defaultPacketSize));
+      expect(body[24], equals(fUseDB | fSetLang)); // OptionFlags1
+      expect(body[25], equals(fODBC)); // OptionFlags2 (SQL auth)
+      expect(body[27], equals(0)); // OptionFlags3 — no feature ext
+      expect(readUint32LE(body, 32), equals(0x0409)); // ClientLCID en-US
+    });
+
+    test('hostname / username / database land at declared offsets', () {
+      final hostOff = readUint16LE(body, 36);
+      final hostLen = readUint16LE(body, 38);
+      final userOff = readUint16LE(body, 40);
+      final userLen = readUint16LE(body, 42);
+      final dbOff = readUint16LE(body, 68);
+      final dbLen = readUint16LE(body, 70);
+
+      expect(hostLen, equals(host.length));
+      expect(userLen, equals(user.length));
+      expect(dbLen, equals(database.length));
+      expect(_ucs2At(body, hostOff, hostLen), equals(host));
+      expect(_ucs2At(body, userOff, userLen), equals(user));
+      expect(_ucs2At(body, dbOff, dbLen), equals(database));
+    });
+
+    test('password is obfuscated, not plaintext UCS-2', () {
+      final passOff = readUint16LE(body, 44);
+      final passLen = readUint16LE(body, 46);
+      expect(passLen, equals(pass.length));
+
+      final onWire = body.sublist(passOff, passOff + passLen * 2);
+      final plaintext = ucs2(pass);
+      final expected = obfuscatePassword(plaintext);
+
+      expect(onWire, isNot(equals(plaintext)));
+      expect(onWire, equals(expected));
+    });
+
+    test('app name and server name match config', () {
+      final appOff = readUint16LE(body, 48);
+      final appLen = readUint16LE(body, 50);
+      final serverOff = readUint16LE(body, 52);
+      final serverLen = readUint16LE(body, 54);
+
+      expect(_ucs2At(body, appOff, appLen), equals(appName));
+      expect(_ucs2At(body, serverOff, serverLen), equals(server));
+    });
+  });
+
+  group('Login7 FedAuth feature extension', () {
+    test('sets OptionFlags3 fExtension and embeds token', () async {
+      const token = 'bearer-token-xyz';
+      final body = await _captureLogin7Body(const LoginConfig(
+        host: host,
+        username: '',
+        password: '',
+        serverName: server,
+        database: database,
+        fedAuthToken: token,
+      ));
+
+      expect(body[27] & fExtension, equals(fExtension));
+
+      final featOff = readUint16LE(body, 56);
+      final featLen = readUint16LE(body, 58);
+      expect(featOff, greaterThan(0));
+      expect(featLen, greaterThan(0));
+
+      final feat = body.sublist(featOff, featOff + featLen);
+      expect(feat[0], equals(featExtFedAuth));
+      final tokenBytes = ucs2(token);
+      var found = false;
+      for (var i = 0; i <= feat.length - tokenBytes.length; i++) {
+        var match = true;
+        for (var j = 0; j < tokenBytes.length; j++) {
+          if (feat[i + j] != tokenBytes[j]) {
+            match = false;
+            break;
+          }
+        }
+        if (match) {
+          found = true;
+          break;
+        }
+      }
+      expect(found, isTrue, reason: 'FedAuth token missing from feature ext');
+      expect(feat.last, equals(featExtTerminator));
+    });
+  });
+}
