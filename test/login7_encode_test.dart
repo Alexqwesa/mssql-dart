@@ -8,8 +8,13 @@ import 'package:test/test.dart';
 
 import 'helpers/tds_socket.dart';
 
-/// Golden Login7 encoding tests inspired by go-mssqldb login fixtures.
-
+/// Golden Login7 encoding tests.
+///
+/// Sources:
+/// - ms-tds §2.2.6.3 LOGIN7
+/// - microsoft/go-mssqldb / denisenkom `tds_login_test.go` hex fixtures
+///   (fixed header, offset/length table, password mangling)
+/// - FedAuth feature extension layout from go-mssqldb fedauth feature blocks
 Future<Uint8List> _captureLogin7Body(LoginConfig cfg) async {
   final pair = await TdsSocketPair.open();
   final completer = Completer<Uint8List>();
@@ -64,6 +69,7 @@ void main() {
       ));
     });
 
+    // go-mssqldb login header: Length, TDSVersion, PacketSize, OptionFlags*
     test('fixed header: length, TDS 7.4, packet size, option flags', () {
       expect(readUint32LE(body, 0), equals(body.length));
       expect(readUint32LE(body, 4), equals(verTDS74));
@@ -90,6 +96,7 @@ void main() {
       expect(_ucs2At(body, dbOff, dbLen), equals(database));
     });
 
+    // ms-tds §2.2.6.3 / go-mssqldb manglePassword — not plaintext UCS-2
     test('password is obfuscated, not plaintext UCS-2', () {
       final passOff = readUint16LE(body, 44);
       final passLen = readUint16LE(body, 46);
@@ -115,6 +122,7 @@ void main() {
   });
 
   group('Login7 FedAuth feature extension', () {
+    // go-mssqldb FedAuth feature extension (featExtFedAuth) block layout
     test('sets OptionFlags3 fExtension and embeds token', () async {
       const token = 'bearer-token-xyz';
       final body = await _captureLogin7Body(const LoginConfig(

@@ -9,7 +9,11 @@ import 'package:test/test.dart';
 import 'helpers/tds_socket.dart';
 
 /// Offline RPC / SQL-batch encoding tests for [RpcRequest].
-
+///
+/// Sources:
+/// - ms-tds §2.2.6.5 RPC Request, §2.2.5.3 ALL_HEADERS
+/// - microsoft/go-mssqldb RPC / `sp_executesql` parameter encoding
+/// - node-mssql / tedious parameter type mapping conventions (BIGINT, NVARCHAR, …)
 Future<Uint8List> _capturePacket({
   required Future<void> Function(TdsBuffer buf) send,
 }) async {
@@ -54,6 +58,7 @@ bool _containsUcs2(List<int> haystack, String needle) {
 
 void main() {
   group('RpcRequest.sendBatch', () {
+    // ms-tds §2.2.6.2 SQLBatch + §2.2.5.3 ALL_HEADERS
     test('packet type is SQLBatch with ALL_HEADERS + UCS-2 SQL', () async {
       const sql = 'SELECT 1';
       final pkt = await _capturePacket(
@@ -77,6 +82,7 @@ void main() {
   });
 
   group('RpcRequest.sendExecuteSql', () {
+    // ms-tds §2.2.6.5; go-mssqldb sp_executesql ProcID=10
     test('uses RPC packet, sp_executesql proc id 10, empty params', () async {
       const sql = 'SELECT 1 AS n';
       final pkt = await _capturePacket(
@@ -231,6 +237,7 @@ void main() {
       expect(readUint64LE(body, 10), equals(0x1122334455667788));
     });
 
+    // Large string → nvarchar(max) PLP (go-mssqldb / tedious MAX params)
     test('large NVARCHAR param uses PLP encoding', () async {
       final big = 'x' * 5000; // > 4000 chars → nvarchar(max) + PLP on wire
       final pkt = await _capturePacket(

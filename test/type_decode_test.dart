@@ -7,8 +7,12 @@ import 'package:test/test.dart';
 
 import 'helpers/tds_socket.dart';
 
-/// Offline TypeInfo decode tests inspired by go-mssqldb types_unit_test.go.
-
+/// Offline TypeInfo decode tests.
+///
+/// Sources:
+/// - microsoft/go-mssqldb `types_unit_test.go` / PR #323 type conversion coverage
+/// - ms-tds §2.2.5.4 TYPE_INFO, §2.2.5.5.3 sql_variant / PLP
+/// - Mirrors live cases in `types_test.dart` but runs without SQL Server
 Future<(TdsBuffer, TdsSocketPair)> _bufWith(List<int> body) async {
   final pair = await TdsSocketPair.open();
   await tdsSend(pair.server, tdsPacket(type: packReply, body: body));
@@ -31,6 +35,7 @@ Future<Object?> _decode({
 
 void main() {
   group('TypeInfo fixed-length decode', () {
+    // go-mssqldb types_unit_test.go fixed-size ints/floats/bit
     test('INT4', () async {
       final v = await _decode(
         typeInfoBytes: [typeInt4],
@@ -78,6 +83,7 @@ void main() {
   });
 
   group('TypeInfo byte-len decode', () {
+    // go-mssqldb: INTN/MONEY/DATE/TIME/GUID/DECIMAL decode helpers
     test('INTN null', () async {
       final v = await _decode(
         typeInfoBytes: [typeIntN, 4],
@@ -262,6 +268,7 @@ void main() {
   });
 
   group('TypeInfo short-len / PLP decode', () {
+    // go-mssqldb PLP / USHORTLEN nvarchar/varchar/varbinary; ms-tds PLP
     test('NVARCHAR', () async {
       final text = ucs2('hi');
       final v = await _decode(

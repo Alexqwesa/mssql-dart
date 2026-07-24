@@ -6,12 +6,17 @@ import 'package:test/test.dart';
 
 import 'helpers/tds_socket.dart';
 
-/// Protocol unit tests for [TdsBuffer], ported from microsoft/go-mssqldb
-/// `buf_test.go` patterns — especially multi-byte reads that straddle TDS
-/// packet boundaries (the PR #3 corruption class).
-
+/// Protocol unit tests for [TdsBuffer].
+///
+/// Sources:
+/// - microsoft/go-mssqldb `buf_test.go` — write framing, header validation,
+///   multi-packet uint16/32/64 reads
+/// - kartikey321/mssql-dart PR #3 — leftover-byte discard when multi-byte reads
+///   straddle TDS packet boundaries (regression cases below)
+/// - Tedious `test/unit/packet-test.ts` — packet header / EOM patterns
 void main() {
   group('TdsBuffer write framing', () {
+    // go-mssqldb: TestWrite / TestWrite_BufferBounds
     test('single packet write matches go-mssqldb TestWrite layout', () async {
       final pair = await TdsSocketPair.open();
       addTearDown(pair.close);
@@ -33,6 +38,7 @@ void main() {
       );
     });
 
+    // go-mssqldb: TestWrite multi-packet split when body exceeds packetSize
     test('multi-packet write splits when body exceeds packet body capacity',
         () async {
       final pair = await TdsSocketPair.open();
@@ -59,6 +65,7 @@ void main() {
   });
 
   group('TdsBuffer read — header validation', () {
+    // go-mssqldb: TestStreamShorterThanHeader
     test('BeginRead fails when stream is shorter than header', () async {
       final pair = await TdsSocketPair.open();
       addTearDown(pair.close);
@@ -70,6 +77,7 @@ void main() {
       await expectLater(buf.beginRead(), throwsA(isA<StateError>()));
     });
 
+    // go-mssqldb: TestBeginReadSucceeds
     test('BeginRead succeeds and ReadByte returns payload', () async {
       final pair = await TdsSocketPair.open();
       addTearDown(pair.close);
@@ -85,6 +93,7 @@ void main() {
   });
 
   group('TdsBuffer read — multi-byte spanning packet boundaries', () {
+    // mssql-dart PR #3 + go-mssqldb uint16/32/64 read paths across packets
     test('readUint16LE across two packets (PR #3 regression)', () async {
       final pair = await TdsSocketPair.open();
       addTearDown(pair.close);
@@ -189,6 +198,7 @@ void main() {
       expect(await buf.readBytes(4), equals([0xDE, 0xAD, 0xBE, 0xEF]));
     });
 
+    // PR #3: token byte left in buffer + length prefix straddling next packet
     test('token byte then straddling length prefix stays synced', () async {
       final pair = await TdsSocketPair.open();
       addTearDown(pair.close);

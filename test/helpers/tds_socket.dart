@@ -3,7 +3,11 @@ import 'dart:typed_data';
 
 import 'package:mssql/src/tds/constants.dart';
 
-/// Localhost TCP pair for offline TDS protocol tests.
+/// Shared helpers for offline TDS protocol unit tests.
+///
+/// Pattern source: microsoft/go-mssqldb mock transports in `buf_test.go` /
+/// `bad_server_test.go` (localhost socket pair instead of embedding a full
+/// mock `io.ReadWriteCloser`). Also used by Tedious-style packet framing tests.
 class TdsSocketPair {
   TdsSocketPair(this.client, this.server, this._listener);
 
@@ -31,6 +35,7 @@ class TdsSocketPair {
 }
 
 /// Build a TDS packet: 8-byte header + [body].
+/// Layout matches ms-tds §2.2.3.1 / go-mssqldb `header` + Tedious `Packet`.
 Uint8List tdsPacket({
   required int type,
   required List<int> body,
@@ -56,7 +61,7 @@ Future<void> tdsSend(Socket sock, Uint8List data) async {
   await sock.flush();
 }
 
-/// Encode [s] as UTF-16LE.
+/// Encode [s] as UTF-16LE (TDS UCS-2), same as go-mssqldb `str2ucs2`.
 Uint8List ucs2(String s) {
   final out = Uint8List(s.length * 2);
   for (var i = 0; i < s.length; i++) {
@@ -67,7 +72,7 @@ Uint8List ucs2(String s) {
   return out;
 }
 
-/// LOGIN7 password obfuscation (ms-tds §2.2.6.3).
+/// LOGIN7 password obfuscation (ms-tds §2.2.6.3; go-mssqldb `manglePassword`).
 Uint8List obfuscatePassword(Uint8List bytes) {
   final out = Uint8List(bytes.length);
   for (var i = 0; i < bytes.length; i++) {

@@ -15,6 +15,8 @@
 * Extend token-stream coverage: multi-result sets, ORDER/RETURNVALUE skip,
   ENVCHANGE begin/commit txn descriptor, FeatureExtAck + packet-size; RPC large
   NVARCHAR PLP param encoding.
+* Add DML-only DONE, empty COLMETADATA, streamQueryResponse offline tests;
+  annotate protocol unit tests with go-mssqldb / Tedious / ms-tds / PR #3 sources.
 * CI: run unit tests without Docker before the SQL Server 2022 integration suite.
 
 ## 0.1.1

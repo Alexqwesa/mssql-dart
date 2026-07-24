@@ -8,7 +8,13 @@ import 'package:test/test.dart';
 
 import 'helpers/tds_socket.dart';
 
-/// Crafted token-stream packets — inspired by go-mssqldb / Tedious token tests.
+/// Crafted token-stream packets for [TokenStream].
+///
+/// Sources:
+/// - microsoft/go-mssqldb `token.go` parsers (ERROR, DONE, LOGINACK, ENVCHANGE,
+///   COLMETADATA, ROW, NBCROW, ORDER, RETURNVALUE, FEATUREEXTACK)
+/// - Tedious `test/unit/token/*-token-parser-test.ts`
+/// - ms-tds §2.2.7 token stream grammar
 
 Uint8List _errorToken({
   required int number,
@@ -241,6 +247,7 @@ Future<_Fed> _openWithBody(List<int> body) async {
 
 void main() {
   group('TokenStream login response', () {
+    // go-mssqldb parseLoginAck + ENVCHANGE database; Tedious loginack-token-parser
     test('LOGINACK + ENVCHANGE database + DONE', () async {
       final body = [
         ..._loginAckToken('Microsoft SQL Server'),
@@ -271,6 +278,7 @@ void main() {
       );
     });
 
+    // go-mssqldb FEATUREEXTACK skip + ENVCHANGE packet size
     test('FeatureExtAck is skipped; packet-size ENVCHANGE applied', () async {
       final body = [
         ..._loginAckToken('SQL Server'),
@@ -288,6 +296,7 @@ void main() {
   });
 
   group('TokenStream query response', () {
+    // Tedious row-token-parser / go-mssqldb COLMETADATA+ROW
     test('COLMETADATA + ROW + DONE returns one row', () async {
       final body = [
         ..._colMetaInt('n'),
@@ -305,6 +314,7 @@ void main() {
       expect(result.rowsAffected, equals(1));
     });
 
+    // Tedious nbcrow-token-parser-test / go-mssqldb NBCROW bitmap
     test('COLMETADATA + NBCROW null bitmap', () async {
       final body = [
         ..._colMetaTwoNullableInts('a', 'b'),
@@ -335,6 +345,7 @@ void main() {
       );
     });
 
+    // go-mssqldb doneStruct multi-error aggregation pattern
     test('two ERROR tokens populate precedingErrors', () async {
       final body = [
         ..._errorToken(number: 1, message: 'error 1'),
@@ -356,6 +367,7 @@ void main() {
       }
     });
 
+    // ms-tds DONE.status DONE_MORE; multi-result batches (node-mssql / go-mssqldb)
     test('multiple result sets via DONE MORE', () async {
       final body = [
         ..._colMetaInt('a'),
@@ -376,6 +388,7 @@ void main() {
       expect(sets[1].rows.single, equals([2]));
     });
 
+    // Tedious order-token-parser — must not desync stream
     test('ORDER token is skipped between COLMETADATA and ROW', () async {
       final body = [
         ..._colMetaInt('n'),
@@ -390,6 +403,7 @@ void main() {
       expect(result.rows.single, equals([5]));
     });
 
+    // ms-tds §2.2.7.15 RETURNVALUE; go-mssqldb / tedious OUTPUT params
     test('RETURNVALUE token is skipped without corrupting stream', () async {
       final body = [
         ..._colMetaInt('n'),
@@ -404,6 +418,7 @@ void main() {
       expect(result.rows.single, equals([1]));
     });
 
+    // ms-tds ENVCHANGE type 8/9; go-mssqldb transaction descriptor
     test('ENVCHANGE begin/commit updates transactionDescriptor', () async {
       const descriptor = 0x0102030405060708;
       final body = [
@@ -423,6 +438,7 @@ void main() {
       expect(fed.buf.transactionDescriptor, equals(0));
     });
 
+    // ms-tds ENVCHANGE type 8 mid-query
     test('ENVCHANGE begin sets transactionDescriptor mid-stream', () async {
       const descriptor = 0x1122334455667788;
       // Query path: begin-tran envchange then a result set.
@@ -437,6 +453,74 @@ void main() {
 
       await TokenStream(fed.buf).processQueryResponse();
       expect(fed.buf.transactionDescriptor, equals(descriptor));
+    });
+
+    // go-mssqldb / node-mssql: INSERT/UPDATE DONE with COUNT, no COLMETADATA
+    test('DML-only DONE emits rowsAffected without columns', () async {
+      final body = [
+        ..._doneToken(flags: doneFlagCount, rowCount: 3),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.columns, isEmpty);
+      expect(result.rows, isEmpty);
+      expect(result.rowsAffected, equals(3));
+    });
+
+    // ms-tds COLMETADATA count 0xFFFF = no columns (empty result metadata)
+    test('empty COLMETADATA (0xFFFF) yields empty columns', () async {
+      final out = BytesBuilder(copy: false);
+      out.addByte(tokenColMetadata);
+      writeUint16LE(out, 0xFFFF);
+      final body = [
+        ...out.toBytes(),
+        ..._doneToken(),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final result = await TokenStream(fed.buf).processQueryResponse();
+      expect(result.columns, isEmpty);
+      expect(result.rows, isEmpty);
+    });
+
+    // TokenStream.streamQueryResponse — streaming analogue of Tedious row events
+    test('streamQueryResponse yields rows then completes', () async {
+      final body = [
+        ..._colMetaInt('n'),
+        ..._rowInt(10),
+        ..._rowInt(20),
+        ..._doneToken(flags: doneFlagCount, rowCount: 2),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      final rows = <int>[];
+      await for (final (cols, row) in TokenStream(fed.buf).streamQueryResponse()) {
+        expect(cols.single.name, equals('n'));
+        rows.add(row.single as int);
+      }
+      expect(rows, equals([10, 20]));
+    });
+
+    // streamQueryResponse must still throw on ERROR like buffered path
+    test('streamQueryResponse throws on ERROR token', () async {
+      final body = [
+        ..._errorToken(number: 50000, message: 'boom'),
+        ..._doneToken(flags: doneFlagError),
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      await expectLater(
+        () async {
+          await for (final _ in TokenStream(fed.buf).streamQueryResponse()) {}
+        },
+        throwsA(isA<MssqlException>()
+            .having((e) => e.errorCode, 'errorCode', 50000)),
+      );
     });
   });
 }

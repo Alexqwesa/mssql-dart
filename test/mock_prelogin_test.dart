@@ -8,8 +8,10 @@ import 'package:test/test.dart';
 
 import 'helpers/tds_socket.dart';
 
-/// Mock-server PreLogin tests inspired by microsoft/go-mssqldb
-/// `bad_server_test.go` — no live SQL Server required.
+/// Mock-server PreLogin tests.
+///
+/// Source: microsoft/go-mssqldb `bad_server_test.go` (malformed / minimal
+/// PRELOGIN replies, encrypt negotiation). No live SQL Server required.
 
 Uint8List _preloginBody(Map<int, List<int>> fields) {
   final keys = fields.keys.toList()..sort();
@@ -46,6 +48,7 @@ Future<void> _drainPreloginRequest(ChunkedStreamReader<int> reader) async {
 
 void main() {
   group('PreLogin mock server (encrypt not supported)', () {
+    // go-mssqldb: goodPreloginSequence with encryptNotSup
     test('client send + read negotiates encryptNotSupported', () async {
       final pair = await TdsSocketPair.open();
       addTearDown(pair.close);
@@ -119,6 +122,7 @@ void main() {
   });
 
   group('PreLogin bad server responses', () {
+    // go-mssqldb: TestBadServerIncorrectLoginResponseType analogue for PRELOGIN
     test('wrong packet type throws StateError', () async {
       final pair = await TdsSocketPair.open();
       addTearDown(pair.close);
@@ -136,6 +140,7 @@ void main() {
       await serverDone;
     });
 
+    // go-mssqldb: TestBadServerPreLoginPacketWithNoEntries (we document default)
     test('empty PRELOGIN option table still yields defaults', () async {
       final pair = await TdsSocketPair.open();
       addTearDown(pair.close);
@@ -158,6 +163,7 @@ void main() {
       expect(result.fedAuthRequired, isFalse);
     });
 
+    // go-mssqldb: TestBadServerInvalidTokenId shape after PRELOGIN
     test('invalid token id after login-shaped reply is readable as bytes',
         () async {
       final pair = await TdsSocketPair.open();

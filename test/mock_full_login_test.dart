@@ -11,7 +11,11 @@ import 'package:test/test.dart';
 import 'helpers/tds_socket.dart';
 
 /// End-to-end mock handshake: PreLogin → Login7 → LOGINACK (no live SQL).
-
+///
+/// Combines patterns from:
+/// - go-mssqldb `bad_server_test.go` / `goodPreloginSequence`
+/// - go-mssqldb login ack + ENVCHANGE token handling
+/// - ms-tds connection sequence §2.2.1
 Uint8List _preloginBody(Map<int, List<int>> fields) {
   final keys = fields.keys.toList()..sort();
   var offset = keys.length * 5 + 1;
