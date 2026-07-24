@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+* Fix TDS buffer data corruption when multi-byte reads straddle packet boundaries
+  (carry unread remainder into the next packet — upstream PR #3).
+* Add protocol unit tests inspired by microsoft/go-mssqldb (`buf_test.go`,
+  `bad_server_test.go`): `test/tds_buffer_test.dart`, `test/mock_prelogin_test.dart`.
+* CI: run unit tests without Docker before the SQL Server 2022 integration suite.
+
 ## 0.1.1
 
 * Remove hardcoded credentials from example and benchmark tool — all connection details now read from environment variables.

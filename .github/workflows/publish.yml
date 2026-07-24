@@ -28,11 +28,33 @@ jobs:
       - run: dart analyze --fatal-warnings
 
   # ════════════════════════════════════════════════════════════════════════════
-  # 2 · Full test suite against a live SQL Server 2022 container
+  # 2 · Protocol / API unit tests (no SQL Server required)
+  #     Covers go-mssqldb-style buffer + PreLogin mock-server tests so
+  #     packet-boundary regressions fail fast without Docker.
+  # ════════════════════════════════════════════════════════════════════════════
+  unit:
+    name: Unit tests
+    needs: analyze
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with: { sdk: stable }
+      - run: dart pub get
+      - name: Run unit tests
+        run: |
+          dart test \
+            test/unit_test.dart \
+            test/tds_buffer_test.dart \
+            test/mock_prelogin_test.dart \
+            --timeout=60s
+
+  # ════════════════════════════════════════════════════════════════════════════
+  # 3 · Full test suite against a live SQL Server 2022 container
   # ════════════════════════════════════════════════════════════════════════════
   test:
     name: Test (SQL Server 2022)
-    needs: analyze
+    needs: [analyze, unit]
     runs-on: ubuntu-latest
 
     services:
@@ -67,7 +89,7 @@ jobs:
           dart test $TEST_FILES --timeout=90s
 
   # ════════════════════════════════════════════════════════════════════════════
-  # 3 · Publish to pub.dev  (tag pushes only, after tests pass)
+  # 4 · Publish to pub.dev  (tag pushes only, after tests pass)
   #
   # One-time setup required:
   #   pub.dev → package → Settings → "Automated publishing"
