@@ -1,3 +1,5 @@
+import 'live_test_config.dart';
+import 'live_test_gate.dart';
 import 'package:mssql/mssql.dart';
 import 'package:test/test.dart';
 
@@ -6,10 +8,10 @@ import 'package:test/test.dart';
 ///
 /// Skips when 127.0.0.1:14330 is unreachable.
 
-const _host = '127.0.0.1';
-const _port = 14330;
-const _user = 'sa';
-const _password = 'Knex_Test1!';
+final _host = liveTestConfig.host;
+final _port = liveTestConfig.port;
+final _user = liveTestConfig.user;
+final _password = liveTestConfig.password;
 
 Future<MssqlConnection?> tryOpen() async {
   try {
@@ -29,6 +31,10 @@ Future<MssqlConnection?> tryOpen() async {
 }
 
 void main() {
+  if (!liveTestsEnabled) {
+    registerLiveTestsDisabled();
+    return;
+  }
   late MssqlConnection conn;
   var available = false;
 
@@ -244,7 +250,8 @@ void main() {
       'INSERT INTO #xt (doc) VALUES (@x)',
       {'x': const MssqlXml('<a><b>1</b></a>')},
     );
-    final r = await conn.query('SELECT CAST(doc AS nvarchar(max)) AS s FROM #xt');
+    final r =
+        await conn.query('SELECT CAST(doc AS nvarchar(max)) AS s FROM #xt');
     expect(r[0]['s'], contains('<a>'));
     expect(r[0]['s'], contains('<b>1</b>'));
   });
@@ -284,7 +291,8 @@ void main() {
       },
     );
     expect(r[0]['n'], equals('lan'));
-    expect(r[0]['nl'], equals(32)); // nvarchar MaxLength is bytes (16 chars × 2)
+    expect(
+        r[0]['nl'], equals(32)); // nvarchar MaxLength is bytes (16 chars × 2)
     expect((r[0]['c'] as String).startsWith('xy'), isTrue);
     expect(r[0]['b'], equals([0x01, 0x02, 0x00, 0x00]));
     expect((r[0]['bb'] as String).toLowerCase(), equals('binary'));

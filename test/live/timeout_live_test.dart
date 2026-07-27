@@ -1,3 +1,5 @@
+import 'live_test_config.dart';
+import 'live_test_gate.dart';
 import 'package:mssql/mssql.dart';
 import 'package:test/test.dart';
 
@@ -5,10 +7,10 @@ import 'package:test/test.dart';
 ///
 /// Requires `dart-mssql` on 127.0.0.1:14330. Skips when unreachable.
 
-const _host = '127.0.0.1';
-const _port = 14330;
-const _user = 'sa';
-const _password = 'Knex_Test1!';
+final _host = liveTestConfig.host;
+final _port = liveTestConfig.port;
+final _user = liveTestConfig.user;
+final _password = liveTestConfig.password;
 
 Future<MssqlConnection?> tryOpen({
   Duration? queryTimeout,
@@ -33,6 +35,10 @@ Future<MssqlConnection?> tryOpen({
 }
 
 void main() {
+  if (!liveTestsEnabled) {
+    registerLiveTestsDisabled();
+    return;
+  }
   late MssqlConnection conn;
   var available = false;
 
@@ -61,7 +67,8 @@ void main() {
     expect(r[0]['p'], equals('dart-mssql-lan'));
   });
 
-  test('per-call query timeout cancels WAITFOR and reuses connection', () async {
+  test('per-call query timeout cancels WAITFOR and reuses connection',
+      () async {
     if (!available) {
       markTestSkipped('SQL Server not available on :$_port');
       return;
@@ -91,7 +98,8 @@ void main() {
       return;
     }
 
-    final timed = await tryOpen(queryTimeout: const Duration(milliseconds: 500));
+    final timed =
+        await tryOpen(queryTimeout: const Duration(milliseconds: 500));
     if (timed == null) {
       markTestSkipped('SQL Server not available on :$_port');
       return;

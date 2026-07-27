@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Tests: move SQL Server integration coverage to opt-in `test/live`, add
+  environment-backed configuration, driver-based readiness checks, disposable
+  databases, Docker Compose setup, and CI live-test configuration.
+
 * Security: deprecate Azure AD username/password (ROPC) token acquisition,
   reject blank bearer tokens, and expose bounded structured OAuth failures
   without including raw token endpoint response bodies in exception text.

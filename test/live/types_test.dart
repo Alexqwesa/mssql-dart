@@ -1,21 +1,27 @@
+import 'live_test_gate.dart';
+import 'live_test_config.dart';
 import 'package:test/test.dart';
 import 'package:mssql/mssql.dart';
 
 // Runs against the dart-mssql Docker container on port 14330.
 // Start with:
 //   docker run -d --name dart-mssql --cap-add SYS_PTRACE \
-//     -e ACCEPT_EULA=1 -e MSSQL_SA_PASSWORD='Knex_Test1!' \
+//     -e ACCEPT_EULA=1 -e MSSQL_SA_PASSWORD='Strong_test_password_123!' \
 //     -p 127.0.0.1:14330:1433 mcr.microsoft.com/azure-sql-edge:latest
 
 late MssqlConnection conn;
 
 void main() {
+  if (!liveTestsEnabled) {
+    registerLiveTestsDisabled();
+    return;
+  }
   setUpAll(() async {
     conn = await MssqlConnection.connect(
-      host: '127.0.0.1',
-      port: 14330,
-      user: 'sa',
-      password: 'Knex_Test1!',
+      host: liveTestConfig.host,
+      port: liveTestConfig.port,
+      user: liveTestConfig.user,
+      password: liveTestConfig.password,
       database: 'master',
       encrypt: false,
       trustServerCertificate: true,

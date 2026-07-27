@@ -1,3 +1,5 @@
+import 'live_test_config.dart';
+import 'live_test_gate.dart';
 import 'dart:async';
 
 import 'package:mssql/mssql.dart';
@@ -5,17 +7,17 @@ import 'package:test/test.dart';
 
 /// Live SQL Server tests for Attention cancel and large multi-packet results.
 ///
-/// Requires Docker SQL on 127.0.0.1:14330 (password `Knex_Test1!`), same as
+/// Requires Docker SQL on 127.0.0.1:14330 (password `Strong_test_password_123!`), same as
 /// other integration suites. Skips when the server is unreachable.
 ///
 /// Sources:
 /// - ms-tds Attention / DONE doneAttn; go-mssqldb cancel patterns
 /// - PR #3: large NVARCHAR forcing multi-packet TDS replies
 
-const _host = '127.0.0.1';
-const _port = 14330;
-const _user = 'sa';
-const _password = 'Knex_Test1!';
+final _host = liveTestConfig.host;
+final _port = liveTestConfig.port;
+final _user = liveTestConfig.user;
+final _password = liveTestConfig.password;
 
 Future<MssqlConnection?> tryOpen() async {
   try {
@@ -34,6 +36,10 @@ Future<MssqlConnection?> tryOpen() async {
 }
 
 void main() {
+  if (!liveTestsEnabled) {
+    registerLiveTestsDisabled();
+    return;
+  }
   late MssqlConnection conn;
   var available = false;
 
@@ -62,8 +68,7 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 200));
       await conn.cancel();
 
-      final cancelled =
-          await pending.timeout(const Duration(seconds: 10));
+      final cancelled = await pending.timeout(const Duration(seconds: 10));
       expect(cancelled.rows, isEmpty);
       expect(conn.isOpen, isTrue);
 

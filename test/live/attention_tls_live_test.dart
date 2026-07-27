@@ -1,3 +1,5 @@
+import 'live_test_config.dart';
+import 'live_test_gate.dart';
 import 'dart:async';
 
 import 'package:mssql/mssql.dart';
@@ -9,15 +11,15 @@ import 'package:test/test.dart';
 /// (no cancel). Exercises Attention + doneAttn drain on the TDS-wrapped TLS
 /// path used in production.
 ///
-/// Requires `dart-mssql` on 127.0.0.1:14330 (password `Knex_Test1!`).
+/// Requires `dart-mssql` on 127.0.0.1:14330 (password `Strong_test_password_123!`).
 /// Skips when unreachable.
 ///
 /// Sources: ms-tds Attention; go-mssqldb cancel; SQL Edge self-signed cert.
 
-const _host = '127.0.0.1';
-const _port = 14330;
-const _user = 'sa';
-const _password = 'Knex_Test1!';
+final _host = liveTestConfig.host;
+final _port = liveTestConfig.port;
+final _user = liveTestConfig.user;
+final _password = liveTestConfig.password;
 
 Future<MssqlConnection?> tryOpenTls() async {
   try {
@@ -36,6 +38,10 @@ Future<MssqlConnection?> tryOpenTls() async {
 }
 
 void main() {
+  if (!liveTestsEnabled) {
+    registerLiveTestsDisabled();
+    return;
+  }
   late MssqlConnection conn;
   var available = false;
 

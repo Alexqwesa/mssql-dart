@@ -1,3 +1,5 @@
+import 'live_test_config.dart';
+import 'live_test_gate.dart';
 import 'package:mssql/mssql.dart';
 import 'package:test/test.dart';
 
@@ -8,10 +10,10 @@ import 'package:test/test.dart';
 ///
 /// Requires `dart-mssql` on 127.0.0.1:14330. Skips when unreachable.
 
-const _host = '127.0.0.1';
-const _port = 14330;
-const _user = 'sa';
-const _password = 'Knex_Test1!';
+final _host = liveTestConfig.host;
+final _port = liveTestConfig.port;
+final _user = liveTestConfig.user;
+final _password = liveTestConfig.password;
 
 Future<bool> sqlUp() async {
   try {
@@ -33,6 +35,10 @@ Future<bool> sqlUp() async {
 }
 
 void main() {
+  if (!liveTestsEnabled) {
+    registerLiveTestsDisabled();
+    return;
+  }
   late bool available;
 
   setUpAll(() async {
@@ -64,7 +70,7 @@ void main() {
       return;
     }
 
-    final pool = MssqlPool(const MssqlPoolConfig(
+    final pool = MssqlPool(MssqlPoolConfig(
       host: _host,
       port: _port,
       user: _user,

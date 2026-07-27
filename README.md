@@ -595,6 +595,28 @@ final conn = await MssqlConnection.connect(
 
 ---
 
+## Live SQL Server Tests
+
+Offline protocol tests run normally. Live tests are opt-in and live in
+`test/live`; they use a disposable database for suites that modify schema or
+data.
+
+```powershell
+Copy-Item .env.example .env
+docker compose --env-file .env -f docker-compose.live.yml up -d
+$env:MSSQL_LIVE_TESTS = '1'
+$env:MSSQL_HOST = 'localhost'
+$env:MSSQL_PORT = '14333'
+$env:MSSQL_USER = 'sa'
+$env:MSSQL_PASSWORD = 'Strong_test_password_123!'
+dart test test/live
+docker compose --env-file .env -f docker-compose.live.yml down
+```
+
+`MSSQL_PASSWORD` is required whenever `MSSQL_LIVE_TESTS=1`. The compose
+environment has no persistent volume and is removed by `docker compose down`;
+do not reuse production credentials.
+
 ## Limitations
 
 - Azure AD authentication requires a bearer token supplied by the caller (e.g. obtained via `azure_identity`); the driver does not fetch tokens itself.

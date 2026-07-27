@@ -84,13 +84,12 @@ jobs:
         image: mcr.microsoft.com/mssql/server:2022-latest
         env:
           ACCEPT_EULA: "Y"
-          SA_PASSWORD: "Knex_Test1!"
+          MSSQL_SA_PASSWORD: "Strong_test_password_123!"
           MSSQL_PID: Developer
         ports:
-          # Tests hardcode 127.0.0.1:14330; map host 14330 → container 1433
-          - "14330:1433"
+          - "14333:1433"
         options: >-
-          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Knex_Test1!' -Q 'SELECT 1' -No -C"
+          --health-cmd "/opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P 'Strong_test_password_123!' -Q 'SELECT 1' -No -C"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 15
@@ -102,6 +101,12 @@ jobs:
         with: { sdk: stable }
       - run: dart pub get
       - name: Run tests
+        env:
+          MSSQL_LIVE_TESTS: "1"
+          MSSQL_HOST: "127.0.0.1"
+          MSSQL_PORT: "14333"
+          MSSQL_USER: "sa"
+          MSSQL_PASSWORD: "Strong_test_password_123!"
         run: |
           # Exclude standalone scripts that don't use package:test
           TEST_FILES=$(find test -name '*_test.dart' \

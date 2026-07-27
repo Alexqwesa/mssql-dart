@@ -1,0 +1,10 @@
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: mssql-dart-live
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-Strong_test_password_123!}"
+    ports:
+      - "14333:1433"

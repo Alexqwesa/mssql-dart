@@ -1,3 +1,5 @@
+import 'live_test_config.dart';
+import 'live_test_gate.dart';
 import 'package:test/test.dart';
 import 'package:mssql/mssql.dart';
 
@@ -6,12 +8,16 @@ import 'package:mssql/mssql.dart';
 // Azure SQL Edge ships with a self-signed certificate; we use
 // trustServerCertificate: true to accept it.
 
-const _host = '127.0.0.1';
-const _port = 14330;
-const _user = 'sa';
-const _password = 'Knex_Test1!';
+final _host = liveTestConfig.host;
+final _port = liveTestConfig.port;
+final _user = liveTestConfig.user;
+final _password = liveTestConfig.password;
 
 void main() {
+  if (!liveTestsEnabled) {
+    registerLiveTestsDisabled();
+    return;
+  }
   group('TLS', () {
     test('connect with encrypt:true and trustServerCertificate:true', () async {
       final conn = await MssqlConnection.connect(
@@ -110,7 +116,7 @@ void main() {
     });
 
     test('pool over TLS runs concurrent queries', () async {
-      final pool = MssqlPool(const MssqlPoolConfig(
+      final pool = MssqlPool(MssqlPoolConfig(
         host: _host,
         port: _port,
         user: _user,

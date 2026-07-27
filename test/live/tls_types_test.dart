@@ -1,3 +1,5 @@
+import 'live_test_config.dart';
+import 'live_test_gate.dart';
 import 'package:test/test.dart';
 import 'package:mssql/mssql.dart';
 
@@ -5,10 +7,10 @@ import 'package:mssql/mssql.dart';
 // Covers: encrypt=true + trustServerCertificate, transaction helpers, money,
 // smallmoney, smalldatetime, uniqueidentifier, time, datetimeoffset types.
 
-const _host = '127.0.0.1';
-const _port = 14330;
-const _user = 'sa';
-const _password = 'Knex_Test1!';
+final _host = liveTestConfig.host;
+final _port = liveTestConfig.port;
+final _user = liveTestConfig.user;
+final _password = liveTestConfig.password;
 
 Future<MssqlConnection> openConn({bool encrypt = false}) =>
     MssqlConnection.connect(
@@ -22,6 +24,10 @@ Future<MssqlConnection> openConn({bool encrypt = false}) =>
     );
 
 void main() {
+  if (!liveTestsEnabled) {
+    registerLiveTestsDisabled();
+    return;
+  }
   // ── TLS connection ─────────────────────────────────────────────────────────
 
   group('TLS connection', () {

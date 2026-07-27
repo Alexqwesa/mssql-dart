@@ -1,3 +1,5 @@
+import 'live_test_gate.dart';
+import 'live_test_config.dart';
 import 'package:test/test.dart';
 import 'package:mssql/mssql.dart';
 
@@ -11,12 +13,16 @@ import 'package:mssql/mssql.dart';
 late MssqlConnection conn;
 
 void main() {
+  if (!liveTestsEnabled) {
+    registerLiveTestsDisabled();
+    return;
+  }
   setUpAll(() async {
     conn = await MssqlConnection.connect(
-      host: '127.0.0.1',
-      port: 14330,
-      user: 'sa',
-      password: 'Knex_Test1!',
+      host: liveTestConfig.host,
+      port: liveTestConfig.port,
+      user: liveTestConfig.user,
+      password: liveTestConfig.password,
       database: 'master',
       encrypt: false,
       trustServerCertificate: true,

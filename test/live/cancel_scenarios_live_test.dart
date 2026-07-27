@@ -1,3 +1,5 @@
+import 'live_test_config.dart';
+import 'live_test_gate.dart';
 import 'dart:async';
 
 import 'package:mssql/mssql.dart';
@@ -8,13 +10,13 @@ import 'package:test/test.dart';
 /// Complements [attention_live_test.dart] / [attention_tls_live_test.dart]:
 /// multi-result cancel, parameterized RPC cancel, and pool acquire/cancel.
 ///
-/// Requires `dart-mssql` on 127.0.0.1:14330 (password `Knex_Test1!`).
+/// Requires `dart-mssql` on 127.0.0.1:14330 (password `Strong_test_password_123!`).
 /// Skips when unreachable.
 
-const _host = '127.0.0.1';
-const _port = 14330;
-const _user = 'sa';
-const _password = 'Knex_Test1!';
+final _host = liveTestConfig.host;
+final _port = liveTestConfig.port;
+final _user = liveTestConfig.user;
+final _password = liveTestConfig.password;
 
 Future<MssqlConnection?> tryOpen({bool encrypt = false}) async {
   try {
@@ -33,6 +35,10 @@ Future<MssqlConnection?> tryOpen({bool encrypt = false}) async {
 }
 
 void main() {
+  if (!liveTestsEnabled) {
+    registerLiveTestsDisabled();
+    return;
+  }
   late MssqlConnection conn;
   var available = false;
 
@@ -112,7 +118,7 @@ void main() {
         return;
       }
 
-      final pool = MssqlPool(const MssqlPoolConfig(
+      final pool = MssqlPool(MssqlPoolConfig(
         host: _host,
         port: _port,
         user: _user,
@@ -145,7 +151,7 @@ void main() {
         return;
       }
 
-      final pool = MssqlPool(const MssqlPoolConfig(
+      final pool = MssqlPool(MssqlPoolConfig(
         host: _host,
         port: _port,
         user: _user,
