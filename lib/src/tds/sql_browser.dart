@@ -32,9 +32,14 @@ class SqlBrowser {
     final sock = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
     try {
       final request = buildClntUcastInst(instanceName);
-      sock.send(request, addresses.first, browserPort);
+      final browserAddress = addresses.first;
+      sock.send(request, browserAddress, browserPort);
 
-      final dg = await _receive(sock).timeout(
+      final dg = await _receive(
+        sock,
+        expectedAddress: browserAddress,
+        expectedPort: browserPort,
+      ).timeout(
         timeout,
         onTimeout: () => throw MssqlException(
           'SQL Browser timed out after ${timeout.inMilliseconds}ms '
@@ -72,8 +77,7 @@ class SqlBrowser {
 
     if (expectedInstance != null) {
       final got = fields['InstanceName'];
-      if (got != null &&
-          got.toLowerCase() != expectedInstance.toLowerCase()) {
+      if (got != null && got.toLowerCase() != expectedInstance.toLowerCase()) {
         throw MssqlException(
           'SQL Browser: expected instance "$expectedInstance", got "$got"',
         );
@@ -108,13 +112,21 @@ class SqlBrowser {
     return map;
   }
 
-  static Future<Datagram> _receive(RawDatagramSocket sock) {
+  static Future<Datagram> _receive(
+    RawDatagramSocket sock, {
+    required InternetAddress expectedAddress,
+    required int expectedPort,
+  }) {
     final completer = Completer<Datagram>();
     late StreamSubscription<RawSocketEvent> sub;
     sub = sock.listen((event) {
       if (event == RawSocketEvent.read) {
         final dg = sock.receive();
         if (dg != null && !completer.isCompleted) {
+          if (dg.port != expectedPort ||
+              dg.address.address != expectedAddress.address) {
+            return;
+          }
           completer.complete(dg);
           unawaited(sub.cancel());
         }

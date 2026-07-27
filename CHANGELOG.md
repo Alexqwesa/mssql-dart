@@ -14,6 +14,9 @@
 * Security: harden malformed TDS and NTLM response parsing by validating packet
   sizes, token body offsets, UTF-16LE byte lengths, `sql_variant` metadata
   lengths, and NTLM TargetInfo AV_PAIR bounds before decoding.
+* Security: harden SQL Browser named-instance discovery by ignoring UDP
+  responses whose source address or port does not match the queried browser
+  endpoint.
 * LAN typed binders: `MssqlNVarchar` / `MssqlNChar` / `MssqlBinary` /
   `MssqlRowVersion` for sized `nvarchar(n)` / `nchar(n)` / `binary(n)` and
   `rowversion`/`timestamp` compare params (bare `String` stays

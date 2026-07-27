@@ -22,8 +22,7 @@ Uint8List _svrResp({
   required int tcpPort,
   String serverName = 'HOST',
 }) {
-  final text =
-      'ServerName;$serverName;InstanceName;$instance;IsClustered;No;'
+  final text = 'ServerName;$serverName;InstanceName;$instance;IsClustered;No;'
       'Version;15.0.2000.5;tcp;$tcpPort;;';
   final payload = utf8.encode(text);
   final out = Uint8List(3 + payload.length);
@@ -159,7 +158,8 @@ void main() {
 
   group('SqlBrowser UDP mock', () {
     test('resolveTcpPort against local mock browser', () async {
-      final browser = await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final browser =
+          await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(browser.close);
 
       late StreamSubscription<RawSocketEvent> sub;
@@ -172,6 +172,43 @@ void main() {
         expect(name, 'MOCKINST');
         final resp = _svrResp(instance: 'MOCKINST', tcpPort: 49152);
         browser.send(resp, dg.address, dg.port);
+      });
+      addTearDown(() => sub.cancel());
+
+      final port = await SqlBrowser.resolveTcpPort(
+        '127.0.0.1',
+        'MOCKINST',
+        browserPort: browser.port,
+        timeout: const Duration(seconds: 2),
+      );
+      expect(port, 49152);
+    });
+
+    test('resolveTcpPort ignores datagrams from unexpected source port',
+        () async {
+      final browser =
+          await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
+      final spoof =
+          await RawDatagramSocket.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(browser.close);
+      addTearDown(spoof.close);
+
+      late StreamSubscription<RawSocketEvent> sub;
+      sub = browser.listen((event) {
+        if (event != RawSocketEvent.read) return;
+        final dg = browser.receive();
+        if (dg == null) return;
+
+        spoof.send(
+          _svrResp(instance: 'MOCKINST', tcpPort: 1),
+          dg.address,
+          dg.port,
+        );
+        browser.send(
+          _svrResp(instance: 'MOCKINST', tcpPort: 49152),
+          dg.address,
+          dg.port,
+        );
       });
       addTearDown(() => sub.cancel());
 
