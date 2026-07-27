@@ -405,6 +405,21 @@ final pool = MssqlPool(MssqlPoolConfig(
 await pool.open();
 ```
 
+#### Pool observability
+
+```dart
+print(pool.stats);
+// MssqlPoolStats(total=2 idle=1 inUse=1 pending=0 max=10 created=… …)
+
+print('${pool.size} ${pool.available} ${pool.borrowed} ${pool.pending}');
+
+pool.onEvent = (e) {
+  // created / destroyed / acquired / released / acquireTimeout /
+  // validationFailed / resetFailed
+  log.info('${e.kind} ${e.stats}');
+};
+```
+
 #### Pool query methods
 
 ```dart

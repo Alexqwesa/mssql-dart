@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+* LAN pool observability: `MssqlPool.stats` / `size` / `available` /
+  `borrowed` / `pending` (node-mssql / tarn style) plus lifetime counters
+  (`created`, `destroyed`, `acquired`, `released`, `acquireTimeouts`,
+  `validationFailures`, `resetFailures`); `onPoolEvent` / `MssqlPool.onEvent`
+  lifecycle hooks.
 * LAN typed binders: `MssqlXml` / `MssqlVarbinary` for `xml` and sized
   `varbinary(n)` / `varbinary(max)` params (bare `String` → nvarchar; bare
   `List<int>` stays `varbinary(max)`).

@@ -88,6 +88,10 @@ class MssqlPoolConfig {
   /// Optional INFO token handler applied to every pooled connection.
   final void Function(MssqlInfoMessage info)? onInfoMessage;
 
+  /// Optional pool lifecycle observer (acquire/release/create/…); see
+  /// [MssqlPoolEvent]. Also assignable on [MssqlPool.onEvent] after construct.
+  final void Function(MssqlPoolEvent event)? onPoolEvent;
+
   const MssqlPoolConfig({
     required this.host,
     this.port = 1433,
@@ -118,6 +122,7 @@ class MssqlPoolConfig {
     this.keepAlive = const Duration(seconds: 30),
     this.sessionInitSql,
     this.onInfoMessage,
+    this.onPoolEvent,
   });
 
   /// Builds pool config from an ADO.NET / `sqlserver://` connection string.
@@ -135,6 +140,7 @@ class MssqlPoolConfig {
     int connectRetries = 2,
     String? sessionInitSql,
     void Function(MssqlInfoMessage info)? onInfoMessage,
+    void Function(MssqlPoolEvent event)? onPoolEvent,
   }) {
     final c = MssqlConnectionString.parse(connectionString);
     if (c.useNtlm) {
@@ -167,6 +173,7 @@ class MssqlPoolConfig {
         keepAlive: c.keepAlive,
         sessionInitSql: sessionInitSql,
         onInfoMessage: onInfoMessage,
+        onPoolEvent: onPoolEvent,
       );
     }
     return MssqlPoolConfig(
@@ -196,6 +203,7 @@ class MssqlPoolConfig {
       keepAlive: c.keepAlive,
       sessionInitSql: sessionInitSql,
       onInfoMessage: onInfoMessage,
+      onPoolEvent: onPoolEvent,
     );
   }
 
@@ -228,6 +236,7 @@ class MssqlPoolConfig {
     Duration keepAlive = const Duration(seconds: 30),
     String? sessionInitSql,
     void Function(MssqlInfoMessage info)? onInfoMessage,
+    void Function(MssqlPoolEvent event)? onPoolEvent,
   }) {
     return MssqlPoolConfig(
       host: host,
@@ -257,6 +266,7 @@ class MssqlPoolConfig {
       keepAlive: keepAlive,
       sessionInitSql: sessionInitSql,
       onInfoMessage: onInfoMessage,
+      onPoolEvent: onPoolEvent,
     );
   }
 
@@ -290,6 +300,7 @@ class MssqlPoolConfig {
     Duration keepAlive = const Duration(seconds: 30),
     String? sessionInitSql,
     void Function(MssqlInfoMessage info)? onInfoMessage,
+    void Function(MssqlPoolEvent event)? onPoolEvent,
   }) {
     return MssqlPoolConfig(
       host: host,
@@ -320,9 +331,103 @@ class MssqlPoolConfig {
       keepAlive: keepAlive,
       sessionInitSql: sessionInitSql,
       onInfoMessage: onInfoMessage,
+      onPoolEvent: onPoolEvent,
     );
   }
 }
+
+/// Snapshot of [MssqlPool] sizing + lifetime counters (node-mssql / tarn style).
+///
+/// [total] = [idle] + [inUse]. [pending] is waiters blocked on [MssqlPool.acquire]
+/// when the pool is at [max].
+class MssqlPoolStats {
+  /// Open connections (idle + borrowed).
+  final int total;
+
+  /// Connections sitting in the idle list.
+  final int idle;
+
+  /// Connections currently checked out (`total - idle`).
+  final int inUse;
+
+  /// Callers waiting for a free connection.
+  final int pending;
+
+  /// Configured [MssqlPoolConfig.max].
+  final int max;
+
+  /// Successful new TCP/login opens.
+  final int created;
+
+  /// Connections removed (reap, validate fail, reset fail, discard, close).
+  final int destroyed;
+
+  /// Successful [MssqlPool.acquire] completions (including waiter handoff).
+  final int acquired;
+
+  /// Successful [MssqlPool.release] completions (idle return or waiter handoff).
+  final int released;
+
+  /// [MssqlPool.acquire] futures that hit [MssqlPoolConfig.acquireTimeout].
+  final int acquireTimeouts;
+
+  /// Idle probes that failed under [MssqlPoolConfig.validateOnAcquire].
+  final int validationFailures;
+
+  /// [MssqlConnection.resetSession] / [MssqlConnection.resetDatabase] failures
+  /// during [MssqlPool.release].
+  final int resetFailures;
+
+  const MssqlPoolStats({
+    required this.total,
+    required this.idle,
+    required this.inUse,
+    required this.pending,
+    required this.max,
+    required this.created,
+    required this.destroyed,
+    required this.acquired,
+    required this.released,
+    required this.acquireTimeouts,
+    required this.validationFailures,
+    required this.resetFailures,
+  });
+
+  @override
+  String toString() =>
+      'MssqlPoolStats(total=$total idle=$idle inUse=$inUse pending=$pending '
+      'max=$max created=$created destroyed=$destroyed acquired=$acquired '
+      'released=$released timeouts=$acquireTimeouts '
+      'validateFails=$validationFailures resetFails=$resetFailures)';
+}
+
+/// Pool lifecycle event kinds for [MssqlPoolEvent] / [MssqlPool.onEvent].
+enum MssqlPoolEventKind {
+  created,
+  destroyed,
+  acquired,
+  released,
+  acquireTimeout,
+  validationFailed,
+  resetFailed,
+}
+
+/// One pool lifecycle notification (create/acquire/release/…).
+class MssqlPoolEvent {
+  final MssqlPoolEventKind kind;
+  final DateTime at;
+  final MssqlPoolStats stats;
+
+  const MssqlPoolEvent({
+    required this.kind,
+    required this.at,
+    required this.stats,
+  });
+
+  @override
+  String toString() => 'MssqlPoolEvent($kind at=$at stats=$stats)';
+}
+
 class _IdleEntry {
   final MssqlConnection connection;
   final DateTime idleSince;
@@ -336,12 +441,14 @@ class _IdleEntry {
 /// - [max] caps total open connections.
 /// - Callers that exceed [max] are queued until a connection is released.
 /// - Idle connections older than [idleTimeout] are closed.
+/// - [stats] / [onEvent] expose sizing + lifetime counters for LAN ops.
 ///
 /// ```dart
 /// final pool = MssqlPool(MssqlPoolConfig(
 ///   host: 'localhost', user: 'sa', password: 'P@ssw0rd',
 /// ));
 /// await pool.open();
+/// print(pool.stats); // total/idle/inUse/pending + counters
 ///
 /// final result = await pool.query('SELECT * FROM users WHERE id = @id', {'id': 1});
 ///
@@ -361,7 +468,46 @@ class MssqlPool {
   bool _closed = false;
   Timer? _idleTimer;
 
-  MssqlPool(this.config);
+  int _created = 0;
+  int _destroyed = 0;
+  int _acquired = 0;
+  int _released = 0;
+  int _acquireTimeouts = 0;
+  int _validationFailures = 0;
+  int _resetFailures = 0;
+
+  /// Optional lifecycle observer; seeded from [MssqlPoolConfig.onPoolEvent].
+  void Function(MssqlPoolEvent event)? onEvent;
+
+  MssqlPool(this.config) : onEvent = config.onPoolEvent;
+
+  /// Current sizing + lifetime counters (safe to call anytime).
+  MssqlPoolStats get stats => MssqlPoolStats(
+        total: _total,
+        idle: _idle.length,
+        inUse: _total - _idle.length,
+        pending: _pending.length,
+        max: config.max,
+        created: _created,
+        destroyed: _destroyed,
+        acquired: _acquired,
+        released: _released,
+        acquireTimeouts: _acquireTimeouts,
+        validationFailures: _validationFailures,
+        resetFailures: _resetFailures,
+      );
+
+  /// Alias for [MssqlPoolStats.total] (node-mssql `pool.size`).
+  int get size => _total;
+
+  /// Alias for [MssqlPoolStats.idle] (node-mssql `pool.available`).
+  int get available => _idle.length;
+
+  /// Alias for [MssqlPoolStats.inUse] (node-mssql `pool.borrowed`).
+  int get borrowed => _total - _idle.length;
+
+  /// Alias for [MssqlPoolStats.pending] (node-mssql `pool.pending`).
+  int get pending => _pending.length;
 
   /// Opens the pool and pre-creates [config.min] connections.
   Future<void> open() async {
@@ -388,32 +534,42 @@ class MssqlPool {
     while (_idle.isNotEmpty) {
       final entry = _idle.removeLast();
       if (!entry.connection.isOpen) {
-        _total--;
+        _accountDestroyed();
         continue;
       }
       if (config.validateOnAcquire) {
         final ok = await entry.connection.validate();
         if (!ok) {
-          _total--;
+          _validationFailures++;
+          _emit(MssqlPoolEventKind.validationFailed);
+          _accountDestroyed();
           continue;
         }
       }
+      _noteAcquired();
       return entry.connection;
     }
 
     // Create a new connection if under the cap.
     if (_total < config.max) {
       _total++;
+      var reserved = true;
       try {
         final conn = await _openConnection();
         if (_closed) {
           // Pool was closed while we were connecting — discard the new connection.
           unawaited(conn.close());
+          _accountDestroyed();
+          reserved = false;
           throw MssqlException('Pool closed');
         }
+        _created++;
+        _emit(MssqlPoolEventKind.created);
+        _noteAcquired();
         return conn;
       } catch (_) {
-        _total--;
+        // Failed open: undo the reservation (not a destroy — never opened).
+        if (reserved) _total--;
         rethrow;
       }
     }
@@ -425,6 +581,8 @@ class MssqlPool {
       config.acquireTimeout,
       onTimeout: () {
         _pending.remove(completer);
+        _acquireTimeouts++;
+        _emit(MssqlPoolEventKind.acquireTimeout);
         throw MssqlException(
           'Pool acquire timeout: no connection available within '
           '${config.acquireTimeout.inSeconds}s (pool size: ${config.max})',
@@ -450,6 +608,8 @@ class MssqlPool {
     if (config.resetOnRelease) {
       final ok = await conn.resetSession();
       if (!ok || !conn.isOpen) {
+        _resetFailures++;
+        _emit(MssqlPoolEventKind.resetFailed);
         _discard(conn);
         return;
       }
@@ -458,17 +618,23 @@ class MssqlPool {
           conn.database.toLowerCase() != config.database.toLowerCase()) {
         final dbOk = await conn.resetDatabase(config.database);
         if (!dbOk || !conn.isOpen) {
+          _resetFailures++;
+          _emit(MssqlPoolEventKind.resetFailed);
           _discard(conn);
           return;
         }
       }
     }
 
+    _released++;
+    _emit(MssqlPoolEventKind.released);
+
     // Hand off to the next waiter first.
     while (_pending.isNotEmpty) {
       final completer = _pending.removeAt(0);
       if (!completer.isCompleted) {
         completer.complete(conn);
+        _noteAcquired();
         return;
       }
     }
@@ -577,12 +743,34 @@ class MssqlPool {
     _pending.clear();
 
     // Close all idle connections.
-    final closing = _idle.map((e) => e.connection.close()).toList();
+    final closing = <Future<void>>[];
+    for (final e in _idle) {
+      _accountDestroyed();
+      closing.add(e.connection.close());
+    }
     _idle.clear();
     await Future.wait(closing, eagerError: false);
   }
 
   // ── Internals ──────────────────────────────────────────────────────────────
+
+  void _noteAcquired() {
+    _acquired++;
+    _emit(MssqlPoolEventKind.acquired);
+  }
+
+  void _accountDestroyed() {
+    _total--;
+    if (_total < 0) _total = 0;
+    _destroyed++;
+    _emit(MssqlPoolEventKind.destroyed);
+  }
+
+  void _emit(MssqlPoolEventKind kind) {
+    final handler = onEvent;
+    if (handler == null) return;
+    handler(MssqlPoolEvent(kind: kind, at: DateTime.now(), stats: stats));
+  }
 
   Future<MssqlConnection> _openConnection() async {
     final aad = config.azureAdAuth;
@@ -665,6 +853,8 @@ class MssqlPool {
     _total++;
     try {
       final conn = await _openConnection();
+      _created++;
+      _emit(MssqlPoolEventKind.created);
       _idle.add(_IdleEntry(conn));
     } catch (_) {
       _total--;
@@ -673,8 +863,8 @@ class MssqlPool {
   }
 
   void _discard(MssqlConnection conn) {
-    _total--;
-    if (conn.isOpen) conn.close();
+    _accountDestroyed();
+    if (conn.isOpen) unawaited(conn.close());
   }
 
   void _startIdleTimer() {
