@@ -38,10 +38,7 @@ Future<MssqlConnection?> tryOpenTls() async {
 }
 
 void main() {
-  if (!liveTestsEnabled) {
-    registerLiveTestsDisabled();
-    return;
-  }
+  if (!beginLiveSuite()) return;
   late MssqlConnection conn;
   var available = false;
 

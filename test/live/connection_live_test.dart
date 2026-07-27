@@ -4,10 +4,7 @@ import 'live_test_helpers.dart';
 import 'package:test/test.dart';
 
 void main() {
-  if (!liveTestsEnabled) {
-    registerLiveTestsDisabled();
-    return;
-  }
+  if (!beginLiveSuite()) return;
 
   group('live connection', () {
     setUpAll(waitForSqlServer);

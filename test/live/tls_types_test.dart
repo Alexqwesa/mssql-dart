@@ -24,10 +24,7 @@ Future<MssqlConnection> openConn({bool encrypt = false}) =>
     );
 
 void main() {
-  if (!liveTestsEnabled) {
-    registerLiveTestsDisabled();
-    return;
-  }
+  if (!beginLiveSuite()) return;
   // ── TLS connection ─────────────────────────────────────────────────────────
 
   group('TLS connection', () {

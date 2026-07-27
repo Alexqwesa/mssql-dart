@@ -2,7 +2,10 @@ import 'dart:io';
 
 import 'package:mssql/mssql.dart';
 
-/// Environment-backed settings shared by opt-in SQL Server integration tests.
+/// Environment-backed settings for normal live suites (`mssql-dart-live` :14334).
+///
+/// Force-TLS stress uses its own host/port constants (14335) and does not
+/// depend on [LiveTestConfig.encrypt].
 class LiveTestConfig {
   final String host;
   final int port;
@@ -35,6 +38,7 @@ class LiveTestConfig {
       port: port,
       user: environment['MSSQL_USER'] ?? 'sa',
       password: password,
+      // Default cleartext / optional-TLS for normal live suites.
       encrypt: environment['MSSQL_ENCRYPT'] == '1',
       trustServerCertificate:
           environment['MSSQL_TRUST_SERVER_CERTIFICATE'] != '0',

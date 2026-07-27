@@ -1,4 +1,5 @@
 services:
+  # Optional TLS / cleartext — most of test/live (encrypt:false suites).
   sqlserver:
     build:
       context: .
@@ -10,5 +11,22 @@ services:
       MSSQL_PID: Developer
       MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-Strong_test_password_123!}"
     ports:
-      # Use 14334 — avoid 14333
+      # 14334 — avoid clashing with local 1433 / CI 14333
       - "14334:1433"
+
+  # Full-session TLS (forceencryption=1) — tls_force_encrypt_stress_test only.
+  # Runs beside sqlserver so both suites can run without swapping configs.
+  sqlserver-force-tls:
+    image: mssql-dart-live:local
+    build:
+      context: .
+      dockerfile: docker/live/Dockerfile
+    container_name: mssql-dart-live-force-tls
+    environment:
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: Developer
+      MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-Strong_test_password_123!}"
+    ports:
+      - "14335:1433"
+    volumes:
+      - ./docker/live/mssql.forceencryption.conf:/var/opt/mssql/mssql.conf:ro

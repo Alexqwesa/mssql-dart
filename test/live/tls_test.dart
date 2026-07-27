@@ -14,10 +14,7 @@ final _user = liveTestConfig.user;
 final _password = liveTestConfig.password;
 
 void main() {
-  if (!liveTestsEnabled) {
-    registerLiveTestsDisabled();
-    return;
-  }
+  if (!beginLiveSuite()) return;
   group('TLS', () {
     test('connect with encrypt:true and trustServerCertificate:true', () async {
       final conn = await MssqlConnection.connect(

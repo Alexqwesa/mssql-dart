@@ -25,10 +25,7 @@ Future<MssqlConnection> openConn() => MssqlConnection.connect(
     );
 
 void main() {
-  if (!liveTestsEnabled) {
-    registerLiveTestsDisabled();
-    return;
-  }
+  if (!beginLiveSuite()) return;
   // ── MssqlConnection.connect params ─────────────────────────────────────────
 
   group('MssqlConnection.connect', () {

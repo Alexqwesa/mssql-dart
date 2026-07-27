@@ -619,46 +619,57 @@ on `MssqlPoolConfig` / `MssqlPoolConfig.fromString`.
 
 ---
 
-## Live SQL Server Tests
+## Running tests
 
-Offline protocol tests run normally. Live tests are opt-in and live in
-`test/live`; they use a disposable database for suites that modify schema or
-data.
+### Offline (no SQL Server)
 
 ```powershell
-Copy-Item .env.example .env
-docker compose --env-file .env -f docker-compose.live.yml up -d
+dart test
+```
+
+`test/live/**` is gated: without `MSSQL_LIVE_TESTS=1` those files **skip** (they do
+not fail). Offline TLS helpers (`test/tls_bridge_test.dart`,
+`test/tls_align_test.dart`) always run.
+
+### Live SQL Server (opt-in)
+
+One compose file starts **two** containers. One live command covers both:
+
+| Container | Host port | Used by |
+| --- | --- | --- |
+| `mssql-dart-live` | **14334** | Most of `test/live` (default `MSSQL_PORT` / `encrypt: false`) |
+| `mssql-dart-live-force-tls` | **14335** | `tls_force_encrypt_stress_test.dart` (hard-wired; always `encrypt: true`) |
+
+```powershell
+Copy-Item .env.example .env   # once
+docker compose --env-file .env -f docker-compose.live.yml up -d --build
+
 $env:MSSQL_LIVE_TESTS = '1'
 $env:MSSQL_HOST = '127.0.0.1'
-$env:MSSQL_PORT = '14334'
 $env:MSSQL_USER = 'sa'
 $env:MSSQL_PASSWORD = 'Strong_test_password_123!'
-$env:MSSQL_ENCRYPT = '0'
 $env:MSSQL_TRUST_SERVER_CERTIFICATE = '1'
+# Defaults: MSSQL_PORT=14334, MSSQL_ENCRYPT=0 — no FORCE switch needed
+
 dart test test/live --concurrency=1
+
 docker compose --env-file .env -f docker-compose.live.yml down
 ```
 
-Default compose uses `forceencryption=0` so most suites stay on cleartext when
-`MSSQL_ENCRYPT=0`. TLS suites (`tls_test`, `tls_types_test`, …) still pass
-`encrypt: true` explicitly against the self-signed cert.
+`MSSQL_PASSWORD` is required whenever `MSSQL_LIVE_TESTS=1`. Compose has no
+persistent volume; `docker compose down` wipes both containers — do not use
+production credentials.
 
-### Forced TLS stress
+Bash:
 
-To require encryption server-side and run the long-lived TLS stress suite:
-
-```powershell
-docker compose --env-file .env -f docker-compose.live.yml `
-  -f docker-compose.live.force-tls.yml up -d --build
-$env:MSSQL_FORCE_ENCRYPTION = '1'
-$env:MSSQL_ENCRYPT = '1'
-$env:MSSQL_TRUST_SERVER_CERTIFICATE = '1'
-dart test test/live/tls_force_encrypt_stress_test.dart --concurrency=1
+```bash
+cp -n .env.example .env
+docker compose --env-file .env -f docker-compose.live.yml up -d --build
+export MSSQL_LIVE_TESTS=1 MSSQL_HOST=127.0.0.1 \
+  MSSQL_USER=sa MSSQL_PASSWORD='Strong_test_password_123!' \
+  MSSQL_TRUST_SERVER_CERTIFICATE=1
+dart test test/live --concurrency=1
 ```
-
-`MSSQL_PASSWORD` is required whenever `MSSQL_LIVE_TESTS=1`. The compose
-environment has no persistent volume and is removed by `docker compose down`;
-do not reuse production credentials.
 
 ## Limitations
 

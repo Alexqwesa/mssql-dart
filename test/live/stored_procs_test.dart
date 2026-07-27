@@ -15,10 +15,7 @@ final _config = liveTestConfig;
 late MssqlConnection conn;
 
 void main() {
-  if (!liveTestsEnabled) {
-    registerLiveTestsDisabled();
-    return;
-  }
+  if (!beginLiveSuite()) return;
   setUpAll(() async {
     conn = await MssqlConnection.connect(
       host: _config.host,

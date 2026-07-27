@@ -12,10 +12,7 @@ import 'package:mssql/mssql.dart';
 late MssqlConnection conn;
 
 void main() {
-  if (!liveTestsEnabled) {
-    registerLiveTestsDisabled();
-    return;
-  }
+  if (!beginLiveSuite()) return;
   setUpAll(() async {
     conn = await liveTestConfig.open(database: 'master');
   });

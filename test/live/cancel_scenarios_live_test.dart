@@ -35,10 +35,7 @@ Future<MssqlConnection?> tryOpen({bool encrypt = false}) async {
 }
 
 void main() {
-  if (!liveTestsEnabled) {
-    registerLiveTestsDisabled();
-    return;
-  }
+  if (!beginLiveSuite()) return;
   late MssqlConnection conn;
   var available = false;
 

@@ -35,10 +35,7 @@ Future<bool> sqlUp() async {
 }
 
 void main() {
-  if (!liveTestsEnabled) {
-    registerLiveTestsDisabled();
-    return;
-  }
+  if (!beginLiveSuite()) return;
   late bool available;
 
   setUpAll(() async {

@@ -40,10 +40,7 @@ MssqlPool openPool({int max = 3, Duration? acquireTimeout}) => MssqlPool(
     );
 
 void main() {
-  if (!liveTestsEnabled) {
-    registerLiveTestsDisabled();
-    return;
-  }
+  if (!beginLiveSuite()) return;
   // ── Login error path (token_stream.dart:81-82) ────────────────────────────
   // Wrong credentials → server sends tokenError during login response.
 

@@ -85,49 +85,41 @@ jobs:
       - uses: dart-lang/setup-dart@v1
         with: { sdk: stable }
       - run: dart pub get
-      - name: Start forceencryption SQL Server
+      - name: Start live SQL Servers (optional TLS + forceencryption)
         run: |
           docker compose --env-file .env.example \
             -f docker-compose.live.yml \
-            -f docker-compose.live.force-tls.yml \
             up -d --build
-      - name: Wait for SQL Server
+      - name: Wait for forceencryption SQL Server
         run: |
           for i in $(seq 1 60); do
-            if docker exec mssql-dart-live /opt/mssql-tools18/bin/sqlcmd \
+            if docker exec mssql-dart-live-force-tls /opt/mssql-tools18/bin/sqlcmd \
               -S localhost -U sa -P 'Strong_test_password_123!' \
               -Q 'SELECT 1' -No -C >/dev/null 2>&1; then
-              echo "SQL Server is ready"
+              echo "force-TLS SQL Server is ready"
               exit 0
             fi
             echo "waiting ($i)..."
             sleep 5
           done
           echo "SQL Server did not become ready"
-          docker compose -f docker-compose.live.yml \
-            -f docker-compose.live.force-tls.yml logs
+          docker compose -f docker-compose.live.yml logs
           exit 1
       - name: Run force-encryption TLS stress
         env:
           MSSQL_LIVE_TESTS: "1"
-          MSSQL_FORCE_ENCRYPTION: "1"
           MSSQL_HOST: "127.0.0.1"
-          MSSQL_PORT: "14334"
           MSSQL_USER: "sa"
           MSSQL_PASSWORD: "Strong_test_password_123!"
-          MSSQL_ENCRYPT: "1"
           MSSQL_TRUST_SERVER_CERTIFICATE: "1"
         run: |
           dart test \
             test/live/tls_force_encrypt_stress_test.dart \
-            test/live/tls_test.dart \
-            test/live/tls_types_test.dart \
             --concurrency=1 --timeout=120s
       - name: Tear down
         if: always()
         run: |
-          docker compose -f docker-compose.live.yml \
-            -f docker-compose.live.force-tls.yml down -v
+          docker compose -f docker-compose.live.yml down -v
 
   # ════════════════════════════════════════════════════════════════════════════
   # 3 · Full test suite against a live SQL Server 2022 container

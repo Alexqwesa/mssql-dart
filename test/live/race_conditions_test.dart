@@ -1,6 +1,7 @@
 import 'dart:async';
-import 'package:test/test.dart';
+
 import 'package:mssql/mssql.dart';
+import 'package:test/test.dart';
 
 import 'live_test_config.dart';
 import 'live_test_gate.dart';
@@ -41,39 +42,48 @@ MssqlPool makePool({int min = 0, int max = 5}) => MssqlPool(MssqlPoolConfig(
     ));
 
 void main() {
-  if (!liveTestsEnabled) {
-    registerLiveTestsDisabled();
-    return;
-  }
+  if (!beginLiveSuite()) return;
   // ── Single-connection busy guard ──────────────────────────────────────────
 
   group('connection busy guard', () {
     test('concurrent query on same connection throws StateError', () async {
       final conn = await openConn();
       try {
-        // Start a slow query (WAITFOR DELAY) but don't await it yet.
-        unawaited(conn.query("WAITFOR DELAY '00:00:01'; SELECT 1 AS v"));
-
-        // Immediately issue a second query — must throw because _busy = true.
-        expect(
-          () => conn.query('SELECT 2 AS v'),
+        // Start a slow query; _busy is set synchronously before the first await.
+        final first =
+            conn.query("WAITFOR DELAY '00:00:01'; SELECT 1 AS v");
+        // Async methods surface StateError on the returned Future (not sync throw).
+        await expectLater(
+          conn.query('SELECT 2 AS v'),
           throwsA(isA<StateError>()),
         );
-
-        // Let the first query finish (cancel it by closing).
-      } finally {
         await conn.close();
+        try {
+          await first;
+        } catch (_) {}
+      } finally {
+        try {
+          await conn.close();
+        } catch (_) {}
       }
     });
 
     test('concurrent execute on same connection throws StateError', () async {
       final conn = await openConn();
       try {
-        unawaited(conn.execute("WAITFOR DELAY '00:00:01'"));
-        expect(() => conn.execute('SELECT 1'), throwsA(isA<StateError>()));
+        final first = conn.execute("WAITFOR DELAY '00:00:01'");
+        await expectLater(
+          conn.execute('SELECT 1'),
+          throwsA(isA<StateError>()),
+        );
         await conn.close();
-      } catch (_) {
-        await conn.close();
+        try {
+          await first;
+        } catch (_) {}
+      } finally {
+        try {
+          await conn.close();
+        } catch (_) {}
       }
     });
 
@@ -90,7 +100,10 @@ void main() {
         await iter.moveNext(); // now _busy = true
 
         // A concurrent query must be rejected.
-        expect(() => conn.query('SELECT 1 AS v'), throwsA(isA<StateError>()));
+        await expectLater(
+          conn.query('SELECT 1 AS v'),
+          throwsA(isA<StateError>()),
+        );
 
         // Clean up.
         await iter.cancel();

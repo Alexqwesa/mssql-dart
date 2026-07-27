@@ -36,10 +36,7 @@ Future<MssqlConnection> openConn({bool encrypt = false}) =>
     );
 
 void main() {
-  if (!liveTestsEnabled) {
-    registerLiveTestsDisabled();
-    return;
-  }
+  if (!beginLiveSuite()) return;
   // ── Connection state ──────────────────────────────────────────────────────
 
   group('connection state', () {

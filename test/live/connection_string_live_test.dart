@@ -5,10 +5,7 @@ import 'live_test_config.dart';
 import 'live_test_gate.dart';
 
 void main() {
-  if (!liveTestsEnabled) {
-    registerLiveTestsDisabled();
-    return;
-  }
+  if (!beginLiveSuite()) return;
 
   test('connectFromString connects with an ADO string', () async {
     final config = liveTestConfig;

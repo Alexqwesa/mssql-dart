@@ -1,3 +1,6 @@
+@Tags(['force_tls'])
+library;
+
 import 'dart:io';
 
 import 'package:mssql/mssql.dart';
@@ -6,38 +9,22 @@ import 'package:test/test.dart';
 import 'live_test_config.dart';
 import 'live_test_gate.dart';
 
-/// Long-lived TLS stress against a forceencryption=1 SQL Server.
+/// Long-lived TLS stress against `mssql-dart-live-force-tls` (forceencryption=1).
 ///
-/// Requires:
-///   MSSQL_LIVE_TESTS=1
-///   MSSQL_FORCE_ENCRYPTION=1
-///   encrypt:true + trustServerCertificate (self-signed live image)
+/// Always uses host port **14335** and `encrypt: true` — no env switch required.
+/// Runs alongside normal live suites in `dart test test/live` (those use 14334).
 ///
-/// Start the force-TLS compose overlay first:
-///   docker compose --env-file .env -f docker-compose.live.yml \
-///     -f docker-compose.live.force-tls.yml up -d --build
+///   docker compose --env-file .env -f docker-compose.live.yml up -d --build
 final _host = liveTestConfig.host;
-final _port = liveTestConfig.port;
+final _port = int.tryParse(
+      Platform.environment['MSSQL_FORCE_TLS_PORT'] ?? '14335',
+    ) ??
+    14335;
 final _user = liveTestConfig.user;
 final _password = liveTestConfig.password;
 
-bool get _forceEncryptionEnabled =>
-    Platform.environment['MSSQL_FORCE_ENCRYPTION'] == '1';
-
 void main() {
-  if (!liveTestsEnabled) {
-    registerLiveTestsDisabled();
-    return;
-  }
-  if (!_forceEncryptionEnabled) {
-    test(
-      'force-encryption TLS stress is disabled',
-      () {},
-      skip:
-          'Set MSSQL_FORCE_ENCRYPTION=1 against a forceencryption=1 container.',
-    );
-    return;
-  }
+  if (!beginLiveSuite()) return;
 
   group('forceencryption TLS stress', () {
     test('encrypt:false fails with a clear error', () async {

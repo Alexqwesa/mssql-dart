@@ -4,10 +4,7 @@ import 'live_test_config.dart';
 import 'live_test_gate.dart';
 
 void main() async {
-  if (!liveTestsEnabled) {
-    registerLiveTestsDisabled();
-    return;
-  }
+  if (!beginLiveSuite()) return;
   print('Connecting...');
   final conn = await MssqlConnection.connect(
     host: liveTestConfig.host,

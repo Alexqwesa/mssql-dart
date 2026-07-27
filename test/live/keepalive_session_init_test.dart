@@ -38,10 +38,7 @@ Future<bool> _sqlUp() async {
 }
 
 void main() {
-  if (!liveTestsEnabled) {
-    registerLiveTestsDisabled();
-    return;
-  }
+  if (!beginLiveSuite()) return;
   group('applyMssqlTcpOptions', () {
     test('enables tcpNoDelay and SO_KEEPALIVE without throwing', () async {
       final listener = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);

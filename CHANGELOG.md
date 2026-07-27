@@ -9,8 +9,10 @@
   packets only, and wrap-fill no-op SQLBatches when needed.
 * TLS: add optional `SecurityContext` and `hostNameInCertificate` on connect,
   pool, and connection strings (`HostNameInCertificate`).
-* Tests: Docker force-TLS overlay (`docker-compose.live.force-tls.yml`) and
-  long-lived `tls_force_encrypt_stress_test` gated by `MSSQL_FORCE_ENCRYPTION=1`.
+* Tests: two live containers in `docker-compose.live.yml` — optional TLS on
+  **14334** (`mssql-dart-live`) and `forceencryption=1` on **14335**
+  (`mssql-dart-live-force-tls`). Force-TLS stress hard-wires 14335; one
+  `dart test test/live` run covers both.
 * Tests: move SQL Server integration coverage to opt-in `test/live`, add
   environment-backed configuration, driver-based readiness checks, disposable
   databases, Docker Compose setup, and CI live-test configuration.
@@ -18,7 +20,7 @@
   of the default test run; live connection-string coverage now uses the shared
   `MSSQL_*` configuration instead of the retired port `14330` and credentials.
 * Tests: configure the live Docker SQL Server with a short-lived self-signed
-  TLS certificate (forceencryption off by default; optional force-TLS overlay).
+  TLS certificate (`forceencryption=0` on 14334; sibling force-TLS on 14335).
 
 * Security: deprecate Azure AD username/password (ROPC) token acquisition,
   reject blank bearer tokens, and expose bounded structured OAuth failures
