@@ -262,4 +262,91 @@ void main() {
       );
     });
   });
+
+  group('MssqlXml / MssqlVarbinary', () {
+    test('xml decl + typeXml schemaPresent=0 on wire', () async {
+      final pkt = await _capture(
+        (buf) => RpcRequest.sendExecuteSql(
+          buf,
+          'SELECT @x',
+          {'x': const MssqlXml('<root/>')},
+        ),
+      );
+      final body = _body(pkt);
+      expect(_containsUcs2(body, '@x xml'), isTrue);
+      var found = false;
+      for (var i = 0; i < body.length - 1; i++) {
+        if (body[i] == typeXml && body[i + 1] == 0) {
+          found = true;
+          break;
+        }
+      }
+      expect(found, isTrue);
+      expect(_containsUcs2(body, '<root/>'), isTrue);
+    });
+
+    test('sized varbinary uses USHORT MaxLen not PLP', () async {
+      final pkt = await _capture(
+        (buf) => RpcRequest.sendExecuteSql(
+          buf,
+          'SELECT @b',
+          {
+            'b': MssqlVarbinary([0xDE, 0xAD], length: 16),
+          },
+        ),
+      );
+      final body = _body(pkt);
+      expect(_containsUcs2(body, '@b varbinary(16)'), isTrue);
+      var found = false;
+      for (var i = 0; i < body.length - 4; i++) {
+        if (body[i] == typeBigVarBin &&
+            body[i + 1] == 16 &&
+            body[i + 2] == 0 &&
+            body[i + 3] == 2 &&
+            body[i + 4] == 0) {
+          found = true;
+          expect(body[i + 5], equals(0xDE));
+          expect(body[i + 6], equals(0xAD));
+          break;
+        }
+      }
+      expect(found, isTrue);
+    });
+
+    test('varbinary max flag forces PLP MaxLen 0xFFFF', () async {
+      final pkt = await _capture(
+        (buf) => RpcRequest.sendExecuteSql(
+          buf,
+          'SELECT @b',
+          {
+            'b': MssqlVarbinary([1, 2, 3], max: true),
+          },
+        ),
+      );
+      final body = _body(pkt);
+      expect(_containsUcs2(body, '@b varbinary(max)'), isTrue);
+      var found = false;
+      for (var i = 0; i < body.length - 3; i++) {
+        if (body[i] == typeBigVarBin &&
+            body[i + 1] == 0xFF &&
+            body[i + 2] == 0xFF) {
+          found = true;
+          break;
+        }
+      }
+      expect(found, isTrue);
+    });
+
+    test('default size follows value length', () {
+      expect(MssqlVarbinary([1, 2, 3]).sqlDecl, equals('varbinary(3)'));
+      expect(const MssqlVarbinary([]).sqlDecl, equals('varbinary(1)'));
+    });
+
+    test('rejects value longer than length', () {
+      expect(
+        () => MssqlVarbinary([1, 2, 3], length: 2).sqlDecl,
+        throwsArgumentError,
+      );
+    });
+  });
 }

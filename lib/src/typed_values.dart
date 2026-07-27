@@ -506,3 +506,78 @@ class MssqlSmallDateTime {
   @override
   String toString() => value.toIso8601String();
 }
+
+/// SQL `xml` parameter (UCS-2 PLP, typeXml) — not `nvarchar`.
+///
+/// Bare [String] params are sent as `nvarchar`. Use this when the column or
+/// SP parameter is `xml` so the server avoids implicit conversion (ms-tds
+/// XMLTYPE; go-mssqldb `typeXml` with `SchemaPresent=0`).
+class MssqlXml {
+  final String value;
+
+  const MssqlXml(this.value);
+
+  String get sqlDecl => 'xml';
+
+  @override
+  String toString() => value;
+}
+
+/// SQL `varbinary(n)` / `varbinary(max)` parameter binder.
+///
+/// Bare [List<int>] is always sent as `varbinary(max)` (PLP). Use this when
+/// the column is `varbinary(n)` / `binary(n)` so MaxLength matches the schema
+/// (go-mssqldb sizes `[]byte` to `len(val)`; LAN plan quality).
+///
+/// ```dart
+/// await conn.query('SELECT @b', {
+///   'b': MssqlVarbinary([0xDE, 0xAD], length: 16),
+/// });
+/// // or: MssqlVarbinary(bytes, max: true) for varbinary(max)
+/// ```
+class MssqlVarbinary {
+  final List<int> value;
+
+  /// Force `varbinary(max)` / PLP (also used automatically when length > 8000).
+  final bool max;
+
+  /// Declared / TYPE_INFO MaxLength when not [max] (1–8000).
+  ///
+  /// Defaults to `max(value.length, 1)` so empty payloads still declare
+  /// `varbinary(1)` with a zero-length value (USHORTLEN).
+  final int? length;
+
+  const MssqlVarbinary(this.value, {this.max = false, this.length});
+
+  /// Whether the wire form is PLP (`varbinary(max)`).
+  bool get useMax {
+    if (max) return true;
+    if (length != null && length! > 8000) return true;
+    return value.length > 8000;
+  }
+
+  /// USHORT MaxLength for non-max payloads (1–8000).
+  int get wireMaxLength {
+    if (useMax) {
+      throw StateError('wireMaxLength is only valid for non-max varbinary');
+    }
+    final n = length ?? (value.isEmpty ? 1 : value.length);
+    if (n < 1 || n > 8000) {
+      throw ArgumentError.value(n, 'length', 'must be 1–8000 (or use max: true)');
+    }
+    if (value.length > n) {
+      throw ArgumentError(
+        'Value length ${value.length} exceeds varbinary($n)',
+      );
+    }
+    return n;
+  }
+
+  String get sqlDecl {
+    if (useMax) return 'varbinary(max)';
+    return 'varbinary($wireMaxLength)';
+  }
+
+  @override
+  String toString() => 'MssqlVarbinary(${value.length} bytes)';
+}

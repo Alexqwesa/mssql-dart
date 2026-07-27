@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* LAN typed binders: `MssqlXml` / `MssqlVarbinary` for `xml` and sized
+  `varbinary(n)` / `varbinary(max)` params (bare `String` → nvarchar; bare
+  `List<int>` stays `varbinary(max)`).
 * LAN typed binders: `MssqlDateTime` / `MssqlSmallDateTime` for legacy
   `datetime` / `smalldatetime` params (go-mssqldb `DateTime1`; bare
   `DateTime` stays `datetime2`).

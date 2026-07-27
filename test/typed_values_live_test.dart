@@ -2,7 +2,7 @@ import 'package:mssql/mssql.dart';
 import 'package:test/test.dart';
 
 /// Live round-trips for typed SQL binders (GUID / money / DTO / decimal /
-/// varchar / date / time).
+/// varchar / date / time / datetime / xml / varbinary).
 ///
 /// Skips when 127.0.0.1:14330 is unreachable.
 
@@ -197,7 +197,6 @@ void main() {
     );
     expect((r[0]['dtb'] as String).toLowerCase(), equals('datetime'));
     expect((r[0]['sdb'] as String).toLowerCase(), equals('smalldatetime'));
-
     final dt = r[0]['dt'] as DateTime;
     expect(dt.year, equals(2024));
     expect(dt.month, equals(3));
@@ -210,5 +209,62 @@ void main() {
     expect(sd.hour, equals(10));
     expect(sd.minute, equals(31));
     expect(sd.second, equals(0));
+  });
+
+  test('MssqlXml / MssqlVarbinary round-trip', () async {
+    if (!available) {
+      markTestSkipped('SQL Server not available on :$_port');
+      return;
+    }
+    final r = await conn.query(
+      'SELECT @x AS x, @b AS b, '
+      "SQL_VARIANT_PROPERTY(CAST(@b AS sql_variant), 'BaseType') AS bb, "
+      "SQL_VARIANT_PROPERTY(CAST(@b AS sql_variant), 'MaxLength') AS bl",
+      {
+        'x': const MssqlXml('<root id="1">lan</root>'),
+        'b': MssqlVarbinary([0xDE, 0xAD, 0xBE, 0xEF], length: 16),
+      },
+    );
+    expect(r[0]['x'], equals('<root id="1">lan</root>'));
+    expect(r[0]['b'], equals([0xDE, 0xAD, 0xBE, 0xEF]));
+    expect((r[0]['bb'] as String).toLowerCase(), equals('varbinary'));
+    expect(r[0]['bl'], equals(16));
+  });
+
+  test('MssqlXml into xml column', () async {
+    if (!available) {
+      markTestSkipped('SQL Server not available on :$_port');
+      return;
+    }
+    await conn.execute(
+      'IF OBJECT_ID(\'tempdb..#xt\') IS NOT NULL DROP TABLE #xt;'
+      'CREATE TABLE #xt (doc xml NOT NULL);',
+    );
+    await conn.execute(
+      'INSERT INTO #xt (doc) VALUES (@x)',
+      {'x': const MssqlXml('<a><b>1</b></a>')},
+    );
+    final r = await conn.query('SELECT CAST(doc AS nvarchar(max)) AS s FROM #xt');
+    expect(r[0]['s'], contains('<a>'));
+    expect(r[0]['s'], contains('<b>1</b>'));
+  });
+
+  test('MssqlVarbinary into varbinary(n) column', () async {
+    if (!available) {
+      markTestSkipped('SQL Server not available on :$_port');
+      return;
+    }
+    await conn.execute(
+      'IF OBJECT_ID(\'tempdb..#bt\') IS NOT NULL DROP TABLE #bt;'
+      'CREATE TABLE #bt (blob varbinary(8) NOT NULL);',
+    );
+    await conn.execute(
+      'INSERT INTO #bt (blob) VALUES (@b)',
+      {
+        'b': MssqlVarbinary([1, 2, 3, 4], length: 8),
+      },
+    );
+    final r = await conn.query('SELECT blob FROM #bt');
+    expect(r[0]['blob'], equals([1, 2, 3, 4]));
   });
 }

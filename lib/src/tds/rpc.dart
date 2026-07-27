@@ -125,6 +125,8 @@ class RpcRequest {
     if (v is MssqlTime) return v.sqlDecl;
     if (v is MssqlDateTime) return 'datetime';
     if (v is MssqlSmallDateTime) return 'smalldatetime';
+    if (v is MssqlXml) return v.sqlDecl;
+    if (v is MssqlVarbinary) return v.sqlDecl;
     if (v is int) return 'bigint';
     if (v is double) return 'float';
     if (v is bool) return 'bit';
@@ -198,6 +200,10 @@ class RpcRequest {
         _writeLegacyDateTimeParam(buf, v.toWireBytes(), small: false);
       case MssqlSmallDateTime v:
         _writeLegacyDateTimeParam(buf, v.toWireBytes(), small: true);
+      case MssqlXml v:
+        _writeXmlParam(buf, v);
+      case MssqlVarbinary v:
+        _writeVarBinaryParam(buf, v);
       case int v:
         buf.writeByte(typeIntN);
         buf.writeByte(8); // max len
@@ -260,7 +266,20 @@ class RpcRequest {
     }
     if (t.startsWith('varbinary') || t == 'image' || t == 'binary') {
       buf.writeByte(typeBigVarBin);
-      buf.writeUint16LE(0xFFFF);
+      final sized = RegExp(r'^varbinary\s*\(\s*(\d+)\s*\)$').firstMatch(t);
+      if (sized != null) {
+        final n = int.parse(sized.group(1)!).clamp(1, 8000);
+        buf.writeUint16LE(n);
+        buf.writeUint16LE(0xFFFF); // null
+      } else {
+        buf.writeUint16LE(0xFFFF);
+        buf.writeUint64LE(plpNull);
+      }
+      return;
+    }
+    if (t == 'xml') {
+      buf.writeByte(typeXml);
+      buf.writeByte(0); // schemaPresent
       buf.writeUint64LE(plpNull);
       return;
     }
@@ -552,6 +571,35 @@ class RpcRequest {
     buf.writeUint32LE(data.length);
     buf.writeBytes(data);
     buf.writeUint32LE(plpTerminator);
+  }
+
+  /// `xml` / typeXml — schemaPresent=0 + UCS-2 PLP (ms-tds XMLTYPE).
+  static void _writeXmlParam(TdsBuffer buf, MssqlXml v) {
+    final valueBytes = _ucs2(v.value);
+    buf.writeByte(typeXml);
+    buf.writeByte(0); // SchemaPresent
+    buf.writeUint64LE(valueBytes.length);
+    buf.writeUint32LE(valueBytes.length);
+    buf.writeBytes(valueBytes);
+    buf.writeUint32LE(plpTerminator);
+  }
+
+  /// `varbinary(n)` USHORTLEN or `varbinary(max)` PLP (go-mssqldb []byte size).
+  static void _writeVarBinaryParam(TdsBuffer buf, MssqlVarbinary v) {
+    final data = Uint8List.fromList(v.value);
+    buf.writeByte(typeBigVarBin);
+    if (v.useMax) {
+      buf.writeUint16LE(0xFFFF);
+      buf.writeUint64LE(data.length);
+      buf.writeUint32LE(data.length);
+      buf.writeBytes(data);
+      buf.writeUint32LE(plpTerminator);
+      return;
+    }
+    final maxLen = v.wireMaxLength;
+    buf.writeUint16LE(maxLen);
+    buf.writeUint16LE(data.length);
+    buf.writeBytes(data);
   }
 
   static void _writeCollation(TdsBuffer buf) {
