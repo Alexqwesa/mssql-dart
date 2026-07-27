@@ -5,6 +5,9 @@
 * Tests: move SQL Server integration coverage to opt-in `test/live`, add
   environment-backed configuration, driver-based readiness checks, disposable
   databases, Docker Compose setup, and CI live-test configuration.
+* Tests: move the remaining Docker-dependent suites and diagnostic script out
+  of the default test run; live connection-string coverage now uses the shared
+  `MSSQL_*` configuration instead of the retired port `14330` and credentials.
 
 * Security: deprecate Azure AD username/password (ROPC) token acquisition,
   reject blank bearer tokens, and expose bounded structured OAuth failures

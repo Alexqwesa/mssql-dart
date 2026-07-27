@@ -2,6 +2,9 @@ import 'dart:async';
 import 'package:test/test.dart';
 import 'package:mssql/mssql.dart';
 
+import 'live_test_config.dart';
+import 'live_test_gate.dart';
+
 // Race condition and concurrency tests.
 //
 // Verifies that the driver is safe under concurrent use:
@@ -11,26 +14,23 @@ import 'package:mssql/mssql.dart';
 //   - pool.close() during in-flight work drains gracefully
 //   - Double-release, release-after-close, and other misuse are handled
 
-const _host = '127.0.0.1';
-const _port = 14330;
-const _user = 'sa';
-const _password = 'Knex_Test1!';
+final _config = liveTestConfig;
 
 Future<MssqlConnection> openConn() => MssqlConnection.connect(
-      host: _host,
-      port: _port,
-      user: _user,
-      password: _password,
+      host: _config.host,
+      port: _config.port,
+      user: _config.user,
+      password: _config.password,
       database: 'master',
       encrypt: false,
       trustServerCertificate: true,
     );
 
 MssqlPool makePool({int min = 0, int max = 5}) => MssqlPool(MssqlPoolConfig(
-      host: _host,
-      port: _port,
-      user: _user,
-      password: _password,
+      host: _config.host,
+      port: _config.port,
+      user: _config.user,
+      password: _config.password,
       database: 'master',
       encrypt: false,
       trustServerCertificate: true,
@@ -41,6 +41,10 @@ MssqlPool makePool({int min = 0, int max = 5}) => MssqlPool(MssqlPoolConfig(
     ));
 
 void main() {
+  if (!liveTestsEnabled) {
+    registerLiveTestsDisabled();
+    return;
+  }
   // ── Single-connection busy guard ──────────────────────────────────────────
 
   group('connection busy guard', () {

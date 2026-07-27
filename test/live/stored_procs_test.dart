@@ -1,26 +1,30 @@
 import 'package:test/test.dart';
 import 'package:mssql/mssql.dart';
 
+import 'live_test_config.dart';
+import 'live_test_gate.dart';
+
 // Stored procedure integration tests.
 // Exercises tokenReturnStatus (0x79), tokenReturnValue (0xAC), and
 // DONE_PROC tokens that the adversarial review identified as untested.
 //
 // Runs against the dart-mssql Docker container on port 14330.
 
-const _host = '127.0.0.1';
-const _port = 14330;
-const _user = 'sa';
-const _password = 'Knex_Test1!';
+final _config = liveTestConfig;
 
 late MssqlConnection conn;
 
 void main() {
+  if (!liveTestsEnabled) {
+    registerLiveTestsDisabled();
+    return;
+  }
   setUpAll(() async {
     conn = await MssqlConnection.connect(
-      host: _host,
-      port: _port,
-      user: _user,
-      password: _password,
+      host: _config.host,
+      port: _config.port,
+      user: _config.user,
+      password: _config.password,
       database: 'master',
       encrypt: false,
       trustServerCertificate: true,

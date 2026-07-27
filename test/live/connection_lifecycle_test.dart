@@ -3,6 +3,9 @@ import 'dart:async';
 import 'package:test/test.dart';
 import 'package:mssql/mssql.dart';
 
+import 'live_test_config.dart';
+import 'live_test_gate.dart';
+
 // Connection and pool lifecycle tests.
 // Exercises code paths that no other test file covers:
 //   - Connection.close() + use after close
@@ -15,23 +18,28 @@ import 'package:mssql/mssql.dart';
 //
 // Runs against the dart-mssql Docker container on port 14330.
 
-const _host = '127.0.0.1';
-const _port = 14330;
-const _user = 'sa';
-const _password = 'Knex_Test1!';
+final _config = liveTestConfig;
+String get _host => _config.host;
+int get _port => _config.port;
+String get _user => _config.user;
+String get _password => _config.password;
 
 Future<MssqlConnection> openConn({bool encrypt = false}) =>
     MssqlConnection.connect(
-      host: _host,
-      port: _port,
-      user: _user,
-      password: _password,
+      host: _config.host,
+      port: _config.port,
+      user: _config.user,
+      password: _config.password,
       database: 'master',
       encrypt: encrypt,
       trustServerCertificate: true,
     );
 
 void main() {
+  if (!liveTestsEnabled) {
+    registerLiveTestsDisabled();
+    return;
+  }
   // ── Connection state ──────────────────────────────────────────────────────
 
   group('connection state', () {
@@ -147,7 +155,7 @@ void main() {
     });
 
     test('queryStream early break does not corrupt pool connections', () async {
-      final pool = MssqlPool(const MssqlPoolConfig(
+      final pool = MssqlPool(MssqlPoolConfig(
         host: _host,
         port: _port,
         user: _user,
@@ -202,7 +210,7 @@ void main() {
 
   group('pool lifecycle', () {
     test('acquire after pool.close throws StateError', () async {
-      final pool = MssqlPool(const MssqlPoolConfig(
+      final pool = MssqlPool(MssqlPoolConfig(
         host: _host,
         port: _port,
         user: _user,
@@ -216,7 +224,7 @@ void main() {
     });
 
     test('pending acquire is rejected when pool closes', () async {
-      final pool = MssqlPool(const MssqlPoolConfig(
+      final pool = MssqlPool(MssqlPoolConfig(
         host: _host,
         port: _port,
         user: _user,
@@ -240,7 +248,7 @@ void main() {
     });
 
     test('pool reuses idle connection', () async {
-      final pool = MssqlPool(const MssqlPoolConfig(
+      final pool = MssqlPool(MssqlPoolConfig(
         host: _host,
         port: _port,
         user: _user,
@@ -260,7 +268,7 @@ void main() {
     });
 
     test('pool.execute returns rowsAffected', () async {
-      final pool = MssqlPool(const MssqlPoolConfig(
+      final pool = MssqlPool(MssqlPoolConfig(
         host: _host,
         port: _port,
         user: _user,
@@ -278,7 +286,7 @@ void main() {
     });
 
     test('pool.queryMultiple returns all result sets', () async {
-      final pool = MssqlPool(const MssqlPoolConfig(
+      final pool = MssqlPool(MssqlPoolConfig(
         host: _host,
         port: _port,
         user: _user,

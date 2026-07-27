@@ -1,18 +1,27 @@
 import 'package:test/test.dart';
 import 'package:mssql/mssql.dart';
 
+import 'live_test_config.dart';
+import 'live_test_gate.dart';
+
+final _config = liveTestConfig;
+
 // Behavioural / scenario tests: transactions, errors, execute(), edge cases.
 // Runs against the dart-mssql Docker container on port 14330.
 
 late MssqlConnection conn;
 
 void main() {
+  if (!liveTestsEnabled) {
+    registerLiveTestsDisabled();
+    return;
+  }
   setUpAll(() async {
     conn = await MssqlConnection.connect(
-      host: '127.0.0.1',
-      port: 14330,
-      user: 'sa',
-      password: 'Knex_Test1!',
+      host: liveTestConfig.host,
+      port: liveTestConfig.port,
+      user: liveTestConfig.user,
+      password: liveTestConfig.password,
       database: 'master',
       encrypt: false,
       trustServerCertificate: true,
@@ -34,10 +43,10 @@ void main() {
 
     test('second connection can be opened independently', () async {
       final conn2 = await MssqlConnection.connect(
-        host: '127.0.0.1',
-        port: 14330,
-        user: 'sa',
-        password: 'Knex_Test1!',
+        host: liveTestConfig.host,
+        port: liveTestConfig.port,
+        user: liveTestConfig.user,
+        password: liveTestConfig.password,
         database: 'master',
         encrypt: false,
         trustServerCertificate: true,
@@ -300,11 +309,11 @@ void main() {
     late MssqlPool pool;
 
     setUp(() async {
-      pool = MssqlPool(const MssqlPoolConfig(
-        host: '127.0.0.1',
-        port: 14330,
-        user: 'sa',
-        password: 'Knex_Test1!',
+      pool = MssqlPool(MssqlPoolConfig(
+        host: _config.host,
+        port: _config.port,
+        user: _config.user,
+        password: _config.password,
         database: 'master',
         encrypt: false,
         trustServerCertificate: true,
@@ -370,11 +379,11 @@ void main() {
     });
 
     test('acquire timeout throws when pool exhausted', () async {
-      final tinyPool = MssqlPool(const MssqlPoolConfig(
-        host: '127.0.0.1',
-        port: 14330,
-        user: 'sa',
-        password: 'Knex_Test1!',
+      final tinyPool = MssqlPool(MssqlPoolConfig(
+        host: _config.host,
+        port: _config.port,
+        user: _config.user,
+        password: _config.password,
         encrypt: false,
         trustServerCertificate: true,
         max: 1,

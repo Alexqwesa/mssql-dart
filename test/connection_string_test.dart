@@ -217,38 +217,4 @@ void main() {
       expect(c.user, 'sa');
     });
   });
-
-  group('connectFromString live', () {
-    test('ADO string against Docker SQL Edge', () async {
-      late bool up;
-      try {
-        final probe = await MssqlConnection.connect(
-          host: '127.0.0.1',
-          port: 14330,
-          user: 'sa',
-          password: 'Knex_Test1!',
-          database: 'master',
-          encrypt: false,
-          timeout: const Duration(seconds: 3),
-        );
-        await probe.close();
-        up = true;
-      } catch (_) {
-        up = false;
-      }
-      if (!up) {
-        markTestSkipped('SQL Server not available on :14330');
-        return;
-      }
-
-      final conn = await MssqlConnection.connectFromString(
-        'Server=127.0.0.1,14330;Database=master;User Id=sa;'
-        'Password=Knex_Test1!;Encrypt=false;App Name=cstr-test;',
-      );
-      addTearDown(conn.close);
-      expect(conn.appName, 'cstr-test');
-      final r = await conn.query('SELECT 1 AS ok');
-      expect(r[0]['ok'], 1);
-    });
-  });
 }

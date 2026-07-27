@@ -4,14 +4,18 @@ import 'package:mssql/mssql.dart';
 import 'package:mssql/src/tcp_options.dart';
 import 'package:test/test.dart';
 
+import 'live_test_config.dart';
+import 'live_test_gate.dart';
+
 /// TCP keepalive + SessionInitSQL (go-mssqldb keepAlive / SessionInitSQL).
 ///
 /// Live cases skip when 127.0.0.1:14330 is down.
 
-const _host = '127.0.0.1';
-const _port = 14330;
-const _user = 'sa';
-const _password = 'Knex_Test1!';
+final _config = liveTestConfig;
+String get _host => _config.host;
+int get _port => _config.port;
+String get _user => _config.user;
+String get _password => _config.password;
 
 Future<bool> _sqlUp() async {
   try {
@@ -33,6 +37,10 @@ Future<bool> _sqlUp() async {
 }
 
 void main() {
+  if (!liveTestsEnabled) {
+    registerLiveTestsDisabled();
+    return;
+  }
   group('applyMssqlTcpOptions', () {
     test('enables tcpNoDelay and SO_KEEPALIVE without throwing', () async {
       final listener = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
