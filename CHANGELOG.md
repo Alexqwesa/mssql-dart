@@ -5,6 +5,8 @@
 * Security: deprecate Azure AD username/password (ROPC) token acquisition,
   reject blank bearer tokens, and expose bounded structured OAuth failures
   without including raw token endpoint response bodies in exception text.
+* Tests: add deterministic malformed-input mutation coverage for truncated and
+  length-corrupted TDS token streams and NTLM Type 2 messages.
 
 ## 0.3.0
 

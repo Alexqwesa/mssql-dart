@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:mssql/mssql.dart';
@@ -366,6 +367,24 @@ Future<_Fed> _openWithBody(
   final pair = await TdsSocketPair.open();
   await tdsSend(pair.server, tdsPacket(type: packReply, body: body));
   return (buf: TdsBuffer(pair.client, limits: limits), pair: pair);
+}
+
+/// Sends one final reply packet then closes the peer, so truncated parses fail
+/// rather than waiting for another packet indefinitely.
+Future<_Fed> _openClosedWithBody(List<int> body) async {
+  final pair = await TdsSocketPair.open();
+  await tdsSend(pair.server, tdsPacket(type: packReply, body: body));
+  await pair.server.close();
+  return (buf: TdsBuffer(pair.client), pair: pair);
+}
+
+Future<void> _expectPromptRejection(Future<Object?> parse) async {
+  try {
+    await parse.timeout(const Duration(milliseconds: 250));
+    fail('expected malformed protocol input to be rejected');
+  } on TimeoutException {
+    fail('parser did not reject malformed protocol input promptly');
+  } catch (_) {}
 }
 
 /// Multi-packet reply (EOM only on last) — PR #3 / go-mssqldb multi-packet reads.
@@ -1238,6 +1257,49 @@ void main() {
       final result = await TokenStream(fed.buf).processQueryResponse();
       expect(result.columns.single.name, equals('n'));
       expect(result.rows.single, equals([7]));
+    });
+  });
+
+  group('TokenStream malformed-input mutation coverage', () {
+    test('every truncated prefix of a query response rejects promptly',
+        () async {
+      final valid = <int>[
+        ..._colMetaInt('n'),
+        ..._rowInt(42),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+
+      for (var length = 0; length < valid.length; length++) {
+        final fed = await _openClosedWithBody(valid.sublist(0, length));
+        try {
+          await _expectPromptRejection(
+            TokenStream(fed.buf).processQueryResponse(),
+          );
+        } finally {
+          await fed.pair.close();
+        }
+      }
+    });
+
+    test('corrupted variable-token lengths reject promptly', () async {
+      final valid = <int>[..._infoToken('mutation'), ..._doneToken()];
+      for (final lengthBytes in const [
+        [0x00, 0x00],
+        [0x01, 0x00],
+        [0xFF, 0x7F],
+      ]) {
+        final mutated = List<int>.from(valid)
+          ..[1] = lengthBytes[0]
+          ..[2] = lengthBytes[1];
+        final fed = await _openClosedWithBody(mutated);
+        try {
+          await _expectPromptRejection(
+            TokenStream(fed.buf).processQueryResponse(),
+          );
+        } finally {
+          await fed.pair.close();
+        }
+      }
     });
   });
 }

@@ -422,6 +422,35 @@ void main() {
       expect(NtlmAuth.rc4(key, cipher), equals(plain));
     });
   });
+
+  group('NtlmChallenge malformed-input mutation coverage', () {
+    test('every truncated Type 2 prefix is rejected', () {
+      final valid = _type2(
+        flags: NtlmAuth.negotiateUnicode | NtlmAuth.negotiateNtlm,
+        challenge: _hex('0123456789abcdef'),
+        targetName: _ucs2('DB'),
+      );
+
+      for (var length = 0; length < valid.length; length++) {
+        expect(
+          () => NtlmChallenge.parse(Uint8List.sublistView(valid, 0, length)),
+          throwsFormatException,
+          reason: 'truncated Type 2 length=$length',
+        );
+      }
+    });
+
+    test('mutated security-buffer length is rejected', () {
+      final bad = _type2(
+        flags: NtlmAuth.negotiateUnicode | NtlmAuth.negotiateNtlm,
+        challenge: _hex('0123456789abcdef'),
+        targetName: _ucs2('DB'),
+      );
+      ByteData.sublistView(bad).setUint16(12, 0x7FFF, Endian.little);
+
+      expect(() => NtlmChallenge.parse(bad), throwsFormatException);
+    });
+  });
 }
 
 Uint8List _hex(String s) {
