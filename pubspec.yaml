@@ -6,7 +6,7 @@ repository: https://github.com/kartikey321/mssql-dart
 issue_tracker: https://github.com/kartikey321/mssql-dart/issues
 
 environment:
-  sdk: '>=3.0.0 <4.0.0'
+  sdk: '>=3.4.0 <4.0.0'
 
 dependencies:
   async: ^2.11.0
