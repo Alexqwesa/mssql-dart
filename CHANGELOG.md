@@ -6,9 +6,11 @@
   multipart table names, re-quoting existing bracketed identifiers, escaping
   closing brackets, and rejecting empty, control-character, or overlong
   identifier parts.
-* Security: add opt-in `MssqlProtocolLimits` for server-controlled TDS sizes
+* Security: add `MssqlProtocolLimits` for server-controlled TDS sizes
   including token bytes, single value bytes, PLP chunk bytes, column counts, and
-  result set counts. Defaults remain unlimited for compatibility.
+  result set counts. Protocol limit violations now throw
+  `MssqlProtocolLimitException` and close the connection to avoid stream
+  desynchronization and pool poisoning.
 * LAN typed binders: `MssqlNVarchar` / `MssqlNChar` / `MssqlBinary` /
   `MssqlRowVersion` for sized `nvarchar(n)` / `nchar(n)` / `binary(n)` and
   `rowversion`/`timestamp` compare params (bare `String` stays

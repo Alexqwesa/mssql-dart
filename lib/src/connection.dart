@@ -52,8 +52,10 @@ class MssqlConnection {
   final NtlmAuth? _ntlmAuth;
   final bool _encrypt;
   final bool _trustServerCertificate;
+
   /// Covers TCP + PRELOGIN + optional TLS + LOGIN7 (+ NTLM) — not TCP alone.
   final Duration _timeout;
+
   /// Default per-query deadline; null means no timeout. Overridable per call.
   final Duration? _queryTimeout;
   final MssqlProtocolLimits _protocolLimits;
@@ -85,6 +87,7 @@ class MssqlConnection {
   bool _connected = false;
   bool _busy = false;
   String _currentDatabase = '';
+
   /// Database set at login (ENVCHANGE) — pool reset target when config.db empty.
   String _initialDatabase = '';
 
@@ -108,7 +111,7 @@ class MssqlConnection {
     required bool trustServerCertificate,
     required Duration timeout,
     Duration? queryTimeout,
-    MssqlProtocolLimits protocolLimits = MssqlProtocolLimits.unlimited,
+    MssqlProtocolLimits protocolLimits = const MssqlProtocolLimits(),
     bool readOnlyIntent = false,
     String? failoverPartner,
     int? failoverPort,
@@ -194,7 +197,7 @@ class MssqlConnection {
     bool trustServerCertificate = false,
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
-    MssqlProtocolLimits protocolLimits = MssqlProtocolLimits.unlimited,
+    MssqlProtocolLimits protocolLimits = const MssqlProtocolLimits(),
     int connectRetries = 0,
     bool readOnlyIntent = false,
     String? failoverPartner,
@@ -208,7 +211,8 @@ class MssqlConnection {
       readOnlyIntent: readOnlyIntent,
       failoverPartner: failoverPartner,
     );
-    final ep = ServerEndpoint.parse(host, port: port, instanceName: instanceName);
+    final ep =
+        ServerEndpoint.parse(host, port: port, instanceName: instanceName);
     return MssqlTransient.retry(
       () => MssqlConnection._(
         host: ep.host,
@@ -242,7 +246,7 @@ class MssqlConnection {
   static Future<MssqlConnection> connectFromString(
     String connectionString, {
     String? sessionInitSql,
-    MssqlProtocolLimits protocolLimits = MssqlProtocolLimits.unlimited,
+    MssqlProtocolLimits protocolLimits = const MssqlProtocolLimits(),
   }) {
     final c = MssqlConnectionString.parse(connectionString);
     if (c.useNtlm) {
@@ -305,7 +309,7 @@ class MssqlConnection {
     bool trustServerCertificate = false,
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
-    MssqlProtocolLimits protocolLimits = MssqlProtocolLimits.unlimited,
+    MssqlProtocolLimits protocolLimits = const MssqlProtocolLimits(),
     int connectRetries = 0,
     bool readOnlyIntent = false,
     String? failoverPartner,
@@ -319,7 +323,8 @@ class MssqlConnection {
       readOnlyIntent: readOnlyIntent,
       failoverPartner: failoverPartner,
     );
-    final ep = ServerEndpoint.parse(host, port: port, instanceName: instanceName);
+    final ep =
+        ServerEndpoint.parse(host, port: port, instanceName: instanceName);
     return MssqlTransient.retry(
       () => MssqlConnection._(
         host: ep.host,
@@ -366,7 +371,7 @@ class MssqlConnection {
     bool trustServerCertificate = false,
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
-    MssqlProtocolLimits protocolLimits = MssqlProtocolLimits.unlimited,
+    MssqlProtocolLimits protocolLimits = const MssqlProtocolLimits(),
     int connectRetries = 0,
     bool readOnlyIntent = false,
     String? failoverPartner,
@@ -380,7 +385,8 @@ class MssqlConnection {
       readOnlyIntent: readOnlyIntent,
       failoverPartner: failoverPartner,
     );
-    final ep = ServerEndpoint.parse(host, port: port, instanceName: instanceName);
+    final ep =
+        ServerEndpoint.parse(host, port: port, instanceName: instanceName);
     return MssqlTransient.retry(
       () => MssqlConnection._(
         host: ep.host,
@@ -507,11 +513,13 @@ class MssqlConnection {
           unawaited(_buf.sendAttention());
         });
       }
-      await for (final (cols, values)
-          in _tokenStream().streamQueryResponse()) {
+      await for (final (cols, values) in _tokenStream().streamQueryResponse()) {
         yield MssqlRow(cols, values);
       }
       streamCompleted = true;
+    } on MssqlProtocolLimitException {
+      await _forceClose();
+      rethrow;
     } finally {
       deadline?.cancel();
       if (!streamCompleted && _connected) {
@@ -632,7 +640,8 @@ class MssqlConnection {
       );
       return MssqlProcedureResult(
         returnStatus: ts.lastReturnStatus,
-        output: Map.unmodifiable(Map<String, Object?>.from(ts.lastReturnValues)),
+        output:
+            Map.unmodifiable(Map<String, Object?>.from(ts.lastReturnValues)),
         resultSets: [for (final s in sets) MssqlResult.fromInternal(s)],
       );
     } finally {
@@ -673,9 +682,8 @@ class MssqlConnection {
   /// [database] defaults to [initialDatabase]. No-op when already on target
   /// (case-insensitive). Returns `false` and closes the connection on failure.
   Future<bool> resetDatabase([String? database]) async {
-    final target = (database == null || database.isEmpty)
-        ? _initialDatabase
-        : database;
+    final target =
+        (database == null || database.isEmpty) ? _initialDatabase : database;
     if (target.isEmpty) return true;
     if (!_connected) return false;
     if (_busy) {
@@ -894,6 +902,9 @@ class MssqlConnection {
           );
         },
       );
+    } on MssqlProtocolLimitException {
+      unawaited(_forceClose());
+      rethrow;
     } on SocketException catch (e) {
       unawaited(_forceClose());
       throw MssqlException('TCP connect failed: $e');
@@ -979,8 +990,7 @@ class MssqlConnection {
       if (seen.add(a.address)) unique.add(a);
     }
     if (unique.length == 1) {
-      final sock =
-          await Socket.connect(unique.first, port, timeout: _timeout);
+      final sock = await Socket.connect(unique.first, port, timeout: _timeout);
       applyMssqlTcpOptions(sock, keepAlive: _keepAlive);
       return sock;
     }
@@ -1044,8 +1054,7 @@ class MssqlConnection {
       a.toLowerCase() == b.toLowerCase();
 
   /// Bracket-quotes a SQL identifier (`]` → `]]`).
-  static String _bracketIdent(String name) =>
-      '[${name.replaceAll(']', ']]')}]';
+  static String _bracketIdent(String name) => '[${name.replaceAll(']', ']]')}]';
 
   /// Marks the connection dead when the peer closes or errors.
   void _watchSocket(Socket sock) {
@@ -1310,18 +1319,25 @@ class MssqlConnection {
     Duration? timeout,
   }) async {
     final effective = timeout ?? _queryTimeout;
-    if (effective == null) return response;
     try {
+      if (effective == null) return await response;
       return await response.timeout(effective);
+    } on MssqlProtocolLimitException {
+      await _forceClose();
+      rethrow;
     } on TimeoutException {
+      final timedOutAfter = effective!;
       try {
         await _buf.sendAttention();
       } catch (_) {}
       try {
         await response.timeout(const Duration(seconds: 10));
+      } on MssqlProtocolLimitException {
+        await _forceClose();
+        rethrow;
       } catch (_) {}
       throw MssqlException(
-        'Query timed out after ${effective.inMilliseconds}ms',
+        'Query timed out after ${timedOutAfter.inMilliseconds}ms',
       );
     }
   }

@@ -38,3 +38,18 @@ class MssqlException implements Exception {
   @override
   String toString() => 'MssqlException($errorCode): $message';
 }
+
+/// Thrown when a server-controlled TDS size exceeds [MssqlProtocolLimits].
+class MssqlProtocolLimitException extends MssqlException {
+  final String context;
+  final int value;
+  final int maximum;
+
+  MssqlProtocolLimitException({
+    required this.context,
+    required this.value,
+    required this.maximum,
+  }) : super(
+          '$context $value exceeds configured maximum $maximum',
+        );
+}

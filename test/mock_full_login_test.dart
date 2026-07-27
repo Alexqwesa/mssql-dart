@@ -1,6 +1,8 @@
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:async/async.dart';
+import 'package:mssql/mssql.dart';
 import 'package:mssql/src/tds/buf.dart';
 import 'package:mssql/src/tds/constants.dart';
 import 'package:mssql/src/tds/login7.dart';
@@ -35,7 +37,8 @@ Uint8List _preloginBody(Map<int, List<int>> fields) {
   return Uint8List.fromList([...header.toBytes(), ...values.toBytes()]);
 }
 
-Future<void> _readPacket(ChunkedStreamReader<int> reader, int expectType) async {
+Future<void> _readPacket(
+    ChunkedStreamReader<int> reader, int expectType) async {
   final hdr = await reader.readChunk(headerSize);
   expect(hdr[0], equals(expectType));
   final size = (hdr[2] << 8) | hdr[3];
@@ -75,6 +78,26 @@ Uint8List _loginAckDone({required String progName, required String database}) {
   writeUint16LE(out, doneFlagFinal);
   writeUint16LE(out, 0);
   writeUint64LE(out, 0);
+  return Uint8List.fromList(out.toBytes());
+}
+
+Uint8List _infoToken(String message) {
+  final msg = ucs2(message);
+  final payload = BytesBuilder(copy: false);
+  writeUint32LE(payload, 0);
+  payload.addByte(0);
+  payload.addByte(0);
+  writeUint16LE(payload, message.length);
+  payload.add(msg);
+  payload.addByte(0);
+  payload.addByte(0);
+  writeUint32LE(payload, 0);
+
+  final data = payload.toBytes();
+  final out = BytesBuilder(copy: false);
+  out.addByte(tokenInfo);
+  writeUint16LE(out, data.length);
+  out.add(data);
   return Uint8List.fromList(out.toBytes());
 }
 
@@ -128,6 +151,65 @@ void main() {
     final login = await TokenStream(buf).processLoginResponse();
     expect(login.serverVersion, equals('Microsoft SQL Server'));
     expect(login.database, equals('master'));
+
+    await serverDone;
+  });
+
+  test('protocol limit violation closes connection', () async {
+    final listener = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(listener.close);
+
+    final serverDone = () async {
+      final server = await listener.first;
+      try {
+        final serverReader = ChunkedStreamReader(server);
+
+        await _readPacket(serverReader, packPrelogin);
+        server.add(tdsPacket(
+          type: packReply,
+          body: _preloginBody({
+            preloginEncryption: [encryptNotSupported],
+          }),
+        ));
+        await server.flush();
+
+        await _readPacket(serverReader, packLogin7);
+        server.add(tdsPacket(
+          type: packReply,
+          body: _loginAckDone(
+            progName: 'Microsoft SQL Server',
+            database: 'master',
+          ),
+        ));
+        await server.flush();
+
+        await _readPacket(serverReader, packSQLBatch);
+        server.add(tdsPacket(
+          type: packReply,
+          body: _infoToken('this info token is intentionally too large'),
+        ));
+        await server.flush();
+      } finally {
+        server.destroy();
+      }
+    }();
+
+    final conn = await MssqlConnection.connect(
+      host: InternetAddress.loopbackIPv4.address,
+      port: listener.port,
+      user: 'sa',
+      password: 'Secret1',
+      database: 'master',
+      encrypt: false,
+      protocolLimits: const MssqlProtocolLimits(maximumTokenBytes: 64),
+    );
+    addTearDown(conn.close);
+
+    await expectLater(
+      conn.query('SELECT 1'),
+      throwsA(isA<MssqlProtocolLimitException>()),
+    );
+    expect(conn.isOpen, isFalse);
 
     await serverDone;
   });

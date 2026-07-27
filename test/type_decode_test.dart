@@ -392,7 +392,7 @@ void main() {
           valueBytes: [5, 0, 0xDE, 0xAD, 0xBE],
           limits: const MssqlProtocolLimits(maximumValueBytes: 4),
         ),
-        throwsA(isA<FormatException>()),
+        throwsA(isA<MssqlProtocolLimitException>()),
       );
     });
 
@@ -417,7 +417,7 @@ void main() {
           ],
           limits: const MssqlProtocolLimits(maximumValueBytes: 4),
         ),
-        throwsA(isA<FormatException>()),
+        throwsA(isA<MssqlProtocolLimitException>()),
       );
     });
 
@@ -444,7 +444,7 @@ void main() {
             maximumPlpChunkBytes: 4,
           ),
         ),
-        throwsA(isA<FormatException>()),
+        throwsA(isA<MssqlProtocolLimitException>()),
       );
     });
 
@@ -481,7 +481,7 @@ void main() {
           ],
           limits: const MssqlProtocolLimits(maximumValueBytes: 6),
         ),
-        throwsA(isA<FormatException>()),
+        throwsA(isA<MssqlProtocolLimitException>()),
       );
     });
   });

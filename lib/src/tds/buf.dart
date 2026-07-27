@@ -48,7 +48,7 @@ class TdsBuffer {
   TdsBuffer(
     Socket socket, {
     this.packetSize = defaultPacketSize,
-    this.limits = MssqlProtocolLimits.unlimited,
+    this.limits = const MssqlProtocolLimits(),
   })  : _socket = socket,
         _reader = ChunkedStreamReader(socket);
 

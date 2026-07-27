@@ -583,7 +583,7 @@ void main() {
 
       await expectLater(
         TokenStream(fed.buf).processQueryResponse(),
-        throwsA(isA<FormatException>()),
+        throwsA(isA<MssqlProtocolLimitException>()),
       );
     });
 
@@ -600,7 +600,7 @@ void main() {
 
       await expectLater(
         TokenStream(fed.buf).processQueryResponse(),
-        throwsA(isA<FormatException>()),
+        throwsA(isA<MssqlProtocolLimitException>()),
       );
     });
 
@@ -621,7 +621,7 @@ void main() {
 
       await expectLater(
         TokenStream(fed.buf).processAllQueryResponses(),
-        throwsA(isA<FormatException>()),
+        throwsA(isA<MssqlProtocolLimitException>()),
       );
     });
 
