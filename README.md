@@ -609,6 +609,8 @@ $env:MSSQL_HOST = 'localhost'
 $env:MSSQL_PORT = '14333'
 $env:MSSQL_USER = 'sa'
 $env:MSSQL_PASSWORD = 'Strong_test_password_123!'
+$env:MSSQL_ENCRYPT = '1'
+$env:MSSQL_TRUST_SERVER_CERTIFICATE = '1'
 dart test test/live
 docker compose --env-file .env -f docker-compose.live.yml down
 ```

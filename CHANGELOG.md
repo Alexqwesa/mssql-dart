@@ -8,6 +8,8 @@
 * Tests: move the remaining Docker-dependent suites and diagnostic script out
   of the default test run; live connection-string coverage now uses the shared
   `MSSQL_*` configuration instead of the retired port `14330` and credentials.
+* Tests: configure the live Docker SQL Server with a short-lived self-signed
+  TLS certificate and force full-session TLS for integration coverage.
 
 * Security: deprecate Azure AD username/password (ROPC) token acquisition,
   reject blank bearer tokens, and expose bounded structured OAuth failures
