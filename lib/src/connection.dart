@@ -933,10 +933,14 @@ class MssqlConnection {
     );
 
     // 2. PRELOGIN
-    // encryptNotSupported (0x02) = client cannot do TLS → server skips it.
-    // encryptOn (0x01) = request TLS → required for production / Azure SQL.
+    // encryptOff (0x00) = TLS capable but prefer cleartext; server may still
+    // require encryption (forceencryption=1) and we honor that via TLS upgrade.
+    // encryptNotSupported (0x02) falsely claims the client cannot TLS — if the
+    // server then requires encryption, a post-PRELOGIN TLS attempt is rejected
+    // (SQL error 17828 / HandshakeException).
+    // encryptOn (0x01) = request TLS for the whole session.
     final wantEncrypt =
-        (_encrypt || _azureAdAuth != null) ? encryptOn : encryptNotSupported;
+        (_encrypt || _azureAdAuth != null) ? encryptOn : encryptOff;
 
     await Prelogin.send(
       _buf,
@@ -946,7 +950,7 @@ class MssqlConnection {
     );
     final prelogin = await Prelogin.read(_buf);
 
-    // 3. TLS upgrade (only if both sides agreed to encrypt)
+    // 3. TLS upgrade when the server requires or accepts encryption.
     if (prelogin.requiresTls) {
       await _upgradeTls();
     } else if (_encrypt && _azureAdAuth == null) {

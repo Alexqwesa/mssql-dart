@@ -10,4 +10,5 @@ services:
       MSSQL_PID: Developer
       MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-Strong_test_password_123!}"
     ports:
-      - "14333:1433"
+      # Use 14334 — avoid 14333
+      - "14334:1433"

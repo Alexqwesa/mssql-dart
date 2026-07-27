@@ -22,7 +22,7 @@ class LiveTestConfig {
 
   factory LiveTestConfig.fromEnvironment() {
     final environment = Platform.environment;
-    final port = int.tryParse(environment['MSSQL_PORT'] ?? '14333');
+    final port = int.tryParse(environment['MSSQL_PORT'] ?? '14334');
     if (port == null || port < 1 || port > 65535) {
       throw StateError('MSSQL_PORT must be an integer from 1 through 65535.');
     }
@@ -31,11 +31,11 @@ class LiveTestConfig {
       throw StateError('MSSQL_PASSWORD must be set when MSSQL_LIVE_TESTS=1.');
     }
     return LiveTestConfig(
-      host: environment['MSSQL_HOST'] ?? 'localhost',
+      host: environment['MSSQL_HOST'] ?? '127.0.0.1',
       port: port,
       user: environment['MSSQL_USER'] ?? 'sa',
       password: password,
-      encrypt: environment['MSSQL_ENCRYPT'] == '1',
+      encrypt: environment['MSSQL_ENCRYPT'] != '0',
       trustServerCertificate:
           environment['MSSQL_TRUST_SERVER_CERTIFICATE'] != '0',
     );
@@ -45,6 +45,7 @@ class LiveTestConfig {
     String database = 'master',
     String appName = 'mssql-dart-live-tests',
     Duration timeout = const Duration(seconds: 10),
+    bool? encrypt,
   }) {
     return MssqlConnection.connect(
       host: host,
@@ -53,7 +54,7 @@ class LiveTestConfig {
       password: password,
       database: database,
       appName: appName,
-      encrypt: encrypt,
+      encrypt: encrypt ?? this.encrypt,
       trustServerCertificate: trustServerCertificate,
       timeout: timeout,
     );

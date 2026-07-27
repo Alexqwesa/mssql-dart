@@ -26,8 +26,10 @@ class Prelogin {
   ///
   /// [requestEncrypt]: the encryption byte to advertise.
   ///   - [encryptOn] (1): request TLS — required for production / Azure SQL.
-  ///   - [encryptNotSupported] (2): client cannot do TLS — server skips it for
-  ///     dev containers with default settings.
+  ///   - [encryptOff] (0): TLS capable, prefer cleartext; server may still
+  ///     require encryption (e.g. forceencryption=1).
+  ///   - [encryptNotSupported] (2): client cannot do TLS — only for clients
+  ///     that truly lack TLS (do not use when a TLS upgrade is still possible).
   static Future<void> send(
     TdsBuffer buf, {
     int requestEncrypt = encryptOn,
