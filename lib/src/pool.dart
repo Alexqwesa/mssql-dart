@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'auth/azure_ad_auth.dart';
 import 'connection.dart';
@@ -26,6 +27,13 @@ class MssqlPoolConfig {
   final int packetSize;
   final bool encrypt;
   final bool trustServerCertificate;
+
+  /// Optional custom [SecurityContext] (e.g. corporate CA).
+  final SecurityContext? securityContext;
+
+  /// Hostname for SNI / certificate validation (defaults to [host]).
+  final String? hostNameInCertificate;
+
   final Duration connectionTimeout;
 
   /// Default query deadline applied to pooled connections (null = none).
@@ -107,6 +115,8 @@ class MssqlPoolConfig {
     this.packetSize = defaultPacketSize,
     this.encrypt = true,
     this.trustServerCertificate = false,
+    this.securityContext,
+    this.hostNameInCertificate,
     this.connectionTimeout = const Duration(seconds: 15),
     this.queryTimeout,
     this.protocolLimits = const MssqlProtocolLimits(),
@@ -163,6 +173,7 @@ class MssqlPoolConfig {
         packetSize: c.packetSize,
         encrypt: c.encrypt,
         trustServerCertificate: c.trustServerCertificate,
+        hostNameInCertificate: c.hostNameInCertificate,
         connectionTimeout: c.connectionTimeout,
         queryTimeout: c.queryTimeout,
         protocolLimits: protocolLimits,
@@ -194,6 +205,7 @@ class MssqlPoolConfig {
       packetSize: c.packetSize,
       encrypt: c.encrypt,
       trustServerCertificate: c.trustServerCertificate,
+      hostNameInCertificate: c.hostNameInCertificate,
       connectionTimeout: c.connectionTimeout,
       queryTimeout: c.queryTimeout,
       protocolLimits: protocolLimits,
@@ -228,6 +240,8 @@ class MssqlPoolConfig {
     String appName = 'mssql-dart',
     int packetSize = defaultPacketSize,
     bool trustServerCertificate = false,
+    SecurityContext? securityContext,
+    String? hostNameInCertificate,
     Duration connectionTimeout = const Duration(seconds: 15),
     Duration? queryTimeout,
     MssqlProtocolLimits protocolLimits = const MssqlProtocolLimits(),
@@ -258,6 +272,8 @@ class MssqlPoolConfig {
       packetSize: packetSize,
       encrypt: true,
       trustServerCertificate: trustServerCertificate,
+      securityContext: securityContext,
+      hostNameInCertificate: hostNameInCertificate,
       connectionTimeout: connectionTimeout,
       queryTimeout: queryTimeout,
       protocolLimits: protocolLimits,
@@ -294,6 +310,8 @@ class MssqlPoolConfig {
     int packetSize = defaultPacketSize,
     bool encrypt = true,
     bool trustServerCertificate = false,
+    SecurityContext? securityContext,
+    String? hostNameInCertificate,
     Duration connectionTimeout = const Duration(seconds: 15),
     Duration? queryTimeout,
     MssqlProtocolLimits protocolLimits = const MssqlProtocolLimits(),
@@ -324,6 +342,8 @@ class MssqlPoolConfig {
       packetSize: packetSize,
       encrypt: encrypt,
       trustServerCertificate: trustServerCertificate,
+      securityContext: securityContext,
+      hostNameInCertificate: hostNameInCertificate,
       connectionTimeout: connectionTimeout,
       queryTimeout: queryTimeout,
       protocolLimits: protocolLimits,
@@ -797,6 +817,8 @@ class MssqlPool {
         appName: config.appName,
         packetSize: config.packetSize,
         trustServerCertificate: config.trustServerCertificate,
+        securityContext: config.securityContext,
+        hostNameInCertificate: config.hostNameInCertificate,
         timeout: config.connectionTimeout,
         queryTimeout: config.queryTimeout,
         protocolLimits: config.protocolLimits,
@@ -824,6 +846,8 @@ class MssqlPool {
           packetSize: config.packetSize,
           encrypt: config.encrypt,
           trustServerCertificate: config.trustServerCertificate,
+          securityContext: config.securityContext,
+          hostNameInCertificate: config.hostNameInCertificate,
           timeout: config.connectionTimeout,
           queryTimeout: config.queryTimeout,
           protocolLimits: config.protocolLimits,
@@ -847,6 +871,8 @@ class MssqlPool {
           packetSize: config.packetSize,
           encrypt: config.encrypt,
           trustServerCertificate: config.trustServerCertificate,
+          securityContext: config.securityContext,
+          hostNameInCertificate: config.hostNameInCertificate,
           timeout: config.connectionTimeout,
           queryTimeout: config.queryTimeout,
           protocolLimits: config.protocolLimits,

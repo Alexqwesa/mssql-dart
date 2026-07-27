@@ -559,12 +559,27 @@ Named parameters use `@name` placeholders. Supported Dart → SQL type mappings:
 
 ## TLS / Encryption
 
+TDS 7.x wraps the TLS handshake in PRELOGIN packets, then switches to raw TLS
+for the rest of the session. This package uses a go-mssqldb-style bridge:
+handshake wrap/unwrap, then **opaque byte passthrough** (no TLS-record
+reassembly on the bridge).
+
+Dart’s `SecureSocket` can split one `add` across two TLS records when its
+internal 8 KiB plaintext ring wraps. SQL Server requires each TDS packet to
+fit in one TLS application-data record, so the driver sizes/aligns writes
+accordingly (and may send a short no-op SQLBatch to reach a safe ring
+boundary).
+
 ```dart
 // Production (Azure SQL, SQL Server with TLS)
 final conn = await MssqlConnection.connect(
   host: 'server.database.windows.net',
   encrypt: true,                  // default true
   trustServerCertificate: false,  // validate cert (default false)
+  // Optional: custom CA / client certs
+  // securityContext: SecurityContext()..setTrustedCertificates('ca.pem'),
+  // After Always On redirect to an IP, keep validating against the AG name:
+  // hostNameInCertificate: 'ag-listener.contoso.local',
   ...
 );
 
@@ -583,6 +598,15 @@ final conn = await MssqlConnection.connect(
   ...
 );
 ```
+
+If the server requires encryption (`forceencryption=1`) but the client passes
+`encrypt: false`, connect fails immediately with a clear
+`MssqlException` (`Server requires encryption…`) — it does not advertise
+“not supported” and then upgrade (that path caused SQL Error 17828).
+
+Connection-string keys: `Encrypt`, `TrustServerCertificate`,
+`HostNameInCertificate` (also on `sqlserver://` URLs). The same options exist
+on `MssqlPoolConfig` / `MssqlPoolConfig.fromString`.
 
 ---
 
@@ -609,10 +633,27 @@ $env:MSSQL_HOST = '127.0.0.1'
 $env:MSSQL_PORT = '14334'
 $env:MSSQL_USER = 'sa'
 $env:MSSQL_PASSWORD = 'Strong_test_password_123!'
+$env:MSSQL_ENCRYPT = '0'
+$env:MSSQL_TRUST_SERVER_CERTIFICATE = '1'
+dart test test/live --concurrency=1
+docker compose --env-file .env -f docker-compose.live.yml down
+```
+
+Default compose uses `forceencryption=0` so most suites stay on cleartext when
+`MSSQL_ENCRYPT=0`. TLS suites (`tls_test`, `tls_types_test`, …) still pass
+`encrypt: true` explicitly against the self-signed cert.
+
+### Forced TLS stress
+
+To require encryption server-side and run the long-lived TLS stress suite:
+
+```powershell
+docker compose --env-file .env -f docker-compose.live.yml `
+  -f docker-compose.live.force-tls.yml up -d --build
+$env:MSSQL_FORCE_ENCRYPTION = '1'
 $env:MSSQL_ENCRYPT = '1'
 $env:MSSQL_TRUST_SERVER_CERTIFICATE = '1'
-dart test test/live
-docker compose --env-file .env -f docker-compose.live.yml down
+dart test test/live/tls_force_encrypt_stress_test.dart --concurrency=1
 ```
 
 `MSSQL_PASSWORD` is required whenever `MSSQL_LIVE_TESTS=1`. The compose

@@ -1,0 +1,8 @@
+# Overlay: force SQL Server full-session TLS (forceencryption=1).
+# Usage:
+#   docker compose --env-file .env -f docker-compose.live.yml \
+#     -f docker-compose.live.force-tls.yml up -d --build
+services:
+  sqlserver:
+    volumes:
+      - ./docker/live/mssql.forceencryption.conf:/var/opt/mssql/mssql.conf:ro

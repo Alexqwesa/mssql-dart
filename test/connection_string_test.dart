@@ -93,6 +93,22 @@ void main() {
       expect(c.encrypt, isFalse);
     });
 
+    test('HostNameInCertificate', () {
+      final c = MssqlConnectionString.parse(
+        'Server=10.0.0.5;User Id=sa;Password=x;'
+        'Encrypt=true;HostNameInCertificate=sql.contoso.local',
+      );
+      expect(c.hostNameInCertificate, 'sql.contoso.local');
+    });
+
+    test('sqlserver URL HostNameInCertificate', () {
+      final c = MssqlConnectionString.parse(
+        'sqlserver://sa:x@10.0.0.5:1433?'
+        'encrypt=true&hostnameincertificate=sql.contoso.local',
+      );
+      expect(c.hostNameInCertificate, 'sql.contoso.local');
+    });
+
     test('ApplicationIntent=ReadOnly requires Database', () {
       expect(
         () => MssqlConnectionString.parse(

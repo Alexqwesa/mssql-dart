@@ -1,8 +1,5 @@
 import 'dart:async';
 import 'dart:io';
-import 'dart:typed_data';
-
-import 'package:async/async.dart';
 
 import 'auth/azure_ad_auth.dart';
 import 'auth/ntlm_auth.dart';
@@ -23,6 +20,7 @@ import 'tds/login7.dart';
 import 'tds/prelogin.dart';
 import 'tds/rpc.dart';
 import 'tds/sql_browser.dart';
+import 'tds/tls_bridge.dart';
 import 'tds/token_stream.dart';
 
 /// Opens and manages a single connection to SQL Server.
@@ -53,6 +51,8 @@ class MssqlConnection {
   final NtlmAuth? _ntlmAuth;
   final bool _encrypt;
   final bool _trustServerCertificate;
+  final SecurityContext? _securityContext;
+  final String? _hostNameInCertificate;
 
   /// Covers TCP + PRELOGIN + optional TLS + LOGIN7 (+ NTLM) — not TCP alone.
   final Duration _timeout;
@@ -110,6 +110,8 @@ class MssqlConnection {
     NtlmAuth? ntlmAuth,
     required bool encrypt,
     required bool trustServerCertificate,
+    SecurityContext? securityContext,
+    String? hostNameInCertificate,
     required Duration timeout,
     Duration? queryTimeout,
     MssqlProtocolLimits protocolLimits = const MssqlProtocolLimits(),
@@ -132,6 +134,8 @@ class MssqlConnection {
         _ntlmAuth = ntlmAuth,
         _encrypt = encrypt,
         _trustServerCertificate = trustServerCertificate,
+        _securityContext = securityContext,
+        _hostNameInCertificate = hostNameInCertificate,
         _timeout = timeout,
         _queryTimeout = queryTimeout,
         _protocolLimits = protocolLimits,
@@ -152,6 +156,13 @@ class MssqlConnection {
   /// [trustServerCertificate] — accept self-signed or untrusted certificates.
   /// Required for typical local Docker SQL Server. Has no effect when
   /// [encrypt] is `false`.
+  ///
+  /// [securityContext] — optional custom [SecurityContext] (e.g. with a
+  /// corporate CA). Ignored when [trustServerCertificate] is `true`.
+  ///
+  /// [hostNameInCertificate] — hostname used for SNI / certificate validation
+  /// (defaults to [host]). Use when dialing an IP or Always On listener while
+  /// the cert CN/SAN is a different DNS name.
   ///
   /// [timeout] — login deadline for the full handshake (TCP + PRELOGIN +
   /// optional TLS + LOGIN7), not TCP connect alone.
@@ -197,6 +208,8 @@ class MssqlConnection {
     int packetSize = defaultPacketSize,
     bool encrypt = true,
     bool trustServerCertificate = false,
+    SecurityContext? securityContext,
+    String? hostNameInCertificate,
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
     MssqlProtocolLimits protocolLimits = const MssqlProtocolLimits(),
@@ -227,6 +240,8 @@ class MssqlConnection {
         sqlAuth: SqlAuth(username: user, password: password),
         encrypt: encrypt,
         trustServerCertificate: trustServerCertificate,
+        securityContext: securityContext,
+        hostNameInCertificate: hostNameInCertificate,
         timeout: timeout,
         queryTimeout: queryTimeout,
         protocolLimits: protocolLimits,
@@ -249,6 +264,7 @@ class MssqlConnection {
     String connectionString, {
     String? sessionInitSql,
     MssqlProtocolLimits protocolLimits = const MssqlProtocolLimits(),
+    SecurityContext? securityContext,
   }) {
     final c = MssqlConnectionString.parse(connectionString);
     if (c.useNtlm) {
@@ -265,6 +281,8 @@ class MssqlConnection {
         packetSize: c.packetSize,
         encrypt: c.encrypt,
         trustServerCertificate: c.trustServerCertificate,
+        securityContext: securityContext,
+        hostNameInCertificate: c.hostNameInCertificate,
         timeout: c.connectionTimeout,
         queryTimeout: c.queryTimeout,
         protocolLimits: protocolLimits,
@@ -287,6 +305,8 @@ class MssqlConnection {
       packetSize: c.packetSize,
       encrypt: c.encrypt,
       trustServerCertificate: c.trustServerCertificate,
+      securityContext: securityContext,
+      hostNameInCertificate: c.hostNameInCertificate,
       timeout: c.connectionTimeout,
       queryTimeout: c.queryTimeout,
       protocolLimits: protocolLimits,
@@ -309,6 +329,8 @@ class MssqlConnection {
     String appName = 'mssql-dart',
     int packetSize = defaultPacketSize,
     bool trustServerCertificate = false,
+    SecurityContext? securityContext,
+    String? hostNameInCertificate,
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
     MssqlProtocolLimits protocolLimits = const MssqlProtocolLimits(),
@@ -339,6 +361,8 @@ class MssqlConnection {
         azureAdAuth: azureAdAuth,
         encrypt: true, // Azure AD always requires TLS
         trustServerCertificate: trustServerCertificate,
+        securityContext: securityContext,
+        hostNameInCertificate: hostNameInCertificate,
         timeout: timeout,
         queryTimeout: queryTimeout,
         protocolLimits: protocolLimits,
@@ -371,6 +395,8 @@ class MssqlConnection {
     int packetSize = defaultPacketSize,
     bool encrypt = true,
     bool trustServerCertificate = false,
+    SecurityContext? securityContext,
+    String? hostNameInCertificate,
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
     MssqlProtocolLimits protocolLimits = const MssqlProtocolLimits(),
@@ -406,6 +432,8 @@ class MssqlConnection {
         ),
         encrypt: encrypt,
         trustServerCertificate: trustServerCertificate,
+        securityContext: securityContext,
+        hostNameInCertificate: hostNameInCertificate,
         timeout: timeout,
         queryTimeout: queryTimeout,
         protocolLimits: protocolLimits,
@@ -982,6 +1010,11 @@ class MssqlConnection {
     _initialDatabase =
         loginResult.database.isNotEmpty ? loginResult.database : _database;
     _buf.packetSize = loginResult.packetSize;
+    // Encrypted TDS: keep packets within one TLS plaintext fragment (≤16 383).
+    if ((_encrypt || _azureAdAuth != null) && _buf.packetSize > 16383) {
+      _buf.packetSize = 16383;
+    }
+    _buf.enableTlsNopAlign();
     // Routing: stay unconnected until caller reconnects to the alternate.
     if (loginResult.routing == null) {
       _connected = true;
@@ -1083,214 +1116,34 @@ class MssqlConnection {
 
   /// Performs the TDS-wrapped TLS handshake (ms-tds §2.1.1 PRELOGIN encryption).
   ///
-  /// SQL Server wraps TLS handshake messages inside TDS PRELOGIN packets.
-  /// After the handshake, subsequent packets are sent as raw TLS records.
-  ///
-  /// Architecture (modeled on go-mssqldb's tlsHandshakeConn + passthroughConn):
-  ///
-  ///   _buf writes → _socket(=tls) → encrypt → secSide → loopback → bridgeSide
-  ///   bridgeSide → rawSocket  (forwarded: raw encrypted TLS bytes)
-  ///
-  ///   rawSocket → rawReader (bridge loop) → unwrap/pass-through → bridgeSide
-  ///   bridgeSide → loopback → secSide → tls decrypt → _buf reads
-  ///
-  /// During the handshake the bridge loop strips TDS PRELOGIN headers.
-  /// After the handshake it forwards raw TLS bytes without modification.
+  /// See [TdsTlsBridge] — handshake records are wrapped in PRELOGIN; after
+  /// the handshake, ciphertext is forwarded as opaque TCP bytes.
   Future<void> _upgradeTls() async {
-    // Capture the raw TCP socket and its reader before we replace them.
-    // The bridge loop must keep using these even after _socket/_buf are swapped.
     final rawSocket = _socket;
-    final rawReader = _buf.rawReader;
-
-    // Loopback pair: SecureSocket talks to secSide; bridge controls bridgeSide.
-    final loopServer = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final secSideFuture =
-        Socket.connect(InternetAddress.loopbackIPv4, loopServer.port);
-    final bridgeSide = await loopServer.first;
-    await loopServer.close();
-    final secSide = await secSideFuture;
-
-    bool handshakeDone = false;
-
-    // Direction A: SecureSocket writes → secSide → loopback → bridgeSide → rawSocket.
-    //   Handshake phase: wrap TLS bytes in a TDS PRELOGIN packet.
-    //   Post-handshake: forward raw encrypted TLS records.
-    // Writes must stay synchronous with SecureSocket's send path — deferring
-    // them (e.g. an async queue) lets the reader race ahead of the request.
-    // Do not unawaited-flush after every chunk; overlapping add+flush throws
-    // "StreamSink is bound to a stream" under load.
-    bridgeSide.listen(
-      (data) {
-        try {
-          if (handshakeDone) {
-            rawSocket.add(data);
-          } else {
-            final size = headerSize + data.length;
-            final pkt = Uint8List(size);
-            pkt[0] = packPrelogin;
-            pkt[1] = statusEOM;
-            pkt[2] = (size >> 8) & 0xFF;
-            pkt[3] = size & 0xFF;
-            pkt[6] = 1;
-            pkt.setRange(headerSize, size, data);
-            rawSocket.add(pkt);
-          }
-        } catch (_) {
-          _connected = false;
-          try {
-            rawSocket.destroy();
-          } catch (_) {}
-        }
-      },
-      onError: (_) {
-        try {
-          rawSocket.destroy();
-        } catch (_) {}
-      },
-      onDone: () {
-        try {
-          rawSocket.destroy();
-        } catch (_) {}
-      },
-    );
-
-    // Direction B: rawSocket → rawReader (bridge loop) → bridgeSide → secSide.
-    //   Runs for the entire lifetime of the connection; do not await.
-    unawaited(_bridgeReadLoop(rawReader, bridgeSide, () => handshakeDone));
-
-    // Perform the TLS handshake through the loopback.
-    final tls = await SecureSocket.secure(
-      secSide,
+    final upgrade = await TdsTlsBridge.upgrade(
+      rawSocket: rawSocket,
+      rawReader: _buf.rawReader,
       host: _host,
-      onBadCertificate: _trustServerCertificate ? (_) => true : null,
+      trustServerCertificate: _trustServerCertificate,
+      securityContext: _securityContext,
+      hostNameInCertificate: _hostNameInCertificate,
+      onBridgeDied: () {
+        _connected = false;
+      },
     );
-    handshakeDone = true;
 
-    // Extended Protection: bind NTLM to the TLS peer certificate when present.
     final ntlm = _ntlmAuth;
-    final peer = tls.peerCertificate;
+    final peer = upgrade.peerCertificate;
     if (ntlm != null && peer != null) {
       ntlm.channelBindings =
           NtlmAuth.channelBindingTokenFromCertificate(peer.der);
     }
 
-    // Swap _socket and _buf to the SecureSocket.
-    // Writes: _buf → tls (encrypt) → secSide → loopback → bridgeSide → rawSocket → server
-    // Reads:  server → rawSocket → bridge loop → bridgeSide → secSide → tls (decrypt) → _buf
-    _socket = tls;
-    _rawTcpSocket = rawSocket; // retained so close() can tear down the bridge
-    _watchSocket(rawSocket);
-    _watchSocket(tls);
-    _buf.replaceSocket(tls);
-  }
-
-  /// Continuously forwards bytes between the raw TCP socket and the loopback bridge.
-  ///
-  /// During the TLS handshake: validates TDS PRELOGIN headers, strips them,
-  /// forwards the body. After the handshake: forwards raw TLS records verbatim.
-  /// Runs as a fire-and-forget background task for the connection lifetime.
-  /// On unexpected termination, closes the connection so callers fail fast.
-  Future<void> _bridgeReadLoop(
-    ChunkedStreamReader<int> rawReader,
-    Socket bridgeSide,
-    bool Function() isDone,
-  ) async {
-    bool abnormal = false;
-    try {
-      // ── Phase 1: PRELOGIN handshake mode ────────────────────────────────────
-      //
-      // Read 8-byte TDS headers, validate them, strip, forward body.
-      // We re-check isDone() AFTER each readChunk because the handshake can
-      // complete while we are blocked in readChunk, leaving us mid-read on
-      // raw TLS bytes rather than PRELOGIN-wrapped bytes.
-      while (true) {
-        final hdr = await rawReader.readChunk(headerSize);
-        if (hdr.length < headerSize) return;
-
-        if (isDone()) {
-          // Race: the TLS handshake completed while we awaited readChunk(8).
-          // The 8 bytes we just read are actually the start of a TLS record:
-          //   hdr[0..4] = TLS header (type, version×2, lenHi, lenLo)
-          //   hdr[5..7] = first 3 bytes of TLS payload
-          // Reconstruct and forward the complete TLS record, then enter
-          // the TLS passthrough phase.
-          final payloadLen = (hdr[3] << 8) | hdr[4];
-          final alreadyHave = hdr.sublist(5); // 3 bytes past TLS header
-          if (payloadLen < alreadyHave.length) {
-            // Malformed TLS record length — treat as fatal.
-            abnormal = true;
-            return;
-          }
-          final remaining = payloadLen - alreadyHave.length;
-          final rest = remaining > 0
-              ? await rawReader.readChunk(remaining)
-              : const <int>[];
-          if (remaining > 0 && rest.length < remaining) return;
-          final record = Uint8List(5 + payloadLen);
-          record.setRange(0, 5, hdr.sublist(0, 5));
-          record.setRange(5, 5 + alreadyHave.length, alreadyHave);
-          if (remaining > 0) {
-            record.setRange(5 + alreadyHave.length, 5 + payloadLen, rest);
-          }
-          bridgeSide.add(record);
-          await bridgeSide.flush();
-          break;
-        }
-
-        // Validate TDS packet type (server sends PRELOGIN response as packReply).
-        if (hdr[0] != packPrelogin && hdr[0] != packReply) {
-          abnormal = true;
-          return;
-        }
-        final bodyLen = ((hdr[2] << 8) | hdr[3]) - headerSize;
-        if (bodyLen < 0) {
-          abnormal = true;
-          return;
-        }
-        if (bodyLen > 0) {
-          final body = await rawReader.readChunk(bodyLen);
-          if (body.isEmpty) return;
-          bridgeSide.add(Uint8List.fromList(body));
-          await bridgeSide.flush();
-        }
-      }
-
-      // ── Phase 2: TLS passthrough mode ───────────────────────────────────────
-      //
-      // Forward complete TLS records verbatim (5-byte header + payload).
-      while (true) {
-        final tlsHdr = await rawReader.readChunk(5);
-        if (tlsHdr.length < 5) break;
-        final payloadLen = (tlsHdr[3] << 8) | tlsHdr[4];
-        final payload = payloadLen > 0
-            ? await rawReader.readChunk(payloadLen)
-            : const <int>[];
-        if (payloadLen > 0 && payload.length < payloadLen) break;
-        final record = Uint8List(5 + payloadLen);
-        record.setRange(0, 5, tlsHdr);
-        if (payloadLen > 0) record.setRange(5, 5 + payloadLen, payload);
-        bridgeSide.add(record);
-        await bridgeSide.flush();
-      }
-    } catch (_) {
-      // Connection closed or I/O error — expected at normal shutdown.
-    } finally {
-      // Close bridgeSide so the loopback pair is released.
-      try {
-        await bridgeSide.close();
-      } catch (_) {}
-      // If the bridge terminated while the connection is supposedly open,
-      // something went wrong — mark the connection dead so callers fail fast.
-      if (abnormal && _connected) {
-        _connected = false;
-        try {
-          await _socket.close();
-        } catch (_) {}
-        try {
-          await _rawTcpSocket?.close();
-        } catch (_) {}
-      }
-    }
+    _socket = upgrade.socket;
+    _rawTcpSocket = upgrade.rawTcpSocket;
+    _watchSocket(upgrade.rawTcpSocket);
+    _watchSocket(upgrade.socket);
+    _buf.replaceSocket(upgrade.socket);
   }
 
   Future<void> _sendLogin7() async {

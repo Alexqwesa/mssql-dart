@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+* TLS: replace fragile TLS-record reassembly with go-mssqldb-style PRELOGIN
+  handshake wrap + opaque post-handshake byte passthrough (`TdsTlsBridge`).
+* TLS: avoid Dart `SecureSocket` splitting one TDS packet across two TLS
+  records (8 KiB plaintext ring wrap) by aligning writes — full-size non-EOM
+  packets only, and wrap-fill no-op SQLBatches when needed.
+* TLS: add optional `SecurityContext` and `hostNameInCertificate` on connect,
+  pool, and connection strings (`HostNameInCertificate`).
+* Tests: Docker force-TLS overlay (`docker-compose.live.force-tls.yml`) and
+  long-lived `tls_force_encrypt_stress_test` gated by `MSSQL_FORCE_ENCRYPTION=1`.
 * Tests: move SQL Server integration coverage to opt-in `test/live`, add
   environment-backed configuration, driver-based readiness checks, disposable
   databases, Docker Compose setup, and CI live-test configuration.
@@ -9,7 +18,7 @@
   of the default test run; live connection-string coverage now uses the shared
   `MSSQL_*` configuration instead of the retired port `14330` and credentials.
 * Tests: configure the live Docker SQL Server with a short-lived self-signed
-  TLS certificate and force full-session TLS for integration coverage.
+  TLS certificate (forceencryption off by default; optional force-TLS overlay).
 
 * Security: deprecate Azure AD username/password (ROPC) token acquisition,
   reject blank bearer tokens, and expose bounded structured OAuth failures

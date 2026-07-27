@@ -22,6 +22,10 @@ class MssqlConnectionString {
   final int packetSize;
   final bool encrypt;
   final bool trustServerCertificate;
+
+  /// Hostname for SNI / cert validation (ADO `HostNameInCertificate`).
+  final String? hostNameInCertificate;
+
   final Duration connectionTimeout;
   final Duration? queryTimeout;
 
@@ -54,6 +58,7 @@ class MssqlConnectionString {
     this.packetSize = defaultPacketSize,
     this.encrypt = true,
     this.trustServerCertificate = false,
+    this.hostNameInCertificate,
     this.connectionTimeout = const Duration(seconds: 15),
     this.queryTimeout,
     this.ntlmDomain,
@@ -179,6 +184,7 @@ class MssqlConnectionString {
       packetSize: packetSize ?? defaultPacketSize,
       encrypt: encrypt,
       trustServerCertificate: trust,
+      hostNameInCertificate: map['hostnameincertificate'],
       connectionTimeout: loginSecs != null
           ? Duration(seconds: loginSecs)
           : const Duration(seconds: 15),
@@ -289,6 +295,7 @@ class MssqlConnectionString {
       packetSize: packetSize ?? defaultPacketSize,
       encrypt: encrypt,
       trustServerCertificate: trust,
+      hostNameInCertificate: q['hostnameincertificate'],
       connectionTimeout: loginSecs != null
           ? Duration(seconds: loginSecs)
           : const Duration(seconds: 15),
@@ -379,6 +386,8 @@ class MssqlConnectionString {
         return 'encrypt';
       case 'trustservercertificate':
         return 'trustservercertificate';
+      case 'hostnameincertificate':
+        return 'hostnameincertificate';
       case 'packetsize':
         return 'packetsize';
       case 'connectiontimeout':
