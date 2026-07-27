@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+* LAN typed binders: `MssqlDateTime` / `MssqlSmallDateTime` for legacy
+  `datetime` / `smalldatetime` params (go-mssqldb `DateTime1`; bare
+  `DateTime` stays `datetime2`).
 * LAN session resilience: TCP `keepAlive` (go-mssqldb default 30s;
   `KeepAlive=` in connection strings; `Duration.zero` disables) +
   `TCP_NODELAY`; `sessionInitSql` after login and after `resetSession`

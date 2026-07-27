@@ -159,6 +159,55 @@ void main() {
       // Latin-1 'hi' appears as raw bytes, not UCS-2
       expect(body.contains(0x68) && body.contains(0x69), isTrue);
     });
+
+    test('legacy datetime / smalldatetime decls + typeDateTimeN', () async {
+      final pkt = await _capture(
+        (buf) => RpcRequest.sendExecuteSql(
+          buf,
+          'SELECT @dt, @sd',
+          {
+            'dt': MssqlDateTime(DateTime.utc(2024, 3, 15, 10, 30, 0)),
+            'sd': MssqlSmallDateTime(DateTime.utc(2024, 3, 15, 10, 30)),
+          },
+        ),
+      );
+      final body = _body(pkt);
+      expect(_containsUcs2(body, '@dt datetime'), isTrue);
+      expect(_containsUcs2(body, '@sd smalldatetime'), isTrue);
+      expect(body.contains(typeDateTimeN), isTrue);
+    });
+  });
+
+  group('MssqlDateTime / MssqlSmallDateTime', () {
+    test('datetime epoch 1900-01-01 midnight is zeros', () {
+      final w = MssqlDateTime(DateTime.utc(1900, 1, 1)).toWireBytes();
+      expect(w, equals(Uint8List(8)));
+    });
+
+    test('datetime days for 1900-01-02', () {
+      final w = MssqlDateTime(DateTime.utc(1900, 1, 2, 0, 0, 1)).toWireBytes();
+      expect(w[0] | (w[1] << 8) | (w[2] << 16) | (w[3] << 24), equals(1));
+      // 1 second = 300 three-hundredths
+      expect(w[4] | (w[5] << 8) | (w[6] << 16) | (w[7] << 24), equals(300));
+    });
+
+    test('smalldatetime rounds seconds ≥ 30', () {
+      final w = MssqlSmallDateTime(DateTime.utc(1900, 1, 1, 0, 0, 30))
+          .toWireBytes();
+      expect(w[0] | (w[1] << 8), equals(0)); // days
+      expect(w[2] | (w[3] << 8), equals(1)); // 1 minute
+    });
+
+    test('rejects out of range', () {
+      expect(
+        () => MssqlDateTime(DateTime.utc(1752, 12, 31)),
+        throwsArgumentError,
+      );
+      expect(
+        () => MssqlSmallDateTime(DateTime.utc(2080, 1, 1)),
+        throwsArgumentError,
+      );
+    });
   });
 
   group('MssqlVarchar / MssqlDate / MssqlTime', () {

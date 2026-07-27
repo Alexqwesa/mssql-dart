@@ -123,6 +123,8 @@ class RpcRequest {
     if (v is MssqlVarchar) return v.sqlDecl;
     if (v is MssqlDate) return 'date';
     if (v is MssqlTime) return v.sqlDecl;
+    if (v is MssqlDateTime) return 'datetime';
+    if (v is MssqlSmallDateTime) return 'smalldatetime';
     if (v is int) return 'bigint';
     if (v is double) return 'float';
     if (v is bool) return 'bit';
@@ -192,6 +194,10 @@ class RpcRequest {
         _writeDateParam(buf, v);
       case MssqlTime v:
         _writeTimeParam(buf, v);
+      case MssqlDateTime v:
+        _writeLegacyDateTimeParam(buf, v.toWireBytes(), small: false);
+      case MssqlSmallDateTime v:
+        _writeLegacyDateTimeParam(buf, v.toWireBytes(), small: true);
       case int v:
         buf.writeByte(typeIntN);
         buf.writeByte(8); // max len
@@ -275,7 +281,19 @@ class RpcRequest {
       buf.writeByte(0);
       return;
     }
-    if (t.startsWith('datetime')) {
+    if (t == 'smalldatetime') {
+      buf.writeByte(typeDateTimeN);
+      buf.writeByte(4);
+      buf.writeByte(0);
+      return;
+    }
+    if (t == 'datetime') {
+      buf.writeByte(typeDateTimeN);
+      buf.writeByte(8);
+      buf.writeByte(0);
+      return;
+    }
+    if (t.startsWith('datetime2')) {
       buf.writeByte(typeDateTime2N);
       buf.writeByte(7);
       buf.writeByte(0);
@@ -418,6 +436,18 @@ class RpcRequest {
     buf.writeByte(scale);
     buf.writeByte(timeBytes.length);
     buf.writeBytes(timeBytes);
+  }
+
+  /// Legacy `datetime` / `smalldatetime` via typeDateTimeN (go-mssqldb DateTime1).
+  static void _writeLegacyDateTimeParam(
+    TdsBuffer buf,
+    Uint8List bytes, {
+    required bool small,
+  }) {
+    buf.writeByte(typeDateTimeN);
+    buf.writeByte(small ? 4 : 8); // MaxLen
+    buf.writeByte(bytes.length); // value len
+    buf.writeBytes(bytes);
   }
 
   static void _writeGuidParam(TdsBuffer buf, MssqlGuid guid) {

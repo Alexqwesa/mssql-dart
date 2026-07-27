@@ -180,4 +180,35 @@ void main() {
     final r = await conn.query('SELECT name FROM #vt');
     expect(r[0]['name'], equals('bob'));
   });
+
+  test('MssqlDateTime / MssqlSmallDateTime round-trip', () async {
+    if (!available) {
+      markTestSkipped('SQL Server not available on :$_port');
+      return;
+    }
+    final r = await conn.query(
+      'SELECT @dt AS dt, @sd AS sd, '
+      "SQL_VARIANT_PROPERTY(CAST(@dt AS sql_variant), 'BaseType') AS dtb, "
+      "SQL_VARIANT_PROPERTY(CAST(@sd AS sql_variant), 'BaseType') AS sdb",
+      {
+        'dt': MssqlDateTime(DateTime.utc(2024, 3, 15, 10, 30, 0)),
+        'sd': MssqlSmallDateTime(DateTime.utc(2024, 3, 15, 10, 30, 45)),
+      },
+    );
+    expect((r[0]['dtb'] as String).toLowerCase(), equals('datetime'));
+    expect((r[0]['sdb'] as String).toLowerCase(), equals('smalldatetime'));
+
+    final dt = r[0]['dt'] as DateTime;
+    expect(dt.year, equals(2024));
+    expect(dt.month, equals(3));
+    expect(dt.day, equals(15));
+    expect(dt.hour, equals(10));
+    expect(dt.minute, equals(30));
+
+    // 45s rounds to next minute for smalldatetime
+    final sd = r[0]['sd'] as DateTime;
+    expect(sd.hour, equals(10));
+    expect(sd.minute, equals(31));
+    expect(sd.second, equals(0));
+  });
 }

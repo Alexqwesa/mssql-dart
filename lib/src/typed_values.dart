@@ -399,3 +399,110 @@ class MssqlTime {
         '${second.toString().padLeft(2, '0')}.$frac';
   }
 }
+
+/// SQL legacy `datetime` parameter (go-mssqldb `DateTime1`).
+///
+/// Bare [DateTime] is sent as `datetime2`. Use this for columns typed
+/// `datetime` (precision ~3.33ms, range 1753–9999).
+class MssqlDateTime {
+  final DateTime value;
+
+  MssqlDateTime(this.value) {
+    final d = DateTime.utc(value.year, value.month, value.day);
+    final min = DateTime.utc(1753, 1, 1);
+    final max = DateTime.utc(9999, 12, 31);
+    if (d.isBefore(min) || d.isAfter(max)) {
+      throw ArgumentError.value(
+        value,
+        'value',
+        'datetime range is 1753-01-01 … 9999-12-31',
+      );
+    }
+  }
+
+  /// 8 wire bytes: days since 1900-01-01 (LE int32) + 300ths-of-second (LE uint32).
+  Uint8List toWireBytes() {
+    final days = DateTime.utc(value.year, value.month, value.day)
+        .difference(DateTime.utc(1900, 1, 1))
+        .inDays;
+    final nsWithinSec =
+        value.millisecond * 1000000 + value.microsecond * 1000;
+    var tm = 300 *
+            (value.second + value.minute * 60 + value.hour * 3600) +
+        _nanosToThreeHundredths(nsWithinSec);
+    var dayAdj = days;
+    // One day = 86400 * 300 three-hundredths.
+    const dayTicks = 300 * 86400;
+    if (tm >= dayTicks) {
+      dayAdj++;
+      tm -= dayTicks;
+    }
+    final out = Uint8List(8);
+    final dayBits = dayAdj & 0xFFFFFFFF;
+    out[0] = dayBits & 0xFF;
+    out[1] = (dayBits >> 8) & 0xFF;
+    out[2] = (dayBits >> 16) & 0xFF;
+    out[3] = (dayBits >> 24) & 0xFF;
+    out[4] = tm & 0xFF;
+    out[5] = (tm >> 8) & 0xFF;
+    out[6] = (tm >> 16) & 0xFF;
+    out[7] = (tm >> 24) & 0xFF;
+    return out;
+  }
+
+  /// SQL Server datetime rounds fractional seconds to 1/300 s.
+  static int _nanosToThreeHundredths(int ns) =>
+      (ns * 3 / 1e7).round();
+
+  @override
+  String toString() => value.toIso8601String();
+}
+
+/// SQL legacy `smalldatetime` parameter (minute precision).
+///
+/// Range 1900-01-01 … 2079-06-06. Seconds are rounded to the nearest minute.
+class MssqlSmallDateTime {
+  final DateTime value;
+
+  MssqlSmallDateTime(this.value) {
+    final d = DateTime.utc(value.year, value.month, value.day);
+    final min = DateTime.utc(1900, 1, 1);
+    final max = DateTime.utc(2079, 6, 6);
+    if (d.isBefore(min) || d.isAfter(max)) {
+      throw ArgumentError.value(
+        value,
+        'value',
+        'smalldatetime range is 1900-01-01 … 2079-06-06',
+      );
+    }
+  }
+
+  /// 4 wire bytes: days since 1900-01-01 (LE uint16) + minutes (LE uint16).
+  Uint8List toWireBytes() {
+    var days = DateTime.utc(value.year, value.month, value.day)
+        .difference(DateTime.utc(1900, 1, 1))
+        .inDays;
+    var mins = value.hour * 60 + value.minute;
+    // Round seconds ≥ 30 up to the next minute.
+    if (value.second >= 30) {
+      mins++;
+      if (mins >= 24 * 60) {
+        mins = 0;
+        days++;
+      }
+    }
+    if (days < 0) {
+      days = 0;
+      mins = 0;
+    }
+    final out = Uint8List(4);
+    out[0] = days & 0xFF;
+    out[1] = (days >> 8) & 0xFF;
+    out[2] = mins & 0xFF;
+    out[3] = (mins >> 8) & 0xFF;
+    return out;
+  }
+
+  @override
+  String toString() => value.toIso8601String();
+}
