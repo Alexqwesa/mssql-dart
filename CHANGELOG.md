@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+
+## 0.4.0
+
+Reimplement TLS + live tests
+
 * TLS: replace fragile TLS-record reassembly with go-mssqldb-style PRELOGIN
   handshake wrap + opaque post-handshake byte passthrough (`TdsTlsBridge`).
 * TLS: avoid Dart `SecureSocket` splitting one TDS packet across two TLS
