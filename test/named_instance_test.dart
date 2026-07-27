@@ -140,6 +140,15 @@ void main() {
       );
     });
 
+    test('SVR_RESP declared length must match the datagram', () {
+      final data = _svrResp(instance: 'SQLEXPRESS', tcpPort: 51433);
+      data[1]--;
+      expect(
+        () => SqlBrowser.parseTcpPort(data),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
     test('missing tcp throws', () {
       final text = 'ServerName;H;InstanceName;X;IsClustered;No;Version;1.0;;';
       final payload = utf8.encode(text);
@@ -175,13 +184,42 @@ void main() {
       });
       addTearDown(() => sub.cancel());
 
-      final port = await SqlBrowser.resolveTcpPort(
+      final resolved = await SqlBrowser.resolve(
         '127.0.0.1',
         'MOCKINST',
         browserPort: browser.port,
         timeout: const Duration(seconds: 2),
       );
-      expect(port, 49152);
+      expect(resolved.port, 49152);
+      expect(resolved.address.address, InternetAddress.loopbackIPv4.address);
+    });
+
+    test('resolve supports an IPv6 Browser endpoint', () async {
+      final browser =
+          await RawDatagramSocket.bind(InternetAddress.loopbackIPv6, 0);
+      addTearDown(browser.close);
+
+      late StreamSubscription<RawSocketEvent> sub;
+      sub = browser.listen((event) {
+        if (event != RawSocketEvent.read) return;
+        final dg = browser.receive();
+        if (dg == null) return;
+        browser.send(
+          _svrResp(instance: 'IPV6INST', tcpPort: 49153),
+          dg.address,
+          dg.port,
+        );
+      });
+      addTearDown(() => sub.cancel());
+
+      final resolved = await SqlBrowser.resolve(
+        '::1',
+        'IPV6INST',
+        browserPort: browser.port,
+        timeout: const Duration(seconds: 2),
+      );
+      expect(resolved.port, 49153);
+      expect(resolved.address.type, InternetAddressType.IPv6);
     });
 
     test('resolveTcpPort ignores datagrams from unexpected source port',

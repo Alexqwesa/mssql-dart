@@ -13,8 +13,12 @@ import '../exception.dart';
 class SqlBrowser {
   static const int defaultBrowserPort = 1434;
 
-  /// Asks the Browser on [host] for the TCP port of [instanceName].
-  static Future<int> resolveTcpPort(
+  /// Resolves [instanceName] through the Browser on [host].
+  ///
+  /// The returned address is the Browser endpoint that supplied [port]. Use it
+  /// for the ensuing TCP dial, but retain [host] for TLS SNI and certificate
+  /// validation.
+  static Future<ResolvedSqlInstance> resolve(
     String host,
     String instanceName, {
     Duration timeout = const Duration(seconds: 3),
@@ -29,23 +33,74 @@ class SqlBrowser {
       throw MssqlException('SQL Browser: could not resolve host "$host"');
     }
 
-    final sock = await RawDatagramSocket.bind(InternetAddress.anyIPv4, 0);
+    final deadline = DateTime.now().add(timeout);
+    Object? lastError;
+    for (final browserAddress in addresses) {
+      final remaining = deadline.difference(DateTime.now());
+      if (remaining <= Duration.zero) break;
+      try {
+        final port = await _resolveAddress(
+          browserAddress,
+          instanceName,
+          browserPort: browserPort,
+          timeout: remaining,
+        );
+        return ResolvedSqlInstance(browserAddress, port);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw MssqlException(
+      'SQL Browser could not resolve $host\\$instanceName via UDP '
+      '$browserPort${lastError == null ? '' : ': $lastError'}',
+    );
+  }
+
+  /// Asks the Browser on [host] for the TCP port of [instanceName].
+  ///
+  /// Prefer [resolve] internally when the eventual TCP dial should reuse the
+  /// exact address that answered discovery.
+  static Future<int> resolveTcpPort(
+    String host,
+    String instanceName, {
+    Duration timeout = const Duration(seconds: 3),
+    int browserPort = defaultBrowserPort,
+  }) async {
+    return (await resolve(
+      host,
+      instanceName,
+      timeout: timeout,
+      browserPort: browserPort,
+    ))
+        .port;
+  }
+
+  static Future<int> _resolveAddress(
+    InternetAddress browserAddress,
+    String instanceName, {
+    required int browserPort,
+    required Duration timeout,
+  }) async {
+    final bindAddress = browserAddress.type == InternetAddressType.IPv6
+        ? InternetAddress.anyIPv6
+        : InternetAddress.anyIPv4;
+    final sock = await RawDatagramSocket.bind(bindAddress, 0);
     try {
       final request = buildClntUcastInst(instanceName);
-      final browserAddress = addresses.first;
-      sock.send(request, browserAddress, browserPort);
+      final sent = sock.send(request, browserAddress, browserPort);
+      if (sent == 0) {
+        throw MssqlException(
+          'SQL Browser request could not be queued for '
+          '${browserAddress.address}:$browserPort',
+        );
+      }
 
       final dg = await _receive(
         sock,
         expectedAddress: browserAddress,
         expectedPort: browserPort,
-      ).timeout(
-        timeout,
-        onTimeout: () => throw MssqlException(
-          'SQL Browser timed out after ${timeout.inMilliseconds}ms '
-          '($host\\$instanceName via UDP $browserPort)',
-        ),
-      );
+      ).timeout(timeout);
       return parseTcpPort(dg.data, expectedInstance: instanceName);
     } finally {
       sock.close();
@@ -71,8 +126,13 @@ class SqlBrowser {
     }
     final len = data[1] | (data[2] << 8);
     final start = 3;
-    final end = (start + len <= data.length) ? start + len : data.length;
-    final text = utf8.decode(data.sublist(start, end), allowMalformed: true);
+    if (data.length != start + len) {
+      throw FormatException(
+        'SQL Browser: response length is $len bytes but received '
+        '${data.length - start}',
+      );
+    }
+    final text = utf8.decode(data.sublist(start));
     final fields = parseResponseFields(text);
 
     if (expectedInstance != null) {
@@ -117,23 +177,50 @@ class SqlBrowser {
     required InternetAddress expectedAddress,
     required int expectedPort,
   }) {
-    final completer = Completer<Datagram>();
-    late StreamSubscription<RawSocketEvent> sub;
-    sub = sock.listen((event) {
+    return _receiveLoop(sock, expectedAddress, expectedPort);
+  }
+
+  static Future<Datagram> _receiveLoop(
+    RawDatagramSocket sock,
+    InternetAddress expectedAddress,
+    int expectedPort,
+  ) async {
+    await for (final event in sock) {
       if (event == RawSocketEvent.read) {
-        final dg = sock.receive();
-        if (dg != null && !completer.isCompleted) {
-          if (dg.port != expectedPort ||
-              dg.address.address != expectedAddress.address) {
-            return;
+        Datagram? dg;
+        while ((dg = sock.receive()) != null) {
+          final received = dg!;
+          if (received.port == expectedPort &&
+              _sameAddress(received.address, expectedAddress)) {
+            return received;
           }
-          completer.complete(dg);
-          unawaited(sub.cancel());
         }
       }
-    }, onError: (Object e, StackTrace st) {
-      if (!completer.isCompleted) completer.completeError(e, st);
-    });
-    return completer.future;
+      if (event == RawSocketEvent.closed) {
+        throw MssqlException(
+          'SQL Browser socket closed before receiving a response',
+        );
+      }
+    }
+    throw MssqlException(
+        'SQL Browser socket ended before receiving a response');
   }
+
+  static bool _sameAddress(InternetAddress a, InternetAddress b) {
+    if (a.type != b.type || a.rawAddress.length != b.rawAddress.length) {
+      return false;
+    }
+    for (var i = 0; i < a.rawAddress.length; i++) {
+      if (a.rawAddress[i] != b.rawAddress[i]) return false;
+    }
+    return true;
+  }
+}
+
+/// A named SQL Server instance endpoint resolved through SQL Browser.
+class ResolvedSqlInstance {
+  final InternetAddress address;
+  final int port;
+
+  const ResolvedSqlInstance(this.address, this.port);
 }

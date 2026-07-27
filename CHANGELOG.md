@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.0
+
 * Security: harden `bulkInsert` identifier handling by bracket-quoting
   multipart table names, re-quoting existing bracketed identifiers, escaping
   closing brackets, and rejecting empty, control-character, or overlong
@@ -16,7 +18,11 @@
   lengths, and NTLM TargetInfo AV_PAIR bounds before decoding.
 * Security: harden SQL Browser named-instance discovery by ignoring UDP
   responses whose source address or port does not match the queried browser
-  endpoint.
+  endpoint; use the matching IPv4/IPv6 socket family, retry resolved addresses
+  within one deadline, reject malformed responses, and reuse the answering IP
+  for the ensuing TCP dial while retaining the hostname for TLS validation.
+* Release: correct the Dart SDK lower bound to `>=3.4.0` to match direct
+  dependency requirements.
 * LAN typed binders: `MssqlNVarchar` / `MssqlNChar` / `MssqlBinary` /
   `MssqlRowVersion` for sized `nvarchar(n)` / `nchar(n)` / `binary(n)` and
   `rowversion`/`timestamp` compare params (bare `String` stays

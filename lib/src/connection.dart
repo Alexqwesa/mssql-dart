@@ -41,6 +41,7 @@ import 'tds/token_stream.dart';
 /// ```
 class MssqlConnection {
   String _host;
+  InternetAddress? _resolvedAddress;
   int _port;
   String? _instanceName;
   bool _resolveNamedInstancePort;
@@ -119,6 +120,7 @@ class MssqlConnection {
     Duration keepAlive = const Duration(seconds: 30),
     String? sessionInitSql,
   })  : _host = host,
+        _resolvedAddress = null,
         _port = port,
         _instanceName = instanceName,
         _resolveNamedInstancePort = resolveNamedInstancePort,
@@ -856,6 +858,7 @@ class MssqlConnection {
         port: _failoverPort ?? defaultPort,
       );
       _host = ep.host;
+      _resolvedAddress = null;
       _port = ep.port;
       _instanceName = ep.instanceName;
       _resolveNamedInstancePort = ep.shouldResolvePort;
@@ -884,6 +887,7 @@ class MssqlConnection {
       await _forceClose();
       final parts = routing.server.split(r'\');
       _host = parts[0];
+      _resolvedAddress = null;
       _instanceName = parts.length > 1 ? parts[1] : null;
       _port = routing.port;
       _resolveNamedInstancePort = false; // port is explicit from ENVCHANGE
@@ -914,11 +918,13 @@ class MssqlConnection {
   Future<LoginResult> _openHandshake() async {
     // 0. Named instance → SQL Browser (UDP 1434) when no explicit port
     if (_resolveNamedInstancePort && _instanceName != null) {
-      _port = await SqlBrowser.resolveTcpPort(_host, _instanceName!);
+      final resolved = await SqlBrowser.resolve(_host, _instanceName!);
+      _resolvedAddress = resolved.address;
+      _port = resolved.port;
     }
 
     // 1. TCP
-    _socket = await _dialTcp(_host, _port);
+    _socket = await _dialTcp(_resolvedAddress ?? _host, _port);
     _watchSocket(_socket);
     _buf = TdsBuffer(
       _socket,
@@ -959,7 +965,7 @@ class MssqlConnection {
           ? null
           : (challengeBytes) async {
               final challenge = NtlmChallenge.parse(challengeBytes);
-              return _ntlmAuth!.authenticateMessage(challenge);
+              return _ntlmAuth.authenticateMessage(challenge);
             },
     );
     _currentDatabase = loginResult.database;
@@ -974,13 +980,13 @@ class MssqlConnection {
   }
 
   /// TCP dial — optionally races all DNS addresses ([multiSubnetFailover]).
-  Future<Socket> _dialTcp(String host, int port) async {
-    if (!_multiSubnetFailover) {
+  Future<Socket> _dialTcp(Object host, int port) async {
+    if (!_multiSubnetFailover || host is InternetAddress) {
       final sock = await Socket.connect(host, port, timeout: _timeout);
       applyMssqlTcpOptions(sock, keepAlive: _keepAlive);
       return sock;
     }
-    final addrs = await InternetAddress.lookup(host);
+    final addrs = await InternetAddress.lookup(host as String);
     if (addrs.isEmpty) {
       throw SocketException('Failed host lookup: "$host"');
     }
