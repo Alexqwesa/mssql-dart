@@ -18,15 +18,7 @@ void main() {
     return;
   }
   setUpAll(() async {
-    conn = await MssqlConnection.connect(
-      host: liveTestConfig.host,
-      port: liveTestConfig.port,
-      user: liveTestConfig.user,
-      password: liveTestConfig.password,
-      database: 'master',
-      encrypt: false,
-      trustServerCertificate: true,
-    );
+    conn = await liveTestConfig.open(database: 'master');
   });
 
   tearDownAll(() async => conn.close());

@@ -35,7 +35,7 @@ class LiveTestConfig {
       port: port,
       user: environment['MSSQL_USER'] ?? 'sa',
       password: password,
-      encrypt: environment['MSSQL_ENCRYPT'] != '0',
+      encrypt: environment['MSSQL_ENCRYPT'] == '1',
       trustServerCertificate:
           environment['MSSQL_TRUST_SERVER_CERTIFICATE'] != '0',
     );

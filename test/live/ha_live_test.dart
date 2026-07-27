@@ -22,7 +22,8 @@ Future<bool> _sqlUp() async {
       user: _user,
       password: _password,
       database: 'master',
-      encrypt: false,
+      encrypt: liveTestConfig.encrypt,
+      trustServerCertificate: liveTestConfig.trustServerCertificate,
       timeout: const Duration(seconds: 3),
     );
     await c.close();
@@ -45,7 +46,7 @@ void main() {
 
   test('readOnlyIntent connects to standalone SQL (no routing)', () async {
     if (!available) {
-      markTestSkipped('SQL Server not available on :14330');
+        markTestSkipped('SQL Server not available on :$_port');
       return;
     }
     final conn = await MssqlConnection.connect(
@@ -54,7 +55,8 @@ void main() {
       user: _user,
       password: _password,
       database: 'master',
-      encrypt: false,
+      encrypt: liveTestConfig.encrypt,
+      trustServerCertificate: liveTestConfig.trustServerCertificate,
       readOnlyIntent: true,
       timeout: const Duration(seconds: 5),
     );
@@ -82,7 +84,7 @@ void main() {
 
   test('FailoverPartner used when primary host is unreachable', () async {
     if (!available) {
-      markTestSkipped('SQL Server not available on :14330');
+        markTestSkipped('SQL Server not available on :$_port');
       return;
     }
     // 127.0.0.1:1 refuses quickly; partner is the live Docker instance.
@@ -92,7 +94,8 @@ void main() {
       user: _user,
       password: _password,
       database: 'master',
-      encrypt: false,
+      encrypt: liveTestConfig.encrypt,
+      trustServerCertificate: liveTestConfig.trustServerCertificate,
       failoverPartner: _host,
       failoverPort: _port,
       timeout: const Duration(seconds: 3),
@@ -107,12 +110,15 @@ void main() {
 
   test('ADO ApplicationIntent string connects', () async {
     if (!available) {
-      markTestSkipped('SQL Server not available on :14330');
+        markTestSkipped('SQL Server not available on :$_port');
       return;
     }
+    final trust = liveTestConfig.trustServerCertificate ? 'yes' : 'no';
+    final enc = liveTestConfig.encrypt ? 'true' : 'false';
     final conn = await MssqlConnection.connectFromString(
       'Server=$_host,$_port;Database=master;User Id=$_user;'
-      'Password=$_password;Encrypt=false;ApplicationIntent=ReadOnly;',
+      'Password=$_password;Encrypt=$enc;TrustServerCertificate=$trust;'
+      'ApplicationIntent=ReadOnly;',
     );
     try {
       expect((await conn.query('SELECT 1 AS n'))[0]['n'], equals(1));

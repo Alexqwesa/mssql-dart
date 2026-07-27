@@ -933,14 +933,13 @@ class MssqlConnection {
     );
 
     // 2. PRELOGIN
-    // encryptOff (0x00) = TLS capable but prefer cleartext; server may still
-    // require encryption (forceencryption=1) and we honor that via TLS upgrade.
-    // encryptNotSupported (0x02) falsely claims the client cannot TLS — if the
-    // server then requires encryption, a post-PRELOGIN TLS attempt is rejected
-    // (SQL error 17828 / HandshakeException).
+    // encryptNotSupported (0x02) = client will not do TLS (cleartext / LAN).
     // encryptOn (0x01) = request TLS for the whole session.
+    // Do not advertise encryptOff and then upgrade: that races the TDS-TLS
+    // bridge and breaks long-lived connections. If the server requires
+    // encryption, fail with a clear error instead.
     final wantEncrypt =
-        (_encrypt || _azureAdAuth != null) ? encryptOn : encryptOff;
+        (_encrypt || _azureAdAuth != null) ? encryptOn : encryptNotSupported;
 
     await Prelogin.send(
       _buf,
@@ -950,8 +949,15 @@ class MssqlConnection {
     );
     final prelogin = await Prelogin.read(_buf);
 
-    // 3. TLS upgrade when the server requires or accepts encryption.
+    // 3. TLS upgrade only when the client requested encryption.
     if (prelogin.requiresTls) {
+      if (!_encrypt && _azureAdAuth == null) {
+        throw MssqlException(
+          'Server requires encryption, but encrypt: false was set. '
+          'Pass encrypt: true (and trustServerCertificate: true for '
+          'self-signed certificates).',
+        );
+      }
       await _upgradeTls();
     } else if (_encrypt && _azureAdAuth == null) {
       throw MssqlException(
@@ -1109,25 +1115,43 @@ class MssqlConnection {
     // Direction A: SecureSocket writes → secSide → loopback → bridgeSide → rawSocket.
     //   Handshake phase: wrap TLS bytes in a TDS PRELOGIN packet.
     //   Post-handshake: forward raw encrypted TLS records.
+    // Writes must stay synchronous with SecureSocket's send path — deferring
+    // them (e.g. an async queue) lets the reader race ahead of the request.
+    // Do not unawaited-flush after every chunk; overlapping add+flush throws
+    // "StreamSink is bound to a stream" under load.
     bridgeSide.listen(
       (data) {
-        if (handshakeDone) {
-          rawSocket.add(data);
-        } else {
-          final size = headerSize + data.length;
-          final pkt = Uint8List(size);
-          pkt[0] = packPrelogin;
-          pkt[1] = statusEOM;
-          pkt[2] = (size >> 8) & 0xFF;
-          pkt[3] = size & 0xFF;
-          pkt[6] = 1;
-          pkt.setRange(headerSize, size, data);
-          rawSocket.add(pkt);
+        try {
+          if (handshakeDone) {
+            rawSocket.add(data);
+          } else {
+            final size = headerSize + data.length;
+            final pkt = Uint8List(size);
+            pkt[0] = packPrelogin;
+            pkt[1] = statusEOM;
+            pkt[2] = (size >> 8) & 0xFF;
+            pkt[3] = size & 0xFF;
+            pkt[6] = 1;
+            pkt.setRange(headerSize, size, data);
+            rawSocket.add(pkt);
+          }
+        } catch (_) {
+          _connected = false;
+          try {
+            rawSocket.destroy();
+          } catch (_) {}
         }
-        unawaited(rawSocket.flush());
       },
-      onError: (_) => rawSocket.close(),
-      onDone: () => rawSocket.close(),
+      onError: (_) {
+        try {
+          rawSocket.destroy();
+        } catch (_) {}
+      },
+      onDone: () {
+        try {
+          rawSocket.destroy();
+        } catch (_) {}
+      },
     );
 
     // Direction B: rawSocket → rawReader (bridge loop) → bridgeSide → secSide.

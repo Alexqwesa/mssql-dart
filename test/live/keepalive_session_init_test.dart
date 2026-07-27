@@ -25,7 +25,8 @@ Future<bool> _sqlUp() async {
       user: _user,
       password: _password,
       database: 'master',
-      encrypt: false,
+      encrypt: liveTestConfig.encrypt,
+      trustServerCertificate: liveTestConfig.trustServerCertificate,
       timeout: const Duration(seconds: 3),
       keepAlive: Duration.zero,
     );
@@ -91,7 +92,8 @@ void main() {
         user: _user,
         password: _password,
         database: 'master',
-        encrypt: false,
+        encrypt: liveTestConfig.encrypt,
+        trustServerCertificate: liveTestConfig.trustServerCertificate,
         sessionInitSql: 'SET LOCK_TIMEOUT 1234;',
       );
       try {
@@ -115,7 +117,8 @@ void main() {
         user: _user,
         password: _password,
         database: 'master',
-        encrypt: false,
+        encrypt: liveTestConfig.encrypt,
+        trustServerCertificate: liveTestConfig.trustServerCertificate,
         sessionInitSql: 'SET LOCK_TIMEOUT 4321;',
       );
       try {
