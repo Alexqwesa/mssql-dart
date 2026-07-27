@@ -182,10 +182,18 @@ class TdsBuffer {
     final size = (hdr[2] << 8) | hdr[3];
     _rFinal = (status & statusEOM) != 0;
 
+    if (size < headerSize) {
+      throw FormatException(
+        'TDS packet size $size is smaller than header size $headerSize',
+      );
+    }
     final bodyLen = size - headerSize;
     final newBody = bodyLen > 0
         ? Uint8List.fromList(await _reader.readChunk(bodyLen))
         : Uint8List(0);
+    if (newBody.length < bodyLen) {
+      throw StateError('Connection closed mid-packet body');
+    }
 
     // Preserve unread bytes when a multi-byte read straddles a packet
     // boundary (go-mssqldb / PR #3). Without this, leftover bytes in

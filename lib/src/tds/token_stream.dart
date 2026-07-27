@@ -487,18 +487,59 @@ class TokenStream {
     return _buf.readBytes(length);
   }
 
+  static void _requireBytes(
+    List<int> data,
+    int offset,
+    int length,
+    String context,
+  ) {
+    if (offset < 0 || length < 0 || offset + length > data.length) {
+      throw FormatException(
+        '$context exceeds token body at offset $offset length $length '
+        '(body ${data.length} bytes)',
+      );
+    }
+  }
+
+  static int _uint16LEAt(List<int> data, int offset, String context) {
+    _requireBytes(data, offset, 2, context);
+    return data[offset] | (data[offset + 1] << 8);
+  }
+
+  static int _int32LEAt(List<int> data, int offset, String context) {
+    _requireBytes(data, offset, 4, context);
+    final v = data[offset] |
+        (data[offset + 1] << 8) |
+        (data[offset + 2] << 16) |
+        (data[offset + 3] << 24);
+    return v >= 0x80000000 ? v - 0x100000000 : v;
+  }
+
+  static (String, int) _readBVarCharFrom(
+    List<int> data,
+    int offset,
+    String context,
+  ) {
+    _requireBytes(data, offset, 1, '$context length');
+    final chars = data[offset];
+    final start = offset + 1;
+    final byteLength = chars * 2;
+    _requireBytes(data, start, byteLength, context);
+    return (
+      _ucs2String(data.sublist(start, start + byteLength), context),
+      start + byteLength
+    );
+  }
+
   Future<String> _readLoginAck() async {
     final length = await _buf.readUint16LE();
     final data = await _readTokenBytes(length, 'LOGINACK token');
+    _requireBytes(data, 0, 10, 'LOGINACK token');
     final nameLen = data[5];
-    final nameBytes = data.sublist(6, 6 + nameLen * 2);
-    final name = String.fromCharCodes(
-      [
-        for (int i = 0; i < nameBytes.length; i += 2)
-          nameBytes[i] | (nameBytes[i + 1] << 8)
-      ],
-    );
-    return name;
+    final nameEnd = 6 + nameLen * 2;
+    _requireBytes(data, 6, nameLen * 2, 'LOGINACK program name');
+    _requireBytes(data, nameEnd, 4, 'LOGINACK program version');
+    return _ucs2String(data.sublist(6, nameEnd), 'LOGINACK program name');
   }
 
   Future<void> _skipFeatureExtAck() async {
@@ -515,13 +556,15 @@ class TokenStream {
     final size = await _buf.readUint32LE();
     _buf.limits.checkTokenBytes(size, 'FEDAUTHINFO token');
     if (size < 4) {
-      if (size > 0) await _readTokenBytes(size, 'FEDAUTHINFO token');
-      return const FedAuthInfo();
+      throw FormatException('FEDAUTHINFO token size $size is smaller than 4');
     }
     final count = await _buf.readUint32LE();
     var offset = 4; // bytes consumed within [size] after reading count
     final opts = <({int id, int dataLength, int dataOffset})>[];
     for (var i = 0; i < count; i++) {
+      if (offset + 9 > size) {
+        throw FormatException('FEDAUTHINFO option table exceeds token size');
+      }
       final id = await _buf.readUint8();
       final dataLength = await _buf.readUint32LE();
       final dataOffset = await _buf.readUint32LE();
@@ -530,6 +573,9 @@ class TokenStream {
       opts.add((id: id, dataLength: dataLength, dataOffset: dataOffset));
     }
     final remaining = size - offset;
+    if (remaining < 0) {
+      throw FormatException('FEDAUTHINFO option table exceeds token size');
+    }
     final data = remaining > 0
         ? await _readTokenBytes(remaining, 'FEDAUTHINFO token')
         : <int>[];
@@ -548,7 +594,7 @@ class TokenStream {
         throw FormatException('FEDAUTHINFO option exceeds token size');
       }
       final raw = data.sublist(start, end);
-      final text = _ucs2String(raw);
+      final text = _ucs2String(raw, 'FEDAUTHINFO option');
       switch (opt.id) {
         case fedAuthInfoStsUrl:
           stsUrl = text;
@@ -575,9 +621,14 @@ class TokenStream {
     await _buf.finishPacket(packFedAuthToken);
   }
 
-  static String _ucs2String(List<int> bytes) {
+  static String _ucs2String(List<int> bytes, String context) {
+    if (bytes.length.isOdd) {
+      throw FormatException(
+        '$context has odd UTF-16LE byte length ${bytes.length}',
+      );
+    }
     final codes = <int>[];
-    for (var i = 0; i + 1 < bytes.length; i += 2) {
+    for (var i = 0; i < bytes.length; i += 2) {
       codes.add(bytes[i] | (bytes[i + 1] << 8));
     }
     return String.fromCharCodes(codes);
@@ -596,6 +647,7 @@ class TokenStream {
   Future<_EnvChange> _readEnvChange() async {
     final length = await _buf.readUint16LE();
     final data = await _readTokenBytes(length, 'ENVCHANGE token');
+    _requireBytes(data, 0, 1, 'ENVCHANGE token');
     final type = data[0];
     int i = 1;
 
@@ -607,25 +659,25 @@ class TokenStream {
       // NEWVALUE = RoutingData: USHORT len + Protocol BYTE + Port USHORT +
       // AlternateServer US_VARCHAR; OLDVALUE = 0x00 0x00
       // (go-mssqldb processEnvChg / ms-tds §2.2.7.9 type 20).
-      if (data.length < 6) return _EnvChange(type: type);
-      i += 2; // RoutingDataValueLength
+      final routingValueLen = _uint16LEAt(data, i, 'ENVCHANGE routing length');
+      i += 2;
+      _requireBytes(data, i, routingValueLen, 'ENVCHANGE routing new value');
       final protocol = data[i++];
       if (protocol != 0) return _EnvChange(type: type);
-      final port = data[i] | (data[i + 1] << 8);
+      final port = _uint16LEAt(data, i, 'ENVCHANGE routing port');
       i += 2;
-      if (i + 2 > data.length) return _EnvChange(type: type);
-      final nameChars = data[i] | (data[i + 1] << 8);
+      final nameChars = _uint16LEAt(data, i, 'ENVCHANGE routing server length');
       i += 2;
       final nameEnd = i + nameChars * 2;
-      if (nameEnd > data.length) return _EnvChange(type: type);
-      final chars = <int>[];
-      for (var j = i; j + 1 < nameEnd; j += 2) {
-        chars.add(data[j] | (data[j + 1] << 8));
-      }
+      _requireBytes(data, i, nameChars * 2, 'ENVCHANGE routing server');
+      final server = _ucs2String(
+        data.sublist(i, nameEnd),
+        'ENVCHANGE routing server',
+      );
       return _EnvChange(
         type: type,
         routing: MssqlRoutingInfo(
-          server: String.fromCharCodes(chars),
+          server: server,
           port: port,
         ),
       );
@@ -650,18 +702,10 @@ class TokenStream {
       return _EnvChange(type: type);
     }
 
-    String readBVarChar() {
-      final len = data[i++];
-      final chars = <int>[];
-      for (int j = 0; j < len; j++) {
-        chars.add(data[i] | (data[i + 1] << 8));
-        i += 2;
-      }
-      return String.fromCharCodes(chars);
-    }
-
-    final newVal = readBVarChar();
-    final oldVal = readBVarChar();
+    final (newVal, afterNew) =
+        _readBVarCharFrom(data, i, 'ENVCHANGE new value');
+    i = afterNew;
+    final (oldVal, _) = _readBVarCharFrom(data, i, 'ENVCHANGE old value');
     return _EnvChange(type: type, newValue: newVal, oldValue: oldVal);
   }
 
@@ -688,45 +732,26 @@ class TokenStream {
     final length = await _buf.readUint16LE();
     final data = await _readTokenBytes(length, 'INFO/ERROR token');
     int i = 0;
-    final number = data[i] |
-        (data[i + 1] << 8) |
-        (data[i + 2] << 16) |
-        (data[i + 3] << 24);
-    // Sign-extend if high bit set (SQL numbers are INT32).
-    final signedNumber = number >= 0x80000000 ? number - 0x100000000 : number;
+    final signedNumber = _int32LEAt(data, i, 'INFO/ERROR number');
     i += 4;
+    _requireBytes(data, i, 4, 'INFO/ERROR header');
     final state = data[i++];
     final severity = data[i++];
-    final msgLen = data[i] | (data[i + 1] << 8);
+    final msgLen = _uint16LEAt(data, i, 'INFO/ERROR message length');
     i += 2;
-    final msgChars = <int>[];
-    for (int j = 0; j < msgLen; j++) {
-      msgChars.add(data[i] | (data[i + 1] << 8));
-      i += 2;
-    }
-    final message = String.fromCharCodes(msgChars);
+    final msgByteLen = msgLen * 2;
+    _requireBytes(data, i, msgByteLen, 'INFO/ERROR message');
+    final message =
+        _ucs2String(data.sublist(i, i + msgByteLen), 'INFO/ERROR message');
+    i += msgByteLen;
 
-    String readBVarChar() {
-      if (i >= data.length) return '';
-      final n = data[i++];
-      final chars = <int>[];
-      for (int j = 0; j < n && i + 1 < data.length; j++) {
-        chars.add(data[i] | (data[i + 1] << 8));
-        i += 2;
-      }
-      return String.fromCharCodes(chars);
-    }
-
-    final serverName = readBVarChar();
-    final procName = readBVarChar();
-    var lineNo = 0;
-    if (i + 3 < data.length) {
-      lineNo = data[i] |
-          (data[i + 1] << 8) |
-          (data[i + 2] << 16) |
-          (data[i + 3] << 24);
-      if (lineNo >= 0x80000000) lineNo -= 0x100000000;
-    }
+    final (serverName, afterServer) =
+        _readBVarCharFrom(data, i, 'INFO/ERROR server name');
+    i = afterServer;
+    final (procName, afterProc) =
+        _readBVarCharFrom(data, i, 'INFO/ERROR procedure name');
+    i = afterProc;
+    final lineNo = _int32LEAt(data, i, 'INFO/ERROR line number');
 
     return MssqlInfoMessage(
       number: signedNumber,
@@ -754,10 +779,7 @@ class TokenStream {
     var name = '';
     if (nameLen > 0) {
       final nameBytes = await _readTokenBytes(nameLen * 2, 'RETURNVALUE name');
-      name = String.fromCharCodes([
-        for (int j = 0; j < nameBytes.length; j += 2)
-          nameBytes[j] | (nameBytes[j + 1] << 8)
-      ]);
+      name = _ucs2String(nameBytes, 'RETURNVALUE name');
     }
     if (name.startsWith('@')) name = name.substring(1);
     await _buf.readUint8(); // Status
@@ -795,12 +817,7 @@ class TokenStream {
       }
       final nameLen = await _buf.readUint8();
       final nameBytes = await _readTokenBytes(nameLen * 2, 'COLMETADATA name');
-      final name = String.fromCharCodes(
-        [
-          for (int j = 0; j < nameBytes.length; j += 2)
-            nameBytes[j] | (nameBytes[j + 1] << 8)
-        ],
-      );
+      final name = _ucs2String(nameBytes, 'COLMETADATA name');
       cols.add(ColumnMeta(
           name: name, typeInfo: ti, userType: userType, flags: flags));
     }

@@ -55,7 +55,10 @@ class NtlmChallenge {
     final challenge = Uint8List.fromList(msg.sublist(24, 32));
 
     var targetName = '';
-    if (targetLen > 0 && targetOff + targetLen <= msg.length) {
+    if (targetLen > 0) {
+      if (targetOff + targetLen > msg.length) {
+        throw FormatException('NTLM Type 2 target name exceeds message length');
+      }
       final raw = msg.sublist(targetOff, targetOff + targetLen);
       targetName = (flags & NtlmAuth.negotiateUnicode) != 0
           ? _fromUtf16Le(raw)
@@ -66,8 +69,14 @@ class NtlmChallenge {
     if (msg.length >= 48 && (flags & negotiateTargetInfo) != 0) {
       final infoLen = bd.getUint16(40, Endian.little);
       final infoOff = bd.getUint32(44, Endian.little);
-      if (infoLen > 0 && infoOff + infoLen <= msg.length) {
-        targetInfo = Uint8List.fromList(msg.sublist(infoOff, infoOff + infoLen));
+      if (infoLen > 0) {
+        if (infoOff + infoLen > msg.length) {
+          throw FormatException(
+            'NTLM Type 2 target info exceeds message length',
+          );
+        }
+        targetInfo =
+            Uint8List.fromList(msg.sublist(infoOff, infoOff + infoLen));
       }
     }
 
@@ -221,7 +230,8 @@ class NtlmAuth {
     final ntlmv2Hash = ntowfV2(ntHash, username, targetForHash);
 
     final blob = _ntlmv2Blob(ts, cc, targetInfo);
-    final ntProof = _hmacMd5(ntlmv2Hash, [...challenge.serverChallenge, ...blob]);
+    final ntProof =
+        _hmacMd5(ntlmv2Hash, [...challenge.serverChallenge, ...blob]);
     final ntResponse = Uint8List.fromList([...ntProof, ...blob]);
 
     final lmProof = _hmacMd5(ntlmv2Hash, [...challenge.serverChallenge, ...cc]);
@@ -280,7 +290,8 @@ class NtlmAuth {
     writeBuf(44, wsU);
     writeBuf(52, encryptedSessionKey);
 
-    var flags = challenge.flags | negotiateUnicode | negotiateNtlm | negotiateVersion;
+    var flags =
+        challenge.flags | negotiateUnicode | negotiateNtlm | negotiateVersion;
     flags &= ~negotiateOem;
     if (doKeyExch) flags |= negotiateKeyExch;
     bd.setUint32(60, flags, Endian.little);
@@ -389,8 +400,14 @@ class NtlmAuth {
       final len = info[i + 2] | (info[i + 3] << 8);
       i += 4;
       if (id == _avEol) return false;
+      if (i + len > info.length) {
+        throw FormatException('NTLM TargetInfo AV_PAIR exceeds message length');
+      }
       if (id == _avTimestamp) return true;
       i += len;
+    }
+    if (i != info.length) {
+      throw FormatException('NTLM TargetInfo has truncated AV_PAIR header');
     }
     return false;
   }
@@ -412,6 +429,9 @@ class NtlmAuth {
       final len = info[i + 2] | (info[i + 3] << 8);
       final valueStart = i + 4;
       if (id == _avEol) break;
+      if (valueStart + len > info.length) {
+        throw FormatException('NTLM TargetInfo AV_PAIR exceeds message length');
+      }
       // Drop any server ChannelBindings; we supply our own.
       if (id == _avChannelBindings) {
         i = valueStart + len;
@@ -430,6 +450,9 @@ class NtlmAuth {
         out.add(info.sublist(i, valueStart + len));
       }
       i = valueStart + len;
+    }
+    if (i != info.length && (i + 4 > info.length)) {
+      throw FormatException('NTLM TargetInfo has truncated AV_PAIR header');
     }
     if (mic && !sawFlags) {
       out.add([_avFlags & 0xFF, (_avFlags >> 8) & 0xFF, 4, 0]);

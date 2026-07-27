@@ -110,6 +110,19 @@ void main() {
       ]);
       expect(() => NtlmChallenge.parse(bad), throwsFormatException);
     });
+
+    test('rejects target info security buffer beyond message length', () {
+      final bad = _type2(
+        flags: NtlmAuth.negotiateUnicode |
+            NtlmAuth.negotiateNtlm |
+            NtlmAuth.negotiateTargetInfo,
+        challenge: _hex('0123456789abcdef'),
+        targetInfo: Uint8List.fromList([0]),
+      );
+      ByteData.sublistView(bad).setUint16(40, 8, Endian.little);
+
+      expect(() => NtlmChallenge.parse(bad), throwsFormatException);
+    });
   });
 
   group('NtlmAuth.authenticateMessage (Type 3 / NTLMv2)', () {
@@ -188,8 +201,10 @@ void main() {
       final userLen = bd.getUint16(36, Endian.little);
       final userOff = bd.getUint32(40, Endian.little);
 
-      expect(_fromUcs2(type3.sublist(domOff, domOff + domLen)), equals('DOMAIN'));
-      expect(_fromUcs2(type3.sublist(userOff, userOff + userLen)), equals('user'));
+      expect(
+          _fromUcs2(type3.sublist(domOff, domOff + domLen)), equals('DOMAIN'));
+      expect(
+          _fromUcs2(type3.sublist(userOff, userOff + userLen)), equals('user'));
     });
 
     test('MIC present when TargetInfo has MsvAvTimestamp', () {
@@ -238,7 +253,8 @@ void main() {
 
       final zeroed = Uint8List.fromList(type3);
       zeroed.setRange(72, 88, Uint8List(16));
-      final expectedMic = _hmacMd5(sessionBase, [...type1, ...type2, ...zeroed]);
+      final expectedMic =
+          _hmacMd5(sessionBase, [...type1, ...type2, ...zeroed]);
       expect(mic, equals(expectedMic));
 
       // NtChallengeResponse blob must include MsvAvFlags with MIC bit
@@ -270,7 +286,8 @@ void main() {
       );
 
       final bd = ByteData.sublistView(type3);
-      expect(bd.getUint32(60, Endian.little) & NtlmAuth.negotiateKeyExch, isNot(0));
+      expect(bd.getUint32(60, Endian.little) & NtlmAuth.negotiateKeyExch,
+          isNot(0));
       final keyLen = bd.getUint16(52, Endian.little);
       final keyOff = bd.getUint32(56, Endian.little);
       expect(keyLen, equals(16));
@@ -311,6 +328,29 @@ void main() {
       );
     });
 
+    test('malformed TargetInfo AV_PAIR length is rejected', () {
+      final challenge = NtlmChallenge(
+        flags: NtlmAuth.negotiateUnicode | NtlmAuth.negotiateNtlm,
+        serverChallenge: _hex('0123456789abcdef'),
+        targetName: 'DOMAIN',
+        targetInfo: Uint8List.fromList([1, 0, 8, 0, 0xAA]),
+        rawMessage: Uint8List(0),
+      );
+
+      expect(
+        () => NtlmAuth(
+          domain: 'DOMAIN',
+          username: 'user',
+          password: 'SecREt01',
+        ).authenticateMessage(
+          challenge,
+          clientChallenge: _hex('aaaaaaaaaaaaaaaa'),
+          timestamp: _hex('0000000000000000'),
+        ),
+        throwsFormatException,
+      );
+    });
+
     test('MsvAvChannelBindings embedded in Type 3 blob', () {
       final cbind = _hex('00112233445566778899aabbccddeeff');
       final targetInfo = _hex(
@@ -345,7 +385,8 @@ void main() {
   });
 
   group('NtlmAuth channel binding token', () {
-    test('channelBindingTokenFromCertificate is 16 bytes and deterministic', () {
+    test('channelBindingTokenFromCertificate is 16 bytes and deterministic',
+        () {
       final der = _hex('3082010a020100300d06092a864886f70d0101050500');
       final a = NtlmAuth.channelBindingTokenFromCertificate(der);
       final b = NtlmAuth.channelBindingTokenFromCertificate(der);
@@ -358,7 +399,8 @@ void main() {
     });
 
     test('gss struct MD5 matches manual layout', () {
-      final app = Uint8List.fromList(utf8.encode('tls-server-end-point:deadbeef'));
+      final app =
+          Uint8List.fromList(utf8.encode('tls-server-end-point:deadbeef'));
       final token = NtlmAuth.channelBindingTokenFromApplicationData(app);
       final expected = BytesBuilder(copy: false)
         ..add(Uint8List(8))

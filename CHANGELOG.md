@@ -11,6 +11,9 @@
   result set counts. Protocol limit violations now throw
   `MssqlProtocolLimitException` and close the connection to avoid stream
   desynchronization and pool poisoning.
+* Security: harden malformed TDS and NTLM response parsing by validating packet
+  sizes, token body offsets, UTF-16LE byte lengths, `sql_variant` metadata
+  lengths, and NTLM TargetInfo AV_PAIR bounds before decoding.
 * LAN typed binders: `MssqlNVarchar` / `MssqlNChar` / `MssqlBinary` /
   `MssqlRowVersion` for sized `nvarchar(n)` / `nchar(n)` / `binary(n)` and
   `rowversion`/`timestamp` compare params (bare `String` stays

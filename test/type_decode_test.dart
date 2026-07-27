@@ -291,6 +291,16 @@ void main() {
       expect(v, equals('hi'));
     });
 
+    test('NVARCHAR with odd byte length is rejected', () async {
+      expect(
+        _decode(
+          typeInfoBytes: [typeNVarChar, 0x64, 0x00, ..._collation],
+          valueBytes: [1, 0, 0x61],
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
     test('NVARCHAR null marker', () async {
       final v = await _decode(
         typeInfoBytes: [typeNVarChar, 0x64, 0x00, ..._collation],
@@ -364,6 +374,41 @@ void main() {
         ],
       );
       expect(v, equals('abcd'));
+    });
+
+    test('NVARCHAR(MAX) PLP with odd UTF-16 length is rejected', () async {
+      expect(
+        _decode(
+          typeInfoBytes: [
+            typeNVarChar,
+            0xFF,
+            0xFF,
+            ..._collation,
+          ],
+          valueBytes: [
+            3,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            3,
+            0,
+            0,
+            0,
+            0x61,
+            0x00,
+            0x62,
+            0,
+            0,
+            0,
+            0,
+          ],
+        ),
+        throwsA(isA<FormatException>()),
+      );
     });
 
     test('VARBINARY(MAX) PLP null', () async {
@@ -526,6 +571,20 @@ void main() {
         valueBytes: [0, 0, 0, 0],
       );
       expect(v, isNull);
+    });
+
+    test('sql_variant shorter than declared metadata is rejected', () async {
+      expect(
+        _decode(
+          typeInfoBytes: [typeVariant, 0x09, 0x1F, 0x00, 0x00],
+          valueBytes: [
+            2, 0, 0, 0, // varLen: only base type + propCount
+            typeNVarChar,
+            7, // propCount requires 7 metadata bytes
+          ],
+        ),
+        throwsA(isA<FormatException>()),
+      );
     });
   });
 

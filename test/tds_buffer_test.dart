@@ -57,8 +57,26 @@ void main() {
       expect(
         received.toBytes(),
         equals([
-          2, 0, 0, 11, 0, 0, 1, 0, 3, 4, 5,
-          2, 1, 0, 9, 0, 0, 2, 0, 6,
+          2,
+          0,
+          0,
+          11,
+          0,
+          0,
+          1,
+          0,
+          3,
+          4,
+          5,
+          2,
+          1,
+          0,
+          9,
+          0,
+          0,
+          2,
+          0,
+          6,
         ]),
       );
     });
@@ -85,7 +103,8 @@ void main() {
       expect(buf.transactionDescriptor, 0);
     });
 
-    test('RESETCONNECTION only on first packet of multi-packet Batch', () async {
+    test('RESETCONNECTION only on first packet of multi-packet Batch',
+        () async {
       final pair = await TdsSocketPair.open();
       addTearDown(pair.close);
 
@@ -126,7 +145,8 @@ void main() {
       final bytes = received.toBytes();
       expect(bytes[0], packAttention);
       expect(bytes[1], statusEOM); // no 0x08
-      expect(buf.resetConnectionPending, isTrue); // still pending for next Batch
+      expect(
+          buf.resetConnectionPending, isTrue); // still pending for next Batch
     });
   });
 
@@ -155,6 +175,33 @@ void main() {
       expect(id, equals(1));
       expect(await buf.readUint8(), equals(2));
       await expectLater(buf.readUint8(), throwsA(isA<StateError>()));
+    });
+
+    test('BeginRead rejects packet size smaller than header', () async {
+      final pair = await TdsSocketPair.open();
+      addTearDown(pair.close);
+
+      await tdsSend(
+        pair.server,
+        Uint8List.fromList([packReply, statusEOM, 0, 4, 0, 0, 1, 0]),
+      );
+
+      final buf = TdsBuffer(pair.client, packetSize: 100);
+      await expectLater(buf.beginRead(), throwsA(isA<FormatException>()));
+    });
+
+    test('BeginRead rejects truncated packet body', () async {
+      final pair = await TdsSocketPair.open();
+      addTearDown(pair.close);
+
+      pair.server.add(
+        Uint8List.fromList([packReply, statusEOM, 0, 12, 0, 0, 1, 0, 0xAA]),
+      );
+      await pair.server.flush();
+      pair.server.destroy();
+
+      final buf = TdsBuffer(pair.client, packetSize: 100);
+      await expectLater(buf.beginRead(), throwsA(isA<StateError>()));
     });
   });
 

@@ -448,6 +448,36 @@ void main() {
       expect(result.serverVersion, equals('SQL Server'));
       expect(result.packetSize, equals(8192));
     });
+
+    test('malformed LOGINACK is rejected', () async {
+      final body = [
+        tokenLoginAck,
+        1, 0, // body length
+        0x00,
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      await expectLater(
+        TokenStream(fed.buf).processLoginResponse(),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('malformed FEDAUTHINFO option table is rejected', () async {
+      final body = [
+        tokenFedAuthInfo,
+        4, 0, 0, 0, // size only contains option count
+        1, 0, 0, 0, // count requires a 9-byte option entry
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      await expectLater(
+        TokenStream(fed.buf).processLoginResponse(),
+        throwsA(isA<FormatException>()),
+      );
+    });
   });
 
   group('TokenStream query response', () {
@@ -584,6 +614,38 @@ void main() {
       await expectLater(
         TokenStream(fed.buf).processQueryResponse(),
         throwsA(isA<MssqlProtocolLimitException>()),
+      );
+    });
+
+    test('malformed ENVCHANGE empty body is rejected', () async {
+      final body = [
+        tokenEnvChange,
+        0, 0, // empty token body has no ENVCHANGE type byte
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      await expectLater(
+        TokenStream(fed.buf).processQueryResponse(),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('malformed INFO body is rejected', () async {
+      final body = [
+        tokenInfo,
+        8, 0, // header says one UTF-16 char but omits message bytes
+        0, 0, 0, 0, // number
+        0, // state
+        0, // class
+        1, 0, // message length
+      ];
+      final fed = await _openWithBody(body);
+      addTearDown(fed.pair.close);
+
+      await expectLater(
+        TokenStream(fed.buf).processQueryResponse(),
+        throwsA(isA<FormatException>()),
       );
     });
 
