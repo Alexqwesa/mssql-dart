@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import '../typed_values.dart';
 import 'buf.dart';
 import 'constants.dart';
 
@@ -148,12 +149,11 @@ class TypeInfo {
         return ByteData.sublistView(Uint8List.fromList(bytes))
             .getFloat64(0, Endian.little);
       case typeMoney4:
-        final v = await buf.readInt32LE();
-        return v / 10000.0;
+        return MssqlSmallMoney.fromScaled(await buf.readInt32LE());
       case typeMoney:
         final hi = await buf.readInt32LE();
         final lo = await buf.readUint32LE();
-        return ((hi * 0x100000000) + lo) / 10000.0;
+        return MssqlMoney.fromScaled((hi * 0x100000000) + lo);
       case typeDateTime:
         final days = await buf.readInt32LE();
         final ticks = await buf.readUint32LE();
@@ -192,11 +192,11 @@ class TypeInfo {
         }
       case typeMoneyN:
         if (data.length == 4) {
-          return _toSigned32(data) / 10000.0;
+          return MssqlSmallMoney.fromScaled(_toSigned32(data));
         }
         final hi = _toSigned32(data);
         final lo = data[4] | (data[5] << 8) | (data[6] << 16) | (data[7] << 24);
-        return ((hi * 0x100000000) + lo) / 10000.0;
+        return MssqlMoney.fromScaled((hi * 0x100000000) + lo);
       case typeDateTimeN:
         if (data.length == 4) {
           // SmallDateTime: 2-byte days + 2-byte minutes since midnight
@@ -235,7 +235,12 @@ class TypeInfo {
             time.minute, time.second, time.millisecond, time.microsecond);
       case typeDecimalN:
       case typeNumericN:
-        return _decodeDecimal(data, scale);
+        return _decodeDecimal(
+          data,
+          scale: scale,
+          precision: precision,
+          asNumeric: typeId == typeNumericN,
+        );
     }
     return data;
   }
@@ -324,11 +329,11 @@ class TypeInfo {
         final d = Uint8List.fromList(await buf.readBytes(8));
         return ByteData.sublistView(d).getFloat64(0, Endian.little);
       case typeMoney4:
-        return (await buf.readInt32LE()) / 10000.0;
+        return MssqlSmallMoney.fromScaled(await buf.readInt32LE());
       case typeMoney:
         final hi = await buf.readInt32LE();
         final lo = await buf.readUint32LE();
-        return ((hi * 0x100000000) + lo) / 10000.0;
+        return MssqlMoney.fromScaled((hi * 0x100000000) + lo);
       case typeDateTime:
         final days = await buf.readInt32LE();
         final ticks = await buf.readUint32LE();
@@ -374,10 +379,15 @@ class TypeInfo {
       // ── 2 metadata bytes: precision + scale ──────────────────────────────────
       case typeDecimalN:
       case typeNumericN:
-        await buf.readUint8(); // precision — not needed for decoding
+        final prec = await buf.readUint8();
         final scale = await buf.readUint8();
         final d = Uint8List.fromList(await buf.readBytes(valueLen));
-        return _decodeDecimal(d, scale);
+        return _decodeDecimal(
+          d,
+          scale: scale,
+          precision: prec,
+          asNumeric: baseTypeId == typeNumericN,
+        );
       // ── 7 metadata bytes: 5-byte collation + 2-byte max-length ───────────────
       case typeBigVarChar:
       case typeBigChar:
@@ -454,25 +464,18 @@ class TypeInfo {
     return base;
   }
 
-  static double _decodeDecimal(Uint8List data, int scale) {
-    final positive = data[0] != 0;
-    // SQL Server sends up to 4 × uint32 LE parts (precision 1-9 uses 5 bytes,
-    // 10-19 → 9 bytes, 20-28 → 13 bytes, 29-38 → 17 bytes).
-    BigInt bigVal = BigInt.zero;
-    for (int part = 0; part * 4 + 1 < data.length; part++) {
-      final base = part * 4 + 1;
-      final chunk = data[base] |
-          (data[base + 1] << 8) |
-          (data[base + 2] << 16) |
-          (data[base + 3] << 24);
-      bigVal += BigInt.from(chunk & 0xFFFFFFFF) << (part * 32);
-    }
-    final divisor = BigInt.from(10).pow(scale);
-    final intPart = bigVal ~/ divisor;
-    final fracPart = bigVal % divisor;
-    final result =
-        intPart.toDouble() + fracPart.toDouble() / divisor.toDouble();
-    return positive ? result : -result;
+  static MssqlDecimal _decodeDecimal(
+    Uint8List data, {
+    required int scale,
+    int? precision,
+    bool asNumeric = false,
+  }) {
+    return MssqlDecimal.fromWire(
+      data,
+      scale: scale,
+      precision: precision,
+      asNumeric: asNumeric,
+    );
   }
 
   static String _formatGuid(Uint8List d) {

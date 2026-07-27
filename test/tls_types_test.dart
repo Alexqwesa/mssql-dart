@@ -144,24 +144,25 @@ void main() {
     setUpAll(() async => conn = await openConn());
     tearDownAll(() async => conn.close());
 
-    test('MONEY value is returned as double', () async {
+    test('MONEY value is returned as MssqlMoney', () async {
       final r = await conn.query("SELECT CAST(1234.56 AS money) AS v");
-      expect((r[0]['v'] as double), closeTo(1234.56, 0.01));
+      expect(r[0]['v'], isA<MssqlMoney>());
+      expect((r[0]['v'] as MssqlMoney).toDouble(), closeTo(1234.56, 0.01));
     });
 
-    test('SMALLMONEY value is returned as double', () async {
+    test('SMALLMONEY value is returned as MssqlSmallMoney', () async {
       final r = await conn.query("SELECT CAST(99.99 AS smallmoney) AS v");
-      expect((r[0]['v'] as double), closeTo(99.99, 0.01));
+      expect((r[0]['v'] as MssqlSmallMoney).toDouble(), closeTo(99.99, 0.01));
     });
 
     test('MONEY zero', () async {
       final r = await conn.query("SELECT CAST(0 AS money) AS v");
-      expect((r[0]['v'] as double), closeTo(0.0, 0.0001));
+      expect((r[0]['v'] as MssqlMoney).scaled, equals(0));
     });
 
     test('MONEY negative', () async {
       final r = await conn.query("SELECT CAST(-500.25 AS money) AS v");
-      expect((r[0]['v'] as double), closeTo(-500.25, 0.01));
+      expect((r[0]['v'] as MssqlMoney).toDouble(), closeTo(-500.25, 0.01));
     });
 
     test('NULL MONEY is returned as null', () async {

@@ -135,15 +135,15 @@ void main() {
     setUpAll(() async => conn = await openConn());
     tearDownAll(() async => conn.close());
 
-    test('NUMERIC(5,2) returns correct double', () async {
+    test('NUMERIC(5,2) returns MssqlDecimal', () async {
       final r = await conn.query("SELECT CAST(3.14 AS numeric(5,2)) AS v");
-      expect((r[0]['v'] as double), closeTo(3.14, 0.001));
+      expect((r[0]['v'] as MssqlDecimal).toString(), equals('3.14'));
     });
 
     test('NUMERIC(10,4) negative value', () async {
       final r =
           await conn.query("SELECT CAST(-1234.5678 AS numeric(10,4)) AS v");
-      expect((r[0]['v'] as double), closeTo(-1234.5678, 0.001));
+      expect((r[0]['v'] as MssqlDecimal).toString(), equals('-1234.5678'));
     });
 
     test('NULL NUMERIC is returned as null', () async {

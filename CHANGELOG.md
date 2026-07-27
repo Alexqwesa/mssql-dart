@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* LAN exact numeric reads: `decimal` / `numeric` → `MssqlDecimal`; `money` →
+  `MssqlMoney`; `smallmoney` → `MssqlSmallMoney` (exact `scaled` / `unscaled`,
+  not IEEE `double`). Use `.toDouble()` when an approximate value is enough.
+  **Breaking** for code that cast those columns to `double`.
 * LAN pool observability: `MssqlPool.stats` / `size` / `available` /
   `borrowed` / `pending` (node-mssql / tarn style) plus lifetime counters
   (`created`, `destroyed`, `acquired`, `released`, `acquireTimeouts`,

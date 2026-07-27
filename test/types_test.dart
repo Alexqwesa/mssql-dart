@@ -85,30 +85,40 @@ void main() {
     test('DECIMAL(9,2) positive', () async {
       final r =
           await conn.query("SELECT CAST('1234567.89' AS decimal(9,2)) AS v");
-      expect((r[0]['v'] as double), closeTo(1234567.89, 0.001));
+      final d = r[0]['v'] as MssqlDecimal;
+      expect(d.toString(), equals('1234567.89'));
+      expect(d.toDouble(), closeTo(1234567.89, 0.001));
     });
 
     test('DECIMAL(9,2) negative', () async {
       final r =
           await conn.query("SELECT CAST('-1234567.89' AS decimal(9,2)) AS v");
-      expect((r[0]['v'] as double), closeTo(-1234567.89, 0.001));
+      expect((r[0]['v'] as MssqlDecimal).toString(), equals('-1234567.89'));
     });
 
     test('DECIMAL(18,4) large', () async {
       final r = await conn
           .query("SELECT CAST('99999999999999.9999' AS decimal(18,4)) AS v");
-      expect((r[0]['v'] as double), closeTo(99999999999999.9999, 0.01));
+      expect(
+        (r[0]['v'] as MssqlDecimal).toString(),
+        equals('99999999999999.9999'),
+      );
     });
 
     test('DECIMAL(38,10) very large', () async {
       final r = await conn
           .query("SELECT CAST('1234567890.1234567890' AS decimal(38,10)) AS v");
-      expect((r[0]['v'] as double), closeTo(1234567890.123456789, 0.001));
+      expect(
+        (r[0]['v'] as MssqlDecimal).toString(),
+        equals('1234567890.1234567890'),
+      );
     });
 
     test('NUMERIC(5,2)', () async {
       final r = await conn.query("SELECT CAST('999.99' AS numeric(5,2)) AS v");
-      expect((r[0]['v'] as double), closeTo(999.99, 0.001));
+      final d = r[0]['v'] as MssqlDecimal;
+      expect(d.asNumeric, isTrue);
+      expect(d.toString(), equals('999.99'));
     });
   });
 
@@ -218,23 +228,23 @@ void main() {
   group('money', () {
     test('MONEY positive', () async {
       final r = await conn.query("SELECT CAST(1234567.89 AS money) AS v");
-      expect((r[0]['v'] as double), closeTo(1234567.89, 0.01));
+      expect((r[0]['v'] as MssqlMoney).scaled, equals(12345678900));
     });
 
     test('MONEY negative', () async {
       final r = await conn.query("SELECT CAST(-1.0000 AS money) AS v");
-      expect((r[0]['v'] as double), closeTo(-1.0, 0.0001));
+      expect((r[0]['v'] as MssqlMoney).scaled, equals(-10000));
     });
 
     test('SMALLMONEY positive', () async {
       final r = await conn.query("SELECT CAST(9999.99 AS smallmoney) AS v");
-      expect((r[0]['v'] as double), closeTo(9999.99, 0.001));
+      expect((r[0]['v'] as MssqlSmallMoney).scaled, equals(99999900));
     });
 
     test('SMALLMONEY negative', () async {
       final r =
           await conn.query("SELECT CAST(-214748.3647 AS smallmoney) AS v");
-      expect((r[0]['v'] as double), closeTo(-214748.3647, 0.001));
+      expect((r[0]['v'] as MssqlSmallMoney).scaled, equals(-2147483647));
     });
 
     test('NULL money', () async {
@@ -600,7 +610,7 @@ void main() {
     test('decimal inside sql_variant', () async {
       final r = await conn.query(
           "SELECT CAST(CAST(-0.5 AS decimal(18,1)) AS sql_variant) AS v");
-      expect((r[0]['v'] as double), closeTo(-0.5, 0.001));
+      expect((r[0]['v'] as MssqlDecimal).toString(), equals('-0.5'));
     });
   });
 }

@@ -1,5 +1,6 @@
 import 'dart:typed_data';
 
+import 'package:mssql/mssql.dart';
 import 'package:mssql/src/tds/buf.dart';
 import 'package:mssql/src/tds/constants.dart';
 import 'package:mssql/src/tds/type_info.dart';
@@ -113,7 +114,7 @@ void main() {
           (raw >> 24) & 0xFF,
         ],
       );
-      expect(v as double, closeTo(123.45, 0.0001));
+      expect((v as MssqlSmallMoney).toDouble(), closeTo(123.45, 0.0001));
     });
 
     test('DATE', () async {
@@ -185,7 +186,7 @@ void main() {
           (scaled >> 24) & 0xFF,
         ],
       );
-      expect(v as double, closeTo(123.45, 0.001));
+      expect((v as MssqlDecimal).toDouble(), closeTo(123.45, 0.001));
     });
 
     test('NUMERIC negative', () async {
@@ -201,7 +202,7 @@ void main() {
           (scaled >> 24) & 0xFF,
         ],
       );
-      expect(v as double, closeTo(-5.0, 0.001));
+      expect((v as MssqlDecimal).toDouble(), closeTo(-5.0, 0.001));
     });
 
     test('DATETIME2 scale 3', () async {

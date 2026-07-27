@@ -64,12 +64,12 @@ void main() {
     final r = await conn.query(
       'SELECT @m AS m, @s AS s',
       {
-        'm': const MssqlMoney(1234.56),
-        's': const MssqlSmallMoney(-99.99),
+        'm': MssqlMoney(1234.56),
+        's': MssqlSmallMoney(-99.99),
       },
     );
-    expect(r[0]['m'] as double, closeTo(1234.56, 0.001));
-    expect(r[0]['s'] as double, closeTo(-99.99, 0.001));
+    expect((r[0]['m'] as MssqlMoney).toDouble(), closeTo(1234.56, 0.001));
+    expect((r[0]['s'] as MssqlSmallMoney).toDouble(), closeTo(-99.99, 0.001));
   });
 
   test('MssqlDateTimeOffset UTC round-trip', () async {
@@ -128,8 +128,8 @@ void main() {
         ),
       },
     );
-    expect(r[0]['d'] as double, closeTo(1234.56, 0.001));
-    expect(r[0]['n'] as double, closeTo(-99.99, 0.0001));
+    expect((r[0]['d'] as MssqlDecimal).toDouble(), closeTo(1234.56, 0.001));
+    expect((r[0]['n'] as MssqlDecimal).toDouble(), closeTo(-99.99, 0.0001));
   });
 
   test('MssqlVarchar / MssqlDate / MssqlTime round-trip', () async {

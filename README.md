@@ -513,8 +513,8 @@ Named parameters use `@name` placeholders. Supported Dart → SQL type mappings:
 |--------------|------------------------------------------------------------------------------|
 | Integer      | TINYINT, SMALLINT, INT, BIGINT, BIT                                          |
 | Float        | REAL (→ `double`), FLOAT (→ `double`)                                        |
-| Decimal      | DECIMAL, NUMERIC (→ `double`)                                                |
-| Money        | MONEY, SMALLMONEY (→ `double`)                                               |
+| Decimal      | DECIMAL, NUMERIC (→ `MssqlDecimal`)                                          |
+| Money        | MONEY (→ `MssqlMoney`), SMALLMONEY (→ `MssqlSmallMoney`)                     |
 | String       | VARCHAR, NVARCHAR, CHAR, NCHAR, TEXT, NTEXT, VARCHAR(MAX), NVARCHAR(MAX)     |
 | Binary       | VARBINARY, BINARY, IMAGE, VARBINARY(MAX) (→ `List<int>`)                    |
 | Date/Time    | DATE, DATETIME, DATETIME2, SMALLDATETIME, TIME, DATETIMEOFFSET (→ `DateTime`) |

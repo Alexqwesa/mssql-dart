@@ -43,28 +43,54 @@ class MssqlGuid {
   String toString() => value;
 }
 
-/// SQL `money` parameter (8-byte, 4 decimal places).
+/// SQL `money` value / parameter (8-byte, 4 decimal places).
 ///
 /// Prefer this over bare [double] when the column / SP param is `money`.
+/// Reads decode to [MssqlMoney] with an exact [scaled] integer (not `double`).
 class MssqlMoney {
-  final double value;
+  /// Integer cents×100 (`value * 10000`).
+  final int scaled;
 
-  const MssqlMoney(this.value);
+  MssqlMoney(num value) : scaled = (value.toDouble() * 10000).round();
 
-  /// Scaled integer (`value * 10000`, rounded).
-  int get scaled => (value * 10000).round();
+  /// Builds from the TDS scaled integer (no floating rounding).
+  const MssqlMoney.fromScaled(this.scaled);
+
+  /// Approximate decimal value (`scaled / 10000`). Prefer [scaled] for exact math.
+  double get value => scaled / 10000.0;
+
+  double toDouble() => value;
+
+  @override
+  bool operator ==(Object other) =>
+      other is MssqlMoney && other.scaled == scaled;
+
+  @override
+  int get hashCode => scaled.hashCode;
 
   @override
   String toString() => value.toString();
 }
 
-/// SQL `smallmoney` parameter (4-byte, 4 decimal places).
+/// SQL `smallmoney` value / parameter (4-byte, 4 decimal places).
 class MssqlSmallMoney {
-  final double value;
+  /// Integer cents×100 (`value * 10000`).
+  final int scaled;
 
-  const MssqlSmallMoney(this.value);
+  MssqlSmallMoney(num value) : scaled = (value.toDouble() * 10000).round();
 
-  int get scaled => (value * 10000).round();
+  const MssqlSmallMoney.fromScaled(this.scaled);
+
+  double get value => scaled / 10000.0;
+
+  double toDouble() => value;
+
+  @override
+  bool operator ==(Object other) =>
+      other is MssqlSmallMoney && other.scaled == scaled;
+
+  @override
+  int get hashCode => scaled.hashCode;
 
   @override
   String toString() => value.toString();
@@ -95,10 +121,11 @@ class MssqlDateTimeOffset {
   String toString() => value.toIso8601String();
 }
 
-/// SQL `decimal(p,s)` / `numeric(p,s)` parameter binder.
+/// SQL `decimal(p,s)` / `numeric(p,s)` value / parameter binder.
 ///
 /// Prefer this over [double] when the column requires exact scale (prices,
-/// quantities). Decode still returns [double] today.
+/// quantities). Column reads decode to [MssqlDecimal] (not [double]); use
+/// [toDouble] only when an approximate IEEE value is acceptable.
 ///
 /// ```dart
 /// await conn.query('SELECT @d', {
@@ -138,6 +165,39 @@ class MssqlDecimal {
         'Value $unscaled exceeds decimal($precision,$scale) precision',
       );
     }
+  }
+
+  /// Decodes TDS DECIMALN/NUMERICN value bytes (sign + LE limbs).
+  factory MssqlDecimal.fromWire(
+    List<int> data, {
+    required int scale,
+    int? precision,
+    bool asNumeric = false,
+  }) {
+    if (data.isEmpty) {
+      throw ArgumentError('decimal wire bytes empty');
+    }
+    final positive = data[0] != 0;
+    BigInt bigVal = BigInt.zero;
+    for (var part = 0; part * 4 + 1 < data.length; part++) {
+      final base = part * 4 + 1;
+      final chunk = data[base] |
+          (data[base + 1] << 8) |
+          (data[base + 2] << 16) |
+          (data[base + 3] << 24);
+      bigVal += BigInt.from(chunk & 0xFFFFFFFF) << (part * 32);
+    }
+    if (!positive && bigVal != BigInt.zero) bigVal = -bigVal;
+    final digits = bigVal == BigInt.zero ? 1 : bigVal.abs().toString().length;
+    final p = (precision != null && precision >= scale && precision >= digits)
+        ? precision
+        : (digits > scale ? digits : scale).clamp(1, 38);
+    return MssqlDecimal._(
+      unscaled: bigVal,
+      precision: p,
+      scale: scale,
+      asNumeric: asNumeric,
+    );
   }
 
   /// Builds from a [num], fixing [scale] with half-up rounding via string form.
@@ -234,6 +294,28 @@ class MssqlDecimal {
 
   String get sqlDecl =>
       '${asNumeric ? 'numeric' : 'decimal'}($precision,$scale)';
+
+  /// Approximate IEEE value — may lose precision for large [precision].
+  double toDouble() {
+    final sign = unscaled < BigInt.zero ? -1.0 : 1.0;
+    final abs = unscaled.abs();
+    final divisor = BigInt.from(10).pow(scale);
+    final intPart = abs ~/ divisor;
+    final fracPart = abs.remainder(divisor);
+    return sign *
+        (intPart.toDouble() + fracPart.toDouble() / divisor.toDouble());
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is MssqlDecimal &&
+      other.unscaled == unscaled &&
+      other.precision == precision &&
+      other.scale == scale &&
+      other.asNumeric == asNumeric;
+
+  @override
+  int get hashCode => Object.hash(unscaled, precision, scale, asNumeric);
 
   @override
   String toString() {

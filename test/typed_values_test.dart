@@ -99,8 +99,8 @@ void main() {
           buf,
           'SELECT @m, @s',
           {
-            'm': const MssqlMoney(12.34),
-            's': const MssqlSmallMoney(1.5),
+            'm': MssqlMoney(12.34),
+            's': MssqlSmallMoney(1.5),
           },
         ),
       );
@@ -241,6 +241,18 @@ void main() {
       expect(w.length, equals(5));
       expect(w[0], equals(1)); // positive
       expect(w[1] | (w[2] << 8) | (w[3] << 16) | (w[4] << 24), equals(12345));
+    });
+
+    test('fromWire round-trips exact unscaled', () {
+      final d = MssqlDecimal.parse('-5.00', precision: 5, scale: 2);
+      final again = MssqlDecimal.fromWire(
+        d.toWireBytes(),
+        precision: 5,
+        scale: 2,
+      );
+      expect(again.unscaled, equals(BigInt.from(-500)));
+      expect(again.toString(), equals('-5.00'));
+      expect(again.toDouble(), closeTo(-5.0, 1e-9));
     });
 
     test('negative numeric wire sign byte 0', () {

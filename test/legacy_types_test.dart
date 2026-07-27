@@ -252,17 +252,17 @@ void main() {
   group('decimal edge cases', () {
     test('DECIMAL(1,0) — smallest', () async {
       final r = await conn.query('SELECT CAST(0 AS decimal(1,0)) AS v');
-      expect((r[0]['v'] as double), closeTo(0.0, 0.0001));
+      expect((r[0]['v'] as MssqlDecimal).toString(), equals('0'));
     });
 
     test('DECIMAL scale-only zero', () async {
       final r = await conn.query("SELECT CAST('0.00' AS decimal(9,2)) AS v");
-      expect((r[0]['v'] as double), closeTo(0.0, 0.0001));
+      expect((r[0]['v'] as MssqlDecimal).toString(), equals('0.00'));
     });
 
     test('DECIMAL negative zero-point-five', () async {
       final r = await conn.query("SELECT CAST('-0.5' AS decimal(3,1)) AS v");
-      expect((r[0]['v'] as double), closeTo(-0.5, 0.001));
+      expect((r[0]['v'] as MssqlDecimal).toString(), equals('-0.5'));
     });
   });
 
