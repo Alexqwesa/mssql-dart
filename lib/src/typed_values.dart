@@ -663,3 +663,179 @@ class MssqlVarbinary {
   @override
   String toString() => 'MssqlVarbinary(${value.length} bytes)';
 }
+
+/// SQL `nvarchar(n)` / `nvarchar(max)` parameter binder.
+///
+/// Bare [String] is sent as `nvarchar(4000)` or `nvarchar(max)`. Use this when
+/// the column is `nvarchar(n)` so MaxLength matches the schema (LAN plan
+/// quality / avoid implicit conversions).
+class MssqlNVarchar {
+  final String value;
+
+  /// Force `nvarchar(max)` / PLP (also used when length > 4000 chars).
+  final bool max;
+
+  /// Declared character length when not [max] (1–4000).
+  /// Defaults to `max(value.length, 1)`.
+  final int? length;
+
+  const MssqlNVarchar(this.value, {this.max = false, this.length});
+
+  bool get useMax {
+    if (max) return true;
+    if (length != null && length! > 4000) return true;
+    return value.length > 4000;
+  }
+
+  /// Character MaxLength for non-max payloads (1–4000).
+  int get wireCharLength {
+    if (useMax) {
+      throw StateError('wireCharLength is only valid for non-max nvarchar');
+    }
+    final n = length ?? (value.isEmpty ? 1 : value.length);
+    if (n < 1 || n > 4000) {
+      throw ArgumentError.value(n, 'length', 'must be 1–4000 (or use max: true)');
+    }
+    if (value.length > n) {
+      throw ArgumentError(
+        'Value length ${value.length} exceeds nvarchar($n)',
+      );
+    }
+    return n;
+  }
+
+  String get sqlDecl {
+    if (useMax) return 'nvarchar(max)';
+    return 'nvarchar($wireCharLength)';
+  }
+
+  @override
+  String toString() => value;
+}
+
+/// SQL `nchar(n)` parameter — fixed-width UCS-2, space-padded on write.
+class MssqlNChar {
+  final String value;
+
+  /// Declared / pad length in characters (1–4000).
+  final int length;
+
+  MssqlNChar(this.value, {required this.length}) {
+    if (length < 1 || length > 4000) {
+      throw ArgumentError.value(length, 'length', 'must be 1–4000');
+    }
+    if (value.length > length) {
+      throw ArgumentError(
+        'Value length ${value.length} exceeds nchar($length)',
+      );
+    }
+  }
+
+  /// Space-padded to [length] characters.
+  String get padded {
+    if (value.length >= length) return value;
+    return value.padRight(length, ' ');
+  }
+
+  String get sqlDecl => 'nchar($length)';
+
+  @override
+  String toString() => padded;
+}
+
+/// SQL `binary(n)` parameter — fixed-width, zero-padded on write.
+///
+/// Prefer [MssqlVarbinary] for `varbinary(n)`. Use this for `binary(n)` columns
+/// (typeBigBinary).
+class MssqlBinary {
+  final List<int> value;
+
+  /// Declared / pad length in bytes (1–8000).
+  final int length;
+
+  MssqlBinary(this.value, {required this.length}) {
+    if (length < 1 || length > 8000) {
+      throw ArgumentError.value(length, 'length', 'must be 1–8000');
+    }
+    if (value.length > length) {
+      throw ArgumentError(
+        'Value length ${value.length} exceeds binary($length)',
+      );
+    }
+  }
+
+  /// Zero-padded to [length] bytes.
+  Uint8List get padded {
+    final out = Uint8List(length);
+    final n = value.length < length ? value.length : length;
+    out.setRange(0, n, value);
+    return out;
+  }
+
+  String get sqlDecl => 'binary($length)';
+
+  @override
+  String toString() => 'MssqlBinary($length bytes)';
+}
+
+/// SQL `rowversion` / `timestamp` value helper (always 8 bytes).
+///
+/// Columns of this type are server-generated; use the binder for `WHERE`
+/// / OUTPUT comparisons (`binary(8)` on the wire).
+class MssqlRowVersion {
+  /// Exactly 8 bytes (SQL Server rowversion).
+  final Uint8List bytes;
+
+  MssqlRowVersion(List<int> value) : bytes = Uint8List.fromList(value) {
+    if (bytes.length != 8) {
+      throw ArgumentError.value(
+        value.length,
+        'value.length',
+        'rowversion must be exactly 8 bytes',
+      );
+    }
+  }
+
+  /// Parses a 16-digit hex string (optional `0x` prefix).
+  factory MssqlRowVersion.parse(String hex) {
+    var h = hex.trim();
+    if (h.startsWith('0x') || h.startsWith('0X')) h = h.substring(2);
+    h = h.replaceAll(RegExp(r'[\s\-]'), '');
+    if (h.length != 16) {
+      throw ArgumentError.value(hex, 'hex', 'need 16 hex digits');
+    }
+    final out = Uint8List(8);
+    for (var i = 0; i < 8; i++) {
+      out[i] = int.parse(h.substring(i * 2, i * 2 + 2), radix: 16);
+    }
+    return MssqlRowVersion(out);
+  }
+
+  String get sqlDecl => 'binary(8)';
+
+  String toHex() {
+    final b = StringBuffer('0x');
+    for (final x in bytes) {
+      b.write(x.toRadixString(16).padLeft(2, '0'));
+    }
+    return b.toString();
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is MssqlRowVersion && _bytesEq(other.bytes, bytes);
+
+  @override
+  int get hashCode => Object.hashAll(bytes);
+
+  @override
+  String toString() => toHex();
+
+  static bool _bytesEq(List<int> a, List<int> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+}

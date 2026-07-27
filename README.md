@@ -177,7 +177,7 @@ await conn.transaction((c) async {
 ### Typed GUID / money / datetimeoffset / decimal / varchar / date / time / datetime / xml / varbinary
 
 ```dart
-await conn.query('SELECT @g, @m, @d, @dec, @v, @day, @tod, @dt, @sd, @x, @b', {
+await conn.query('SELECT @g, @m, @d, @dec, @v, @day, @tod, @dt, @sd, @x, @b, @n, @c, @bin, @rv', {
   'g': MssqlGuid('6F9619FF-8B86-D011-B42D-00C04FC964FF'),
   'm': MssqlMoney(1234.56),
   'd': MssqlDateTimeOffset(
@@ -196,6 +196,11 @@ await conn.query('SELECT @g, @m, @d, @dec, @v, @day, @tod, @dt, @sd, @x, @b', {
   'x': MssqlXml('<root/>'),
   // Bare List<int> → varbinary(max); use MssqlVarbinary for varbinary(n)
   'b': MssqlVarbinary([0xDE, 0xAD], length: 16),
+  // Sized Unicode / fixed binary / rowversion compare
+  'n': MssqlNVarchar('lan', length: 32),
+  'c': MssqlNChar('ab', length: 4),
+  'bin': MssqlBinary([1, 2], length: 4),
+  'rv': MssqlRowVersion.parse('0x00000000000000FF'),
 });
 ```
 
@@ -501,6 +506,8 @@ Named parameters use `@name` placeholders. Supported Dart → SQL type mappings:
 | `MssqlDateTime` / `MssqlSmallDateTime` | datetime / smalldatetime |
 | `MssqlXml`     | xml (bare `String` → nvarchar) |
 | `MssqlVarbinary` | varbinary(n) / varbinary(max) (bare `List<int>` → max) |
+| `MssqlNVarchar` / `MssqlNChar` | nvarchar(n\|max) / nchar(n) |
+| `MssqlBinary` / `MssqlRowVersion` | binary(n) / rowversion compare (`binary(8)`) |
 | `MssqlTvp`   | user-defined table type (`… READONLY`) |
 | `MssqlOutput`| OUTPUT / INPUT-OUTPUT (with [call]) |
 | `null`       | NULL (any type)             |

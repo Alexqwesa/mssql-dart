@@ -127,6 +127,10 @@ class RpcRequest {
     if (v is MssqlSmallDateTime) return 'smalldatetime';
     if (v is MssqlXml) return v.sqlDecl;
     if (v is MssqlVarbinary) return v.sqlDecl;
+    if (v is MssqlNVarchar) return v.sqlDecl;
+    if (v is MssqlNChar) return v.sqlDecl;
+    if (v is MssqlBinary) return v.sqlDecl;
+    if (v is MssqlRowVersion) return v.sqlDecl;
     if (v is int) return 'bigint';
     if (v is double) return 'float';
     if (v is bool) return 'bit';
@@ -204,6 +208,14 @@ class RpcRequest {
         _writeXmlParam(buf, v);
       case MssqlVarbinary v:
         _writeVarBinaryParam(buf, v);
+      case MssqlNVarchar v:
+        _writeNVarCharSizedParam(buf, v);
+      case MssqlNChar v:
+        _writeNCharParam(buf, v);
+      case MssqlBinary v:
+        _writeFixedBinaryParam(buf, v.padded);
+      case MssqlRowVersion v:
+        _writeFixedBinaryParam(buf, v.bytes);
       case int v:
         buf.writeByte(typeIntN);
         buf.writeByte(8); // max len
@@ -239,8 +251,23 @@ class RpcRequest {
   static void _writeNullParam(TdsBuffer buf, String? sqlType) {
     final t = (sqlType ?? 'int').trim().toLowerCase();
     if (t.startsWith('nvarchar') || t.startsWith('nchar')) {
+      final nchar = RegExp(r'^nchar\s*\(\s*(\d+)\s*\)$').firstMatch(t);
+      if (nchar != null) {
+        final n = int.parse(nchar.group(1)!).clamp(1, 4000);
+        buf.writeByte(typeNChar);
+        buf.writeUint16LE(n * 2);
+        _writeCollation(buf);
+        buf.writeUint16LE(0xFFFF);
+        return;
+      }
+      final sized = RegExp(r'^nvarchar\s*\(\s*(\d+)\s*\)$').firstMatch(t);
       buf.writeByte(typeNVarChar);
-      buf.writeUint16LE(2);
+      if (sized != null) {
+        final n = int.parse(sized.group(1)!).clamp(1, 4000);
+        buf.writeUint16LE(n * 2);
+      } else {
+        buf.writeUint16LE(2);
+      }
       _writeCollation(buf);
       buf.writeUint16LE(0xFFFF);
       return;
@@ -264,7 +291,21 @@ class RpcRequest {
       buf.writeByte(0);
       return;
     }
-    if (t.startsWith('varbinary') || t == 'image' || t == 'binary') {
+    if (t.startsWith('varbinary') ||
+        t.startsWith('binary') ||
+        t == 'image' ||
+        t == 'timestamp' ||
+        t == 'rowversion') {
+      final fixed = RegExp(r'^binary\s*\(\s*(\d+)\s*\)$').firstMatch(t);
+      if (fixed != null || t == 'timestamp' || t == 'rowversion') {
+        final n = fixed != null
+            ? int.parse(fixed.group(1)!).clamp(1, 8000)
+            : 8;
+        buf.writeByte(typeBigBinary);
+        buf.writeUint16LE(n);
+        buf.writeUint16LE(0xFFFF); // null
+        return;
+      }
       buf.writeByte(typeBigVarBin);
       final sized = RegExp(r'^varbinary\s*\(\s*(\d+)\s*\)$').firstMatch(t);
       if (sized != null) {
@@ -598,6 +639,44 @@ class RpcRequest {
     }
     final maxLen = v.wireMaxLength;
     buf.writeUint16LE(maxLen);
+    buf.writeUint16LE(data.length);
+    buf.writeBytes(data);
+  }
+
+  /// `nvarchar(n)` USHORTLEN or `nvarchar(max)` PLP.
+  static void _writeNVarCharSizedParam(TdsBuffer buf, MssqlNVarchar v) {
+    final valueBytes = _ucs2(v.value);
+    buf.writeByte(typeNVarChar);
+    if (v.useMax) {
+      buf.writeUint16LE(0xFFFF);
+      _writeCollation(buf);
+      buf.writeUint64LE(valueBytes.length);
+      buf.writeUint32LE(valueBytes.length);
+      buf.writeBytes(valueBytes);
+      buf.writeUint32LE(plpTerminator);
+      return;
+    }
+    final chars = v.wireCharLength;
+    buf.writeUint16LE(chars * 2);
+    _writeCollation(buf);
+    buf.writeUint16LE(valueBytes.length);
+    buf.writeBytes(valueBytes);
+  }
+
+  /// `nchar(n)` — fixed MaxLen, space-padded UCS-2.
+  static void _writeNCharParam(TdsBuffer buf, MssqlNChar v) {
+    final valueBytes = _ucs2(v.padded);
+    buf.writeByte(typeNChar);
+    buf.writeUint16LE(v.length * 2);
+    _writeCollation(buf);
+    buf.writeUint16LE(valueBytes.length);
+    buf.writeBytes(valueBytes);
+  }
+
+  /// `binary(n)` / rowversion — typeBigBinary, fixed MaxLen, zero-padded.
+  static void _writeFixedBinaryParam(TdsBuffer buf, Uint8List data) {
+    buf.writeByte(typeBigBinary);
+    buf.writeUint16LE(data.length);
     buf.writeUint16LE(data.length);
     buf.writeBytes(data);
   }

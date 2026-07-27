@@ -361,4 +361,79 @@ void main() {
       );
     });
   });
+
+  group('MssqlNVarchar / MssqlNChar / MssqlBinary / MssqlRowVersion', () {
+    test('nvarchar sized decl + MaxLen chars*2 on wire', () async {
+      final pkt = await _capture(
+        (buf) => RpcRequest.sendExecuteSql(
+          buf,
+          'SELECT @n',
+          {'n': const MssqlNVarchar('hi', length: 16)},
+        ),
+      );
+      final body = _body(pkt);
+      expect(_containsUcs2(body, '@n nvarchar(16)'), isTrue);
+      var found = false;
+      for (var i = 0; i < body.length - 3; i++) {
+        if (body[i] == typeNVarChar &&
+            body[i + 1] == 32 &&
+            body[i + 2] == 0) {
+          found = true;
+          break;
+        }
+      }
+      expect(found, isTrue);
+    });
+
+    test('nchar pads and uses typeNChar', () async {
+      final pkt = await _capture(
+        (buf) => RpcRequest.sendExecuteSql(
+          buf,
+          'SELECT @c',
+          {'c': MssqlNChar('ab', length: 4)},
+        ),
+      );
+      final body = _body(pkt);
+      expect(_containsUcs2(body, '@c nchar(4)'), isTrue);
+      expect(body.contains(typeNChar), isTrue);
+      expect(_containsUcs2(body, 'ab  '), isTrue);
+    });
+
+    test('binary pads with zeros via typeBigBinary', () async {
+      final pkt = await _capture(
+        (buf) => RpcRequest.sendExecuteSql(
+          buf,
+          'SELECT @b',
+          {
+            'b': MssqlBinary([0xAA, 0xBB], length: 4),
+          },
+        ),
+      );
+      final body = _body(pkt);
+      expect(_containsUcs2(body, '@b binary(4)'), isTrue);
+      var found = false;
+      for (var i = 0; i < body.length - 6; i++) {
+        if (body[i] == typeBigBinary &&
+            body[i + 1] == 4 &&
+            body[i + 2] == 0 &&
+            body[i + 3] == 4 &&
+            body[i + 4] == 0 &&
+            body[i + 5] == 0xAA &&
+            body[i + 6] == 0xBB &&
+            body[i + 7] == 0 &&
+            body[i + 8] == 0) {
+          found = true;
+          break;
+        }
+      }
+      expect(found, isTrue);
+    });
+
+    test('rowversion requires 8 bytes and parses hex', () {
+      expect(() => MssqlRowVersion([1, 2, 3]), throwsArgumentError);
+      final rv = MssqlRowVersion.parse('0x00000000000000FF');
+      expect(rv.bytes.last, equals(0xFF));
+      expect(rv.sqlDecl, equals('binary(8)'));
+    });
+  });
 }

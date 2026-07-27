@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* LAN typed binders: `MssqlNVarchar` / `MssqlNChar` / `MssqlBinary` /
+  `MssqlRowVersion` for sized `nvarchar(n)` / `nchar(n)` / `binary(n)` and
+  `rowversion`/`timestamp` compare params (bare `String` stays
+  `nvarchar(4000|max)`).
 * LAN exact numeric reads: `decimal` / `numeric` → `MssqlDecimal`; `money` →
   `MssqlMoney`; `smallmoney` → `MssqlSmallMoney` (exact `scaled` / `unscaled`,
   not IEEE `double`). Use `.toDouble()` when an approximate value is enough.

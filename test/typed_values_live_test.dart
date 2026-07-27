@@ -2,7 +2,7 @@ import 'package:mssql/mssql.dart';
 import 'package:test/test.dart';
 
 /// Live round-trips for typed SQL binders (GUID / money / DTO / decimal /
-/// varchar / date / time / datetime / xml / varbinary).
+/// varchar / date / time / datetime / xml / varbinary / nvarchar / binary).
 ///
 /// Skips when 127.0.0.1:14330 is unreachable.
 
@@ -266,5 +266,52 @@ void main() {
     );
     final r = await conn.query('SELECT blob FROM #bt');
     expect(r[0]['blob'], equals([1, 2, 3, 4]));
+  });
+
+  test('MssqlNVarchar / MssqlNChar / MssqlBinary round-trip', () async {
+    if (!available) {
+      markTestSkipped('SQL Server not available on :$_port');
+      return;
+    }
+    final r = await conn.query(
+      'SELECT @n AS n, @c AS c, @b AS b, '
+      "SQL_VARIANT_PROPERTY(CAST(@n AS sql_variant), 'MaxLength') AS nl, "
+      "SQL_VARIANT_PROPERTY(CAST(@b AS sql_variant), 'BaseType') AS bb",
+      {
+        'n': const MssqlNVarchar('lan', length: 16),
+        'c': MssqlNChar('xy', length: 4),
+        'b': MssqlBinary([0x01, 0x02], length: 4),
+      },
+    );
+    expect(r[0]['n'], equals('lan'));
+    expect(r[0]['nl'], equals(32)); // nvarchar MaxLength is bytes (16 chars × 2)
+    expect((r[0]['c'] as String).startsWith('xy'), isTrue);
+    expect(r[0]['b'], equals([0x01, 0x02, 0x00, 0x00]));
+    expect((r[0]['bb'] as String).toLowerCase(), equals('binary'));
+  });
+
+  test('MssqlRowVersion WHERE against rowversion column', () async {
+    if (!available) {
+      markTestSkipped('SQL Server not available on :$_port');
+      return;
+    }
+    await conn.execute(
+      'IF OBJECT_ID(\'tempdb..#rv\') IS NOT NULL DROP TABLE #rv;'
+      'CREATE TABLE #rv (id int NOT NULL, ver rowversion);'
+      'INSERT INTO #rv (id) VALUES (1);',
+    );
+    final cur = await conn.query('SELECT ver FROM #rv WHERE id = 1');
+    final bytes = List<int>.from(cur[0]['ver'] as List<int>);
+    final rv = MssqlRowVersion(bytes);
+    final hit = await conn.query(
+      'SELECT id FROM #rv WHERE ver = @v',
+      {'v': rv},
+    );
+    expect(hit[0]['id'], equals(1));
+    final miss = await conn.query(
+      'SELECT id FROM #rv WHERE ver = @v',
+      {'v': MssqlRowVersion.parse('0x0000000000000000')},
+    );
+    expect(miss.isEmpty, isTrue);
   });
 }
