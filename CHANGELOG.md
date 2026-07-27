@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Security: harden `bulkInsert` identifier handling by bracket-quoting
+  multipart table names, re-quoting existing bracketed identifiers, escaping
+  closing brackets, and rejecting empty, control-character, or overlong
+  identifier parts.
 * LAN typed binders: `MssqlNVarchar` / `MssqlNChar` / `MssqlBinary` /
   `MssqlRowVersion` for sized `nvarchar(n)` / `nchar(n)` / `binary(n)` and
   `rowversion`/`timestamp` compare params (bare `String` stays

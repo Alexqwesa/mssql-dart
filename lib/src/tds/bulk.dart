@@ -17,7 +17,7 @@ class BulkColumn {
   final String name;
   final BulkColumnType type;
 
-  /// Max Unicode chars for [BulkColumnType.nVarChar] (default 4000).
+  /// Maximum UTF-16 code units for nvarchar (1–4000).
   final int nVarCharLength;
 
   const BulkColumn(
@@ -84,12 +84,12 @@ class BulkLoad {
     return null;
   }
 
-  /// Builds `INSERT BULK table ( [c] type, … )`.
+  /// Builds `INSERT BULK [table] ( [c] type, … )`.
   static String insertBulkSql(String table, List<BulkColumn> columns) {
     final defs = columns
-        .map((c) => '${_bracket(c.name)} ${c.sqlDecl}')
+        .map((c) => '${_quoteIdentifier(c.name)} ${c.sqlDecl}')
         .join(', ');
-    return 'INSERT BULK $table ($defs)';
+    return 'INSERT BULK ${_quoteMultipartIdentifier(table)} ($defs)';
   }
 
   /// Writes COLMETADATA + ROW* + DONE into an open [packBulkLoadBCP] packet.
@@ -253,9 +253,94 @@ class BulkLoad {
     buf.writeByte((days >> 16) & 0xFF);
   }
 
-  static String _bracket(String name) {
-    if (name.startsWith('[') && name.endsWith(']')) return name;
-    return '[${name.replaceAll(']', ']]')}]';
+  static String _quoteMultipartIdentifier(String name) {
+    final parts = _splitIdentifierParts(name);
+    if (parts.length > 4) {
+      throw ArgumentError('SQL identifier has too many parts: "$name"');
+    }
+    return parts.map(_quoteIdentifier).join('.');
+  }
+
+  static List<String> _splitIdentifierParts(String name) {
+    final parts = <String>[];
+    final part = StringBuffer();
+    var inBrackets = false;
+
+    for (var i = 0; i < name.length; i++) {
+      final code = name.codeUnitAt(i);
+      if (inBrackets) {
+        part.writeCharCode(code);
+        if (code == 0x5D) {
+          if (i + 1 < name.length && name.codeUnitAt(i + 1) == 0x5D) {
+            i++;
+            part.writeCharCode(0x5D);
+          } else {
+            inBrackets = false;
+          }
+        }
+        continue;
+      }
+
+      if (code == 0x2E) {
+        parts.add(part.toString());
+        part.clear();
+      } else {
+        if (code == 0x5B) inBrackets = true;
+        part.writeCharCode(code);
+      }
+    }
+    parts.add(part.toString());
+    return parts;
+  }
+
+  static String _quoteIdentifier(String name) {
+    _validateNoControlCharacters(name);
+    final decoded = _decodeOptionalBrackets(name.trim());
+    _validateIdentifierPart(decoded, name);
+    return '[${decoded.replaceAll(']', ']]')}]';
+  }
+
+  static String _decodeOptionalBrackets(String name) {
+    if (!_isBracketedIdentifier(name)) return name;
+    return name.substring(1, name.length - 1).replaceAll(']]', ']');
+  }
+
+  static bool _isBracketedIdentifier(String name) {
+    if (name.length < 2 || !name.startsWith('[') || !name.endsWith(']')) {
+      return false;
+    }
+    for (var i = 1; i < name.length - 1; i++) {
+      if (name.codeUnitAt(i) == 0x5D) {
+        if (i + 1 >= name.length - 1 || name.codeUnitAt(i + 1) != 0x5D) {
+          return false;
+        }
+        i++;
+      }
+    }
+    return true;
+  }
+
+  static void _validateIdentifierPart(String decoded, String original) {
+    if (decoded.isEmpty) {
+      throw ArgumentError('SQL identifier part must not be empty: "$original"');
+    }
+    if (decoded.length > 128) {
+      throw ArgumentError(
+          'SQL identifier part exceeds 128 characters: "$original"');
+    }
+    _validateNoControlCharacters(decoded, original: original);
+  }
+
+  static void _validateNoControlCharacters(String value, {String? original}) {
+    for (var i = 0; i < value.length; i++) {
+      final code = value.codeUnitAt(i);
+      if (code < 0x20 || code == 0x7F) {
+        throw ArgumentError(
+          'SQL identifier part contains a control character: '
+          '"${original ?? value}"',
+        );
+      }
+    }
   }
 
   static Uint8List _ucs2(String s) {

@@ -50,7 +50,52 @@ void main() {
       ]);
       expect(
         sql,
-        'INSERT BULK dbo.T ([Id] bigint, [Name] nvarchar(4000))',
+        'INSERT BULK [dbo].[T] ([Id] bigint, [Name] nvarchar(4000))',
+      );
+    });
+
+    test('insertBulkSql re-quotes bracketed identifiers', () {
+      final sql = BulkLoad.insertBulkSql('[dbo].[T]]x]', [
+        const BulkColumn('[Id]]x]', BulkColumnType.bigInt),
+      ]);
+      expect(sql, 'INSERT BULK [dbo].[T]]x] ([Id]]x] bigint)');
+    });
+
+    test('insertBulkSql treats SQL metacharacters as identifier text', () {
+      final sql = BulkLoad.insertBulkSql('dbo.Users; DROP TABLE dbo.Users--', [
+        const BulkColumn(
+          'Id] bigint); DROP TABLE dbo.Users--',
+          BulkColumnType.bigInt,
+        ),
+        const BulkColumn(' Name With Spaces ', BulkColumnType.nVarChar),
+      ]);
+      expect(
+        sql,
+        'INSERT BULK [dbo].[Users; DROP TABLE dbo].[Users--] '
+        '([Id]] bigint); DROP TABLE dbo.Users--] bigint, '
+        '[Name With Spaces] nvarchar(4000))',
+      );
+    });
+
+    test('insertBulkSql rejects invalid identifier parts', () {
+      expect(
+        () => BulkLoad.insertBulkSql('dbo..T', [
+          const BulkColumn('Id', BulkColumnType.bigInt),
+        ]),
+        throwsArgumentError,
+      );
+      expect(
+        () => BulkLoad.insertBulkSql('dbo.T', [
+          const BulkColumn('Bad\nName', BulkColumnType.bigInt),
+        ]),
+        throwsArgumentError,
+      );
+      final overlong = List.filled(129, 'a').join();
+      expect(
+        () => BulkLoad.insertBulkSql('$overlong.T', [
+          const BulkColumn('Id', BulkColumnType.bigInt),
+        ]),
+        throwsArgumentError,
       );
     });
 

@@ -527,7 +527,7 @@ class MssqlConnection {
   /// inferred from the first non-null value in each column (`int`→bigint,
   /// `String`→nvarchar(4000), `bool`→bit, `double`→float, `DateTime`→datetime2).
   ///
-  /// [table] may be `dbo.MyTable` (not escaped). [columns] are bracket-quoted.
+  /// [table] may be `dbo.MyTable`. [table] and [columns] are bracket-quoted.
   /// Returns rows inserted. Empty [rows] is a no-op (returns 0).
   ///
   /// ```dart
