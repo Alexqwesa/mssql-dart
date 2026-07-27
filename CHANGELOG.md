@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Security: deprecate Azure AD username/password (ROPC) token acquisition,
+  reject blank bearer tokens, and expose bounded structured OAuth failures
+  without including raw token endpoint response bodies in exception text.
+
 ## 0.3.0
 
 * Security: harden `bulkInsert` identifier handling by bracket-quoting

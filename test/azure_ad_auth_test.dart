@@ -10,7 +10,8 @@ void main() {
   group('AzureAdAuth.extractAccessToken', () {
     test('reads access_token from 200 JSON body', () {
       final token = AzureAdAuth.extractAccessToken(
-        http.Response('{"access_token":"abc.def.ghi","token_type":"Bearer"}', 200),
+        http.Response(
+            '{"access_token":"abc.def.ghi","token_type":"Bearer"}', 200),
       );
       expect(token, equals('abc.def.ghi'));
     });
@@ -20,30 +21,43 @@ void main() {
       expect(auth.bearerToken, equals('preacquired'));
     });
 
-    test('non-200 throws StateError', () {
+    test('non-200 throws structured OAuth error without raw response body', () {
       expect(
         () => AzureAdAuth.extractAccessToken(
-          http.Response('{"error":"invalid_client"}', 401),
+          http.Response(
+            '{"error":"invalid_client","error_description":"bad secret",'
+            '"internal":"do-not-log"}',
+            401,
+          ),
         ),
-        throwsA(isA<StateError>().having(
-          (e) => e.message,
-          'message',
-          contains('401'),
-        )),
+        throwsA(isA<AzureAdTokenException>()
+            .having((e) => e.statusCode, 'statusCode', 401)
+            .having((e) => e.error, 'error', 'invalid_client')
+            .having((e) => e.toString(), 'message', contains('bad secret'))
+            .having(
+                (e) => e.toString(), 'message', isNot(contains('internal')))),
       );
     });
 
-    test('missing access_token throws StateError', () {
+    test('missing access_token throws structured response error', () {
       expect(
         () => AzureAdAuth.extractAccessToken(
           http.Response('{"token_type":"Bearer"}', 200),
         ),
-        throwsA(isA<StateError>().having(
-          (e) => e.message,
-          'message',
-          contains('access_token'),
-        )),
+        throwsA(isA<AzureAdTokenException>()
+            .having((e) => e.error, 'error', 'invalid_token_response')),
       );
+    });
+
+    test('malformed success response throws structured response error', () {
+      expect(
+        () => AzureAdAuth.extractAccessToken(http.Response('not JSON', 200)),
+        throwsA(isA<AzureAdTokenException>()),
+      );
+    });
+
+    test('fromToken rejects blank bearer token', () {
+      expect(() => AzureAdAuth.fromToken('  '), throwsArgumentError);
     });
   });
 }
