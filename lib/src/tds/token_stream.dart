@@ -141,7 +141,7 @@ class TokenStream {
         case tokenSSPI:
           // USHORT length + SSPI blob (go-mssqldb parseSSPIMsg / ms-tds §2.2.7.22)
           final sspiLen = await _buf.readUint16LE();
-          final challenge = Uint8List.fromList(await _buf.readBytes(sspiLen));
+          final challenge = await _readTokenBytes(sspiLen, 'SSPI token');
           if (onSspi == null) {
             throw StateError(
               'Server sent SSPI challenge but no NTLM/SSPI handler was provided',
@@ -224,8 +224,11 @@ class TokenStream {
         case tokenColMetadata:
           // A new COLMETADATA token starts a new result set.
           if (columns != null && columns.isNotEmpty) {
-            results.add(QueryResult(
-                columns: columns, rows: rows, rowsAffected: rowsAffected));
+            _addResultSet(
+              results,
+              QueryResult(
+                  columns: columns, rows: rows, rowsAffected: rowsAffected),
+            );
             rows = [];
             rowsAffected = 0;
           }
@@ -265,12 +268,17 @@ class TokenStream {
 
             // Flush the last (or only) result set.
             if (columns != null && columns.isNotEmpty) {
-              results.add(QueryResult(
-                  columns: columns, rows: rows, rowsAffected: rowsAffected));
+              _addResultSet(
+                results,
+                QueryResult(
+                    columns: columns, rows: rows, rowsAffected: rowsAffected),
+              );
             } else if (rowsAffected > 0) {
               // DML with no SELECT (INSERT/UPDATE/DELETE) — emit a rowsAffected-only result.
-              results.add(QueryResult(
-                  columns: [], rows: [], rowsAffected: rowsAffected));
+              _addResultSet(
+                results,
+                QueryResult(columns: [], rows: [], rowsAffected: rowsAffected),
+              );
             }
             if (errors.isNotEmpty) throw _buildError(errors);
 
@@ -311,6 +319,7 @@ class TokenStream {
     // Rows from subsequent result sets are read and discarded (not yielded).
     bool inFirstSet = false;
     bool seenFirstSet = false;
+    var resultSetCount = 0;
     final errors = <MssqlException>[];
 
     await _buf.beginRead();
@@ -319,6 +328,8 @@ class TokenStream {
       final tok = await _buf.readUint8();
       switch (tok) {
         case tokenColMetadata:
+          resultSetCount++;
+          _buf.limits.checkResultSets(resultSetCount, 'result set count');
           columns = await _readColMetadata();
           if (!seenFirstSet) {
             seenFirstSet = true;
@@ -381,10 +392,13 @@ class TokenStream {
   /// themselves before invoking this.
   Future<void> drainUntilAttentionAck() async {
     List<ColumnMeta>? columns;
+    var resultSetCount = 0;
     while (true) {
       final tok = await _buf.readUint8();
       switch (tok) {
         case tokenColMetadata:
+          resultSetCount++;
+          _buf.limits.checkResultSets(resultSetCount, 'result set count');
           columns = await _readColMetadata();
         case tokenRow:
           if (columns == null) {
@@ -463,9 +477,19 @@ class TokenStream {
     );
   }
 
+  void _addResultSet(List<QueryResult> results, QueryResult result) {
+    _buf.limits.checkResultSets(results.length + 1, 'result set count');
+    results.add(result);
+  }
+
+  Future<Uint8List> _readTokenBytes(int length, String context) {
+    _buf.limits.checkTokenBytes(length, context);
+    return _buf.readBytes(length);
+  }
+
   Future<String> _readLoginAck() async {
     final length = await _buf.readUint16LE();
-    final data = await _buf.readBytes(length);
+    final data = await _readTokenBytes(length, 'LOGINACK token');
     final nameLen = data[5];
     final nameBytes = data.sublist(6, 6 + nameLen * 2);
     final name = String.fromCharCodes(
@@ -482,15 +506,16 @@ class TokenStream {
       final featureId = await _buf.readUint8();
       if (featureId == featExtTerminator) break;
       final len = await _buf.readUint32LE();
-      await _buf.readBytes(len);
+      await _readTokenBytes(len, 'FEATUREEXTACK token');
     }
   }
 
   /// Parses [tokenFedAuthInfo] body (size already unread — reads ULONG size).
   Future<FedAuthInfo> _readFedAuthInfo() async {
     final size = await _buf.readUint32LE();
+    _buf.limits.checkTokenBytes(size, 'FEDAUTHINFO token');
     if (size < 4) {
-      if (size > 0) await _buf.readBytes(size);
+      if (size > 0) await _readTokenBytes(size, 'FEDAUTHINFO token');
       return const FedAuthInfo();
     }
     final count = await _buf.readUint32LE();
@@ -500,12 +525,13 @@ class TokenStream {
       final id = await _buf.readUint8();
       final dataLength = await _buf.readUint32LE();
       final dataOffset = await _buf.readUint32LE();
+      _buf.limits.checkTokenBytes(dataLength, 'FEDAUTHINFO option');
       offset += 1 + 4 + 4;
       opts.add((id: id, dataLength: dataLength, dataOffset: dataOffset));
     }
     final remaining = size - offset;
     final data = remaining > 0
-        ? await _buf.readBytes(remaining)
+        ? await _readTokenBytes(remaining, 'FEDAUTHINFO token')
         : <int>[];
 
     var stsUrl = '';
@@ -536,7 +562,8 @@ class TokenStream {
     return FedAuthInfo(stsUrl: stsUrl, serverSpn: spn);
   }
 
-  Future<void> _sendFedAuthToken(String token, {List<int> nonce = const []}) async {
+  Future<void> _sendFedAuthToken(String token,
+      {List<int> nonce = const []}) async {
     // go-mssqldb sendFedAuthToken / ms-tds packFedAuthToken (type 8)
     final tokenBytes = _ucs2Bytes(token);
     final dataLen = 4 + tokenBytes.length + nonce.length;
@@ -568,7 +595,7 @@ class TokenStream {
 
   Future<_EnvChange> _readEnvChange() async {
     final length = await _buf.readUint16LE();
-    final data = await _buf.readBytes(length);
+    final data = await _readTokenBytes(length, 'ENVCHANGE token');
     final type = data[0];
     int i = 1;
 
@@ -659,15 +686,14 @@ class TokenStream {
   /// Parses INFO/ERROR body — go-mssqldb `parseInfo` / `parseError72`.
   Future<MssqlInfoMessage> _readInfoOrErrorMessage() async {
     final length = await _buf.readUint16LE();
-    final data = await _buf.readBytes(length);
+    final data = await _readTokenBytes(length, 'INFO/ERROR token');
     int i = 0;
     final number = data[i] |
         (data[i + 1] << 8) |
         (data[i + 2] << 16) |
         (data[i + 3] << 24);
     // Sign-extend if high bit set (SQL numbers are INT32).
-    final signedNumber =
-        number >= 0x80000000 ? number - 0x100000000 : number;
+    final signedNumber = number >= 0x80000000 ? number - 0x100000000 : number;
     i += 4;
     final state = data[i++];
     final severity = data[i++];
@@ -715,7 +741,7 @@ class TokenStream {
 
   Future<void> _skipOrder() async {
     final length = await _buf.readUint16LE();
-    await _buf.readBytes(length);
+    await _readTokenBytes(length, 'ORDER token');
   }
 
   /// Reads a RETURNVALUE token (0xAC) — OUTPUT / return parameter.
@@ -727,7 +753,7 @@ class TokenStream {
     final nameLen = await _buf.readUint8();
     var name = '';
     if (nameLen > 0) {
-      final nameBytes = await _buf.readBytes(nameLen * 2);
+      final nameBytes = await _readTokenBytes(nameLen * 2, 'RETURNVALUE name');
       name = String.fromCharCodes([
         for (int j = 0; j < nameBytes.length; j += 2)
           nameBytes[j] | (nameBytes[j + 1] << 8)
@@ -745,6 +771,7 @@ class TokenStream {
   Future<List<ColumnMeta>> _readColMetadata() async {
     final count = await _buf.readUint16LE();
     if (count == 0xFFFF) return [];
+    _buf.limits.checkColumns(count, 'column count');
 
     final cols = <ColumnMeta>[];
     for (int i = 0; i < count; i++) {
@@ -761,11 +788,13 @@ class TokenStream {
         final numParts = await _buf.readUint8();
         for (int p = 0; p < numParts; p++) {
           final partLen = await _buf.readUint16LE();
-          if (partLen > 0) await _buf.readBytes(partLen * 2);
+          if (partLen > 0) {
+            await _readTokenBytes(partLen * 2, 'COLMETADATA table name');
+          }
         }
       }
       final nameLen = await _buf.readUint8();
-      final nameBytes = await _buf.readBytes(nameLen * 2);
+      final nameBytes = await _readTokenBytes(nameLen * 2, 'COLMETADATA name');
       final name = String.fromCharCodes(
         [
           for (int j = 0; j < nameBytes.length; j += 2)
@@ -788,7 +817,7 @@ class TokenStream {
 
   Future<List<Object?>> _readNbcRow(List<ColumnMeta> cols) async {
     final bitmapBytes = (cols.length + 7) >> 3;
-    final bitmap = await _buf.readBytes(bitmapBytes);
+    final bitmap = await _readTokenBytes(bitmapBytes, 'NBCROW null bitmap');
 
     bool isNull(int i) => (bitmap[i >> 3] & (1 << (i & 7))) != 0;
 

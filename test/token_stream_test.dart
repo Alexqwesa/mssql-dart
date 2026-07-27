@@ -359,10 +359,13 @@ Uint8List _envChangeSqlCollation() {
 
 typedef _Fed = ({TdsBuffer buf, TdsSocketPair pair});
 
-Future<_Fed> _openWithBody(List<int> body) async {
+Future<_Fed> _openWithBody(
+  List<int> body, {
+  MssqlProtocolLimits limits = MssqlProtocolLimits.unlimited,
+}) async {
   final pair = await TdsSocketPair.open();
   await tdsSend(pair.server, tdsPacket(type: packReply, body: body));
-  return (buf: TdsBuffer(pair.client), pair: pair);
+  return (buf: TdsBuffer(pair.client, limits: limits), pair: pair);
 }
 
 /// Multi-packet reply (EOM only on last) — PR #3 / go-mssqldb multi-packet reads.
@@ -460,9 +463,11 @@ void main() {
 
       final result = await TokenStream(fed.buf).processQueryResponse();
       expect(result.columns.single.name, equals('n'));
-      expect(result.rows, equals([
-        [42]
-      ]));
+      expect(
+          result.rows,
+          equals([
+            [42]
+          ]));
       expect(result.rowsAffected, equals(1));
     });
 
@@ -563,6 +568,61 @@ void main() {
       expect(sets[0].rows.single, equals([1]));
       expect(sets[1].columns.single.name, equals('b'));
       expect(sets[1].rows.single, equals([2]));
+    });
+
+    test('token body length respects maximumTokenBytes', () async {
+      final body = [
+        ..._infoToken('too large'),
+        ..._doneToken(),
+      ];
+      final fed = await _openWithBody(
+        body,
+        limits: const MssqlProtocolLimits(maximumTokenBytes: 4),
+      );
+      addTearDown(fed.pair.close);
+
+      await expectLater(
+        TokenStream(fed.buf).processQueryResponse(),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('COLMETADATA count respects maximumColumns', () async {
+      final body = [
+        ..._colMetaTwoNullableInts('a', 'b'),
+        ..._doneToken(),
+      ];
+      final fed = await _openWithBody(
+        body,
+        limits: const MssqlProtocolLimits(maximumColumns: 1),
+      );
+      addTearDown(fed.pair.close);
+
+      await expectLater(
+        TokenStream(fed.buf).processQueryResponse(),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('result set count respects maximumResultSets', () async {
+      final body = [
+        ..._colMetaInt('a'),
+        ..._rowInt(1),
+        ..._doneToken(flags: doneFlagMore | doneFlagCount, rowCount: 1),
+        ..._colMetaInt('b'),
+        ..._rowInt(2),
+        ..._doneToken(flags: doneFlagCount, rowCount: 1),
+      ];
+      final fed = await _openWithBody(
+        body,
+        limits: const MssqlProtocolLimits(maximumResultSets: 1),
+      );
+      addTearDown(fed.pair.close);
+
+      await expectLater(
+        TokenStream(fed.buf).processAllQueryResponses(),
+        throwsA(isA<FormatException>()),
+      );
     });
 
     // Tedious order-token-parser — must not desync stream
@@ -711,7 +771,8 @@ void main() {
       addTearDown(fed.pair.close);
 
       final rows = <int>[];
-      await for (final (cols, row) in TokenStream(fed.buf).streamQueryResponse()) {
+      await for (final (cols, row)
+          in TokenStream(fed.buf).streamQueryResponse()) {
         expect(cols.single.name, equals('n'));
         rows.add(row.single as int);
       }
@@ -892,9 +953,11 @@ void main() {
 
       final result = await TokenStream(fed.buf).processQueryResponse();
       expect(result.columns.single.typeInfo.typeId, equals(typeImage));
-      expect(result.rows.single, equals([
-        [0xDE, 0xAD],
-      ]));
+      expect(
+          result.rows.single,
+          equals([
+            [0xDE, 0xAD],
+          ]));
     });
 
     // CAST/computed LOB columns send numParts = 0 (ms-tds §2.2.7.4)
@@ -913,7 +976,8 @@ void main() {
     });
 
     // ms-tds ENVCHANGE type 20; go-mssqldb processEnvChg routing
-    test('ENVCHANGE routing is skipped without desync in query stream', () async {
+    test('ENVCHANGE routing is skipped without desync in query stream',
+        () async {
       final body = [
         ..._envChangeRouting(),
         ..._colMetaInt('n'),

@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:async/async.dart';
 
 import 'constants.dart';
+import '../protocol_limits.dart';
 
 /// Wraps a [Socket] and provides TDS packet framing for reads and writes.
 ///
@@ -17,6 +18,7 @@ import 'constants.dart';
 class TdsBuffer {
   Socket _socket;
   int packetSize;
+  final MssqlProtocolLimits limits;
 
   // Single subscription to the socket stream – do not call _socket.listen again.
   ChunkedStreamReader<int> _reader;
@@ -43,8 +45,11 @@ class TdsBuffer {
   /// `ResetSession`). Cleared after that packet is written.
   bool resetConnectionPending = false;
 
-  TdsBuffer(Socket socket, {this.packetSize = defaultPacketSize})
-      : _socket = socket,
+  TdsBuffer(
+    Socket socket, {
+    this.packetSize = defaultPacketSize,
+    this.limits = MssqlProtocolLimits.unlimited,
+  })  : _socket = socket,
         _reader = ChunkedStreamReader(socket);
 
   /// The current stream reader. Used by the TLS bridge to keep a stable
@@ -254,6 +259,7 @@ class TdsBuffer {
   }
 
   Future<Uint8List> readBytes(int n) async {
+    if (n < 0) throw FormatException('TDS read length is negative: $n');
     final out = Uint8List(n);
     int written = 0;
     while (written < n) {
@@ -278,8 +284,12 @@ class TdsBuffer {
       await _readNextPacket();
     }
     if (parts.isEmpty) return Uint8List(0);
-    if (parts.length == 1) return parts[0];
+    if (parts.length == 1) {
+      limits.checkTokenBytes(parts[0].length, 'TDS message');
+      return parts[0];
+    }
     final total = parts.fold<int>(0, (s, p) => s + p.length);
+    limits.checkTokenBytes(total, 'TDS message');
     final out = Uint8List(total);
     int offset = 0;
     for (final p in parts) {

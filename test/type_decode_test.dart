@@ -20,14 +20,26 @@ Future<(TdsBuffer, TdsSocketPair)> _bufWith(List<int> body) async {
   return (TdsBuffer(pair.client), pair);
 }
 
+Future<(TdsBuffer, TdsSocketPair)> _bufWithLimits(
+  List<int> body,
+  MssqlProtocolLimits limits,
+) async {
+  final pair = await TdsSocketPair.open();
+  await tdsSend(pair.server, tdsPacket(type: packReply, body: body));
+  return (TdsBuffer(pair.client, limits: limits), pair);
+}
+
 /// Default collation (5 zero bytes) for string TYPE_INFO.
 List<int> get _collation => [0, 0, 0, 0, 0];
 
 Future<Object?> _decode({
   required List<int> typeInfoBytes,
   required List<int> valueBytes,
+  MssqlProtocolLimits limits = MssqlProtocolLimits.unlimited,
 }) async {
-  final (buf, pair) = await _bufWith([...typeInfoBytes, ...valueBytes]);
+  final (buf, pair) = limits == MssqlProtocolLimits.unlimited
+      ? await _bufWith([...typeInfoBytes, ...valueBytes])
+      : await _bufWithLimits([...typeInfoBytes, ...valueBytes], limits);
   addTearDown(pair.close);
   await buf.beginRead();
   final ti = await TypeInfo.read(buf);
@@ -322,16 +334,33 @@ void main() {
       final v = await _decode(
         typeInfoBytes: [
           typeNVarChar,
-          0xFF, 0xFF,
+          0xFF,
+          0xFF,
           ..._collation,
         ],
         valueBytes: [
-          0xFE, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-          4, 0, 0, 0,
+          0xFE,
+          0xFF,
+          0xFF,
+          0xFF,
+          0xFF,
+          0xFF,
+          0xFF,
+          0xFF,
+          4,
+          0,
+          0,
+          0,
           ...c1,
-          4, 0, 0, 0,
+          4,
+          0,
+          0,
+          0,
           ...c2,
-          0, 0, 0, 0,
+          0,
+          0,
+          0,
+          0,
         ],
       );
       expect(v, equals('abcd'));
@@ -354,6 +383,106 @@ void main() {
         valueBytes: [3, 0, 0xDE, 0xAD, 0xBE],
       );
       expect(v, equals([0xDE, 0xAD, 0xBE]));
+    });
+
+    test('short value length respects maximumValueBytes', () async {
+      expect(
+        _decode(
+          typeInfoBytes: [typeBigVarBin, 0x0A, 0x00],
+          valueBytes: [5, 0, 0xDE, 0xAD, 0xBE],
+          limits: const MssqlProtocolLimits(maximumValueBytes: 4),
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('known PLP total length respects maximumValueBytes', () async {
+      expect(
+        _decode(
+          typeInfoBytes: [
+            typeNVarChar,
+            0xFF,
+            0xFF,
+            ..._collation,
+          ],
+          valueBytes: [
+            6,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+          ],
+          limits: const MssqlProtocolLimits(maximumValueBytes: 4),
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('PLP chunk length respects maximumPlpChunkBytes', () async {
+      expect(
+        _decode(
+          typeInfoBytes: [typeBigVarBin, 0xFF, 0xFF],
+          valueBytes: [
+            8,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            8,
+            0,
+            0,
+            0,
+          ],
+          limits: const MssqlProtocolLimits(
+            maximumValueBytes: 8,
+            maximumPlpChunkBytes: 4,
+          ),
+        ),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('unknown PLP accumulated length respects maximumValueBytes', () async {
+      final c1 = ucs2('ab');
+      final c2 = ucs2('cd');
+      expect(
+        _decode(
+          typeInfoBytes: [
+            typeNVarChar,
+            0xFF,
+            0xFF,
+            ..._collation,
+          ],
+          valueBytes: [
+            0xFE,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            0xFF,
+            4,
+            0,
+            0,
+            0,
+            ...c1,
+            4,
+            0,
+            0,
+            0,
+            ...c2,
+          ],
+          limits: const MssqlProtocolLimits(maximumValueBytes: 6),
+        ),
+        throwsA(isA<FormatException>()),
+      );
     });
   });
 

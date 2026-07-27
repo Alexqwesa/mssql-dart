@@ -12,6 +12,7 @@ import 'exception.dart';
 import 'info_message.dart';
 import 'isolation.dart';
 import 'params.dart';
+import 'protocol_limits.dart';
 import 'result.dart';
 import 'server_endpoint.dart';
 import 'tcp_options.dart';
@@ -55,6 +56,7 @@ class MssqlConnection {
   final Duration _timeout;
   /// Default per-query deadline; null means no timeout. Overridable per call.
   final Duration? _queryTimeout;
+  final MssqlProtocolLimits _protocolLimits;
 
   /// Always On ApplicationIntent=ReadOnly (LOGIN7 `fReadOnlyIntent`).
   final bool _readOnlyIntent;
@@ -106,6 +108,7 @@ class MssqlConnection {
     required bool trustServerCertificate,
     required Duration timeout,
     Duration? queryTimeout,
+    MssqlProtocolLimits protocolLimits = MssqlProtocolLimits.unlimited,
     bool readOnlyIntent = false,
     String? failoverPartner,
     int? failoverPort,
@@ -126,6 +129,7 @@ class MssqlConnection {
         _trustServerCertificate = trustServerCertificate,
         _timeout = timeout,
         _queryTimeout = queryTimeout,
+        _protocolLimits = protocolLimits,
         _readOnlyIntent = readOnlyIntent,
         _failoverPartner = failoverPartner,
         _failoverPort = failoverPort,
@@ -150,6 +154,9 @@ class MssqlConnection {
   /// [queryTimeout] — default deadline for [query] / [queryMultiple] /
   /// [execute] / [queryStream]. On expiry the driver sends Attention and
   /// tries to keep the connection usable. Override per call with `timeout:`.
+  ///
+  /// [protocolLimits] — optional caps for server-controlled token and value
+  /// lengths. Defaults to unlimited for compatibility.
   ///
   /// [appName] — reported to SQL Server as the client application name
   /// (`program_name` in `sys.dm_exec_sessions`).
@@ -187,6 +194,7 @@ class MssqlConnection {
     bool trustServerCertificate = false,
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
+    MssqlProtocolLimits protocolLimits = MssqlProtocolLimits.unlimited,
     int connectRetries = 0,
     bool readOnlyIntent = false,
     String? failoverPartner,
@@ -215,6 +223,7 @@ class MssqlConnection {
         trustServerCertificate: trustServerCertificate,
         timeout: timeout,
         queryTimeout: queryTimeout,
+        protocolLimits: protocolLimits,
         readOnlyIntent: readOnlyIntent,
         failoverPartner: failoverPartner,
         failoverPort: failoverPort,
@@ -233,6 +242,7 @@ class MssqlConnection {
   static Future<MssqlConnection> connectFromString(
     String connectionString, {
     String? sessionInitSql,
+    MssqlProtocolLimits protocolLimits = MssqlProtocolLimits.unlimited,
   }) {
     final c = MssqlConnectionString.parse(connectionString);
     if (c.useNtlm) {
@@ -251,6 +261,7 @@ class MssqlConnection {
         trustServerCertificate: c.trustServerCertificate,
         timeout: c.connectionTimeout,
         queryTimeout: c.queryTimeout,
+        protocolLimits: protocolLimits,
         readOnlyIntent: c.readOnlyIntent,
         failoverPartner: c.failoverPartner,
         failoverPort: c.failoverPort,
@@ -272,6 +283,7 @@ class MssqlConnection {
       trustServerCertificate: c.trustServerCertificate,
       timeout: c.connectionTimeout,
       queryTimeout: c.queryTimeout,
+      protocolLimits: protocolLimits,
       readOnlyIntent: c.readOnlyIntent,
       failoverPartner: c.failoverPartner,
       failoverPort: c.failoverPort,
@@ -293,6 +305,7 @@ class MssqlConnection {
     bool trustServerCertificate = false,
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
+    MssqlProtocolLimits protocolLimits = MssqlProtocolLimits.unlimited,
     int connectRetries = 0,
     bool readOnlyIntent = false,
     String? failoverPartner,
@@ -321,6 +334,7 @@ class MssqlConnection {
         trustServerCertificate: trustServerCertificate,
         timeout: timeout,
         queryTimeout: queryTimeout,
+        protocolLimits: protocolLimits,
         readOnlyIntent: readOnlyIntent,
         failoverPartner: failoverPartner,
         failoverPort: failoverPort,
@@ -352,6 +366,7 @@ class MssqlConnection {
     bool trustServerCertificate = false,
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
+    MssqlProtocolLimits protocolLimits = MssqlProtocolLimits.unlimited,
     int connectRetries = 0,
     bool readOnlyIntent = false,
     String? failoverPartner,
@@ -385,6 +400,7 @@ class MssqlConnection {
         trustServerCertificate: trustServerCertificate,
         timeout: timeout,
         queryTimeout: queryTimeout,
+        protocolLimits: protocolLimits,
         readOnlyIntent: readOnlyIntent,
         failoverPartner: failoverPartner,
         failoverPort: failoverPort,
@@ -893,7 +909,11 @@ class MssqlConnection {
     // 1. TCP
     _socket = await _dialTcp(_host, _port);
     _watchSocket(_socket);
-    _buf = TdsBuffer(_socket);
+    _buf = TdsBuffer(
+      _socket,
+      packetSize: _packetSize,
+      limits: _protocolLimits,
+    );
 
     // 2. PRELOGIN
     // encryptNotSupported (0x02) = client cannot do TLS → server skips it.

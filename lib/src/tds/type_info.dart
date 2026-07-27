@@ -104,7 +104,7 @@ class TypeInfo {
     if (_isByteLen(typeId)) {
       final len = await buf.readUint8();
       if (len == 0) return null;
-      final data = await buf.readBytes(len);
+      final data = await _readValueBytes(buf, len, 'BYTELEN value');
       return _decodeByteLen(data);
     }
 
@@ -114,7 +114,7 @@ class TypeInfo {
       if (size == 0xFFFF) return _readPlp(buf);
       final len = await buf.readUint16LE();
       if (len == 0xFFFF) return null; // NULL marker for non-MAX columns
-      final data = await buf.readBytes(len);
+      final data = await _readValueBytes(buf, len, 'USHORTLEN value');
       return _decodeShortLen(data);
     }
 
@@ -277,7 +277,7 @@ class TypeInfo {
         await buf.readBytes(textPtr); // text pointer
         await buf.readBytes(8); // timestamp
         final len = await buf.readUint32LE();
-        final data = await buf.readBytes(len);
+        final data = await _readValueBytes(buf, len, 'TEXT/IMAGE value');
         if (typeId == typeNText) {
           return String.fromCharCodes(
             [
@@ -293,6 +293,7 @@ class TypeInfo {
       case typeVariant:
         final varLen = await buf.readUint32LE();
         if (varLen == 0) return null;
+        buf.limits.checkValueBytes(varLen, 'sql_variant value');
         return await _readVariant(buf, varLen);
     }
     return null;
@@ -310,7 +311,7 @@ class TypeInfo {
     switch (baseTypeId) {
       // ── No-metadata fixed-size types ────────────────────────────────────────
       case typeGuid:
-        final d = Uint8List.fromList(await buf.readBytes(valueLen));
+        final d = await _readValueBytes(buf, valueLen, 'sql_variant GUID');
         return _formatGuid(d);
       case typeBit:
         return (await buf.readUint8()) != 0;
@@ -323,10 +324,10 @@ class TypeInfo {
       case typeInt8:
         return await buf.readUint64LE();
       case typeFlt4:
-        final d = Uint8List.fromList(await buf.readBytes(4));
+        final d = await _readValueBytes(buf, 4, 'sql_variant REAL');
         return ByteData.sublistView(d).getFloat32(0, Endian.little);
       case typeFlt8:
-        final d = Uint8List.fromList(await buf.readBytes(8));
+        final d = await _readValueBytes(buf, 8, 'sql_variant FLOAT');
         return ByteData.sublistView(d).getFloat64(0, Endian.little);
       case typeMoney4:
         return MssqlSmallMoney.fromScaled(await buf.readInt32LE());
@@ -344,17 +345,17 @@ class TypeInfo {
         return DateTime.utc(1900, 1, 1)
             .add(Duration(days: days, minutes: mins));
       case typeDateN:
-        final d = Uint8List.fromList(await buf.readBytes(3));
+        final d = await _readValueBytes(buf, 3, 'sql_variant DATE');
         final days = d[0] | (d[1] << 8) | (d[2] << 16);
         return DateTime.utc(1, 1, 1).add(Duration(days: days));
       // ── 1 metadata byte: scale ───────────────────────────────────────────────
       case typeTimeN:
         final scale = await buf.readUint8();
-        final d = Uint8List.fromList(await buf.readBytes(valueLen));
+        final d = await _readValueBytes(buf, valueLen, 'sql_variant TIME');
         return _decodeTime(d, scale);
       case typeDateTime2N:
         final scale = await buf.readUint8();
-        final d = Uint8List.fromList(await buf.readBytes(valueLen));
+        final d = await _readValueBytes(buf, valueLen, 'sql_variant DATETIME2');
         final time = _decodeTime(d.sublist(0, d.length - 3), scale);
         final db = d.sublist(d.length - 3);
         final days = db[0] | (db[1] << 8) | (db[2] << 16);
@@ -363,7 +364,8 @@ class TypeInfo {
             time.minute, time.second, time.millisecond, time.microsecond);
       case typeDateTimeOffsetN:
         final scale = await buf.readUint8();
-        final d = Uint8List.fromList(await buf.readBytes(valueLen));
+        final d =
+            await _readValueBytes(buf, valueLen, 'sql_variant DATETIMEOFFSET');
         final inner = d.sublist(0, d.length - 2); // strip 2-byte offset
         final time = _decodeTime(inner.sublist(0, inner.length - 3), scale);
         final db = inner.sublist(inner.length - 3);
@@ -375,13 +377,13 @@ class TypeInfo {
       case typeBigVarBin:
       case typeBigBinary:
         await buf.readUint16LE(); // max length — not needed
-        return await buf.readBytes(valueLen);
+        return await _readValueBytes(buf, valueLen, 'sql_variant binary');
       // ── 2 metadata bytes: precision + scale ──────────────────────────────────
       case typeDecimalN:
       case typeNumericN:
         final prec = await buf.readUint8();
         final scale = await buf.readUint8();
-        final d = Uint8List.fromList(await buf.readBytes(valueLen));
+        final d = await _readValueBytes(buf, valueLen, 'sql_variant decimal');
         return _decodeDecimal(
           d,
           scale: scale,
@@ -393,18 +395,22 @@ class TypeInfo {
       case typeBigChar:
         await buf.readBytes(5); // collation (skip)
         await buf.readUint16LE(); // max length (ignore)
-        return String.fromCharCodes(await buf.readBytes(valueLen));
+        return String.fromCharCodes(
+          await _readValueBytes(buf, valueLen, 'sql_variant varchar'),
+        );
       case typeNVarChar:
       case typeNChar:
         await buf.readBytes(5); // collation (skip)
         await buf.readUint16LE(); // max length (ignore)
-        final d = Uint8List.fromList(await buf.readBytes(valueLen));
+        final d = await _readValueBytes(buf, valueLen, 'sql_variant nvarchar');
         return String.fromCharCodes(
           [for (int i = 0; i < d.length; i += 2) d[i] | (d[i + 1] << 8)],
         );
       default:
         // Unrecognised inner type — consume bytes and return null.
-        if (valueLen > 0) await buf.readBytes(valueLen);
+        if (valueLen > 0) {
+          await _readValueBytes(buf, valueLen, 'sql_variant unknown value');
+        }
         return null;
     }
   }
@@ -412,15 +418,22 @@ class TypeInfo {
   Future<Object?> _readPlp(TdsBuffer buf) async {
     final totalLen = await buf.readUint64LE();
     if (totalLen == plpNull) return null;
+    if (totalLen != unknownPlpLen) {
+      buf.limits.checkValueBytes(totalLen, 'PLP value');
+    }
 
     final parts = <List<int>>[];
+    var totalRead = 0;
     while (true) {
       final chunkLen = await buf.readUint32LE();
       if (chunkLen == plpTerminator) break;
+      buf.limits.checkPlpChunkBytes(chunkLen, 'PLP chunk');
+      totalRead += chunkLen;
+      buf.limits.checkValueBytes(totalRead, 'PLP accumulated value');
       parts.add(await buf.readBytes(chunkLen));
     }
 
-    final data = Uint8List(parts.fold<int>(0, (s, p) => s + p.length));
+    final data = Uint8List(totalRead);
     int offset = 0;
     for (final p in parts) {
       data.setRange(offset, offset + p.length, p);
@@ -509,6 +522,15 @@ class TypeInfo {
   static Future<void> _skipUsVarChar(TdsBuffer buf) async {
     final len = await buf.readUint16LE();
     await buf.readBytes(len * 2);
+  }
+
+  static Future<Uint8List> _readValueBytes(
+    TdsBuffer buf,
+    int length,
+    String context,
+  ) async {
+    buf.limits.checkValueBytes(length, context);
+    return buf.readBytes(length);
   }
 
   // ── Type classification ────────────────────────────────────────────────────

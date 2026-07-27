@@ -62,6 +62,28 @@ final conn = await MssqlConnection.connect(
 await conn.query('SELECT 1', const {}, Duration(seconds: 2)); // per-call
 ```
 
+### Protocol limits
+
+Protocol size limits default to unlimited for compatibility. Set them when a
+server endpoint is untrusted or a query can unexpectedly return very large
+values.
+
+```dart
+final conn = await MssqlConnection.connect(
+  host: '10.0.0.5',
+  user: 'sa',
+  password: '…',
+  encrypt: false,
+  protocolLimits: const MssqlProtocolLimits(
+    maximumTokenBytes: 1024 * 1024,
+    maximumValueBytes: 8 * 1024 * 1024,
+    maximumPlpChunkBytes: 1024 * 1024,
+    maximumColumns: 256,
+    maximumResultSets: 16,
+  ),
+);
+```
+
 ### Pool health & session reset
 
 ```dart

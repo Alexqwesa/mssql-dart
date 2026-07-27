@@ -7,6 +7,7 @@ import 'exception.dart';
 import 'info_message.dart';
 import 'isolation.dart';
 import 'params.dart';
+import 'protocol_limits.dart';
 import 'result.dart';
 import 'tds/constants.dart';
 
@@ -29,6 +30,9 @@ class MssqlPoolConfig {
 
   /// Default query deadline applied to pooled connections (null = none).
   final Duration? queryTimeout;
+
+  /// Optional caps for server-controlled token and value lengths.
+  final MssqlProtocolLimits protocolLimits;
 
   /// When non-null, [MssqlPool] opens connections via
   /// [MssqlConnection.connectAzureAd] (FedAuth). Takes precedence over
@@ -105,6 +109,7 @@ class MssqlPoolConfig {
     this.trustServerCertificate = false,
     this.connectionTimeout = const Duration(seconds: 15),
     this.queryTimeout,
+    this.protocolLimits = MssqlProtocolLimits.unlimited,
     this.azureAdAuth,
     this.ntlmDomain,
     this.ntlmWorkstation,
@@ -138,6 +143,7 @@ class MssqlPoolConfig {
     bool validateOnAcquire = true,
     bool resetOnRelease = true,
     int connectRetries = 2,
+    MssqlProtocolLimits protocolLimits = MssqlProtocolLimits.unlimited,
     String? sessionInitSql,
     void Function(MssqlInfoMessage info)? onInfoMessage,
     void Function(MssqlPoolEvent event)? onPoolEvent,
@@ -159,6 +165,7 @@ class MssqlPoolConfig {
         trustServerCertificate: c.trustServerCertificate,
         connectionTimeout: c.connectionTimeout,
         queryTimeout: c.queryTimeout,
+        protocolLimits: protocolLimits,
         min: min,
         max: max,
         idleTimeout: idleTimeout,
@@ -189,6 +196,7 @@ class MssqlPoolConfig {
       trustServerCertificate: c.trustServerCertificate,
       connectionTimeout: c.connectionTimeout,
       queryTimeout: c.queryTimeout,
+      protocolLimits: protocolLimits,
       min: min,
       max: max,
       idleTimeout: idleTimeout,
@@ -222,6 +230,7 @@ class MssqlPoolConfig {
     bool trustServerCertificate = false,
     Duration connectionTimeout = const Duration(seconds: 15),
     Duration? queryTimeout,
+    MssqlProtocolLimits protocolLimits = MssqlProtocolLimits.unlimited,
     int min = 0,
     int max = 10,
     Duration idleTimeout = const Duration(seconds: 30),
@@ -251,6 +260,7 @@ class MssqlPoolConfig {
       trustServerCertificate: trustServerCertificate,
       connectionTimeout: connectionTimeout,
       queryTimeout: queryTimeout,
+      protocolLimits: protocolLimits,
       azureAdAuth: azureAdAuth,
       min: min,
       max: max,
@@ -286,6 +296,7 @@ class MssqlPoolConfig {
     bool trustServerCertificate = false,
     Duration connectionTimeout = const Duration(seconds: 15),
     Duration? queryTimeout,
+    MssqlProtocolLimits protocolLimits = MssqlProtocolLimits.unlimited,
     int min = 0,
     int max = 10,
     Duration idleTimeout = const Duration(seconds: 30),
@@ -315,6 +326,7 @@ class MssqlPoolConfig {
       trustServerCertificate: trustServerCertificate,
       connectionTimeout: connectionTimeout,
       queryTimeout: queryTimeout,
+      protocolLimits: protocolLimits,
       ntlmDomain: domain,
       ntlmWorkstation: workstation,
       min: min,
@@ -787,6 +799,7 @@ class MssqlPool {
         trustServerCertificate: config.trustServerCertificate,
         timeout: config.connectionTimeout,
         queryTimeout: config.queryTimeout,
+        protocolLimits: config.protocolLimits,
         connectRetries: config.connectRetries,
         readOnlyIntent: config.readOnlyIntent,
         failoverPartner: config.failoverPartner,
@@ -813,6 +826,7 @@ class MssqlPool {
           trustServerCertificate: config.trustServerCertificate,
           timeout: config.connectionTimeout,
           queryTimeout: config.queryTimeout,
+          protocolLimits: config.protocolLimits,
           connectRetries: config.connectRetries,
           readOnlyIntent: config.readOnlyIntent,
           failoverPartner: config.failoverPartner,
@@ -835,6 +849,7 @@ class MssqlPool {
           trustServerCertificate: config.trustServerCertificate,
           timeout: config.connectionTimeout,
           queryTimeout: config.queryTimeout,
+          protocolLimits: config.protocolLimits,
           connectRetries: config.connectRetries,
           readOnlyIntent: config.readOnlyIntent,
           failoverPartner: config.failoverPartner,
