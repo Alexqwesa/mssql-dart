@@ -1,7 +1,5 @@
 import 'dart:io';
 
-import 'package:async/async.dart';
-import 'package:mssql/mssql.dart';
 import 'package:mssql/src/tds/buf.dart';
 import 'package:mssql/src/tds/constants.dart';
 import 'package:mssql/src/tds/login7.dart';

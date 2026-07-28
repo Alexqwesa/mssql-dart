@@ -6,6 +6,35 @@ import 'package:async/async.dart';
 import '../protocol_limits.dart';
 import 'constants.dart';
 
+/// Protocol boundary of a TDS write. Only independent user requests may run a
+/// synthetic TLS alignment request before their first packet.
+enum TdsWriteContext {
+  topLevelRequest,
+  messageContinuation,
+  login,
+  sspi,
+  bulkLoad,
+  attention,
+  transactionManager,
+}
+
+enum TlsAlignmentEventType {
+  requested,
+  sqlBatchSent,
+  rpcSent,
+  responseStarted,
+  responseCompleted,
+  failed
+}
+
+class TlsAlignmentEvent {
+  final TlsAlignmentEventType type;
+  final int position;
+  final int? packetSize;
+
+  const TlsAlignmentEvent(this.type, this.position, {this.packetSize});
+}
+
 /// Wraps a socket and provides TDS packet framing for reads and writes.
 ///
 /// TDS packets have an 8-byte header:
@@ -183,6 +212,9 @@ class TdsBuffer {
   /// True after LOGINACK — wrap-alignment no-ops are safe only then.
   bool _tlsNopAlignEnabled = false;
 
+  /// Test-only observation hook for synthetic TLS alignment traffic.
+  void Function(TlsAlignmentEvent event)? onTlsAlignment;
+
   TdsBuffer(
     Socket socket, {
     this.packetSize = defaultPacketSize,
@@ -207,6 +239,24 @@ class TdsBuffer {
   /// Enables TLS wrap-alignment no-ops after a successful login.
   void enableTlsNopAlign() {
     if (_tlsWritePos != null) _tlsNopAlignEnabled = true;
+  }
+
+  /// Enables the TLS cursor model without requiring a platform [SecureSocket].
+  void enableTlsAlignmentForTesting(
+      {int initialPosition = tlsPlainBufferStart}) {
+    setTlsWritePositionForTesting(initialPosition);
+    _tlsNopAlignEnabled = true;
+  }
+
+  /// Sets the mirrored TLS plaintext cursor for deterministic unit tests.
+  void setTlsWritePositionForTesting(int position) {
+    RangeError.checkValueInInterval(
+      position,
+      0,
+      tlsPlainBufferSize - 1,
+      'position',
+    );
+    _tlsWritePos = position;
   }
 
   // ── Write API ──────────────────────────────────────────────────────────────
@@ -257,7 +307,10 @@ class TdsBuffer {
   void writeInt32LE(int v) => writeUint32LE(v & 0xFFFFFFFF);
 
   /// Flush the accumulated write buffer as one or more TDS packets.
-  Future<void> finishPacket(int packetType) async {
+  Future<void> finishPacket(
+    int packetType, {
+    TdsWriteContext? context,
+  }) async {
     final payload = _wbuf.toBytes();
     // Body = everything after the 8-byte header placeholder.
     final body = payload.sublist(headerSize);
@@ -267,21 +320,26 @@ class TdsBuffer {
         (packetType == packSQLBatch ||
             packetType == packRPCRequest ||
             packetType == packTransMgrReq);
-    if (applyReset) {
-      resetConnectionPending = false;
-      // Server will clear session state; drop local txn descriptor too.
-      transactionDescriptor = 0;
-    }
-
     final maxBody = packetSize - headerSize;
+    final packetSizes = <int>[];
+    for (var remaining = body.length;;) {
+      final chunkLen = remaining <= maxBody ? remaining : maxBody;
+      packetSizes.add(headerSize + chunkLen);
+      if (remaining <= maxBody) break;
+      remaining -= chunkLen;
+    }
+    await _prepareTlsMessage(
+      packetSizes,
+      context ?? _contextForPacket(packetType),
+    );
+
     int offset = 0;
     int seq = 1;
     while (true) {
       final remaining = body.length - offset;
       final isLast = remaining <= maxBody;
-      // Non-final packets must be full negotiated size (TDS 7.3+).
       final chunkLen = isLast ? remaining : maxBody;
-      var totalSize = headerSize + chunkLen;
+      final totalSize = headerSize + chunkLen;
 
       final pkt = Uint8List(totalSize);
       pkt[0] = packetType;
@@ -302,10 +360,12 @@ class TdsBuffer {
         pkt.setRange(headerSize, totalSize, body, offset);
       }
 
-      await _ensureTlsLinearRoom(totalSize);
-
       _socket.add(pkt);
       await _socket.flush();
+      if (applyReset && seq == 1) {
+        resetConnectionPending = false;
+        transactionDescriptor = 0;
+      }
       final pos = _tlsWritePos;
       if (pos != null) {
         _tlsWritePos = (pos + totalSize) % tlsPlainBufferSize;
@@ -325,6 +385,92 @@ class TdsBuffer {
     return tlsPlainBufferSize - pos;
   }
 
+  static TdsWriteContext _contextForPacket(int packetType) {
+    switch (packetType) {
+      case packSQLBatch:
+      case packRPCRequest:
+        return TdsWriteContext.topLevelRequest;
+      case packBulkLoadBCP:
+        return TdsWriteContext.bulkLoad;
+      case packAttention:
+        return TdsWriteContext.attention;
+      case packLogin7:
+      case packPrelogin:
+        return TdsWriteContext.login;
+      case packSSPIMessage:
+        return TdsWriteContext.sspi;
+      case packTransMgrReq:
+        return TdsWriteContext.transactionManager;
+      default:
+        return TdsWriteContext.messageContinuation;
+    }
+  }
+
+  Future<void> _prepareTlsMessage(
+    List<int> packetSizes,
+    TdsWriteContext context,
+  ) async {
+    final pos = _tlsWritePos;
+    if (pos == null) return;
+    if (_packetsFitFrom(pos, packetSizes)) {
+      final after = _positionAfter(pos, packetSizes);
+      if (!_hasUnalignableTail(after)) return;
+      if (!_tlsNopAlignEnabled || context != TdsWriteContext.topLevelRequest) {
+        throw StateError(
+          'TLS packet alignment is unsafe for $context; no bytes were written.',
+        );
+      }
+      try {
+        await _tlsNopFillToWrap();
+        if (_packetsFitFrom(_tlsWritePos!, packetSizes)) return;
+        throw StateError('TDS message cannot fit TLS plaintext boundaries.');
+      } catch (_) {
+        onTlsAlignment?.call(
+          TlsAlignmentEvent(TlsAlignmentEventType.failed, pos),
+        );
+        rethrow;
+      }
+    }
+    if (!_tlsNopAlignEnabled || context != TdsWriteContext.topLevelRequest) {
+      throw StateError(
+        'TLS packet alignment is unsafe for $context; no bytes were written.',
+      );
+    }
+    try {
+      await _tlsNopFillToWrap();
+      if (!_packetsFitFrom(_tlsWritePos!, packetSizes)) {
+        throw StateError('TDS message cannot fit TLS plaintext boundaries.');
+      }
+    } catch (_) {
+      onTlsAlignment
+          ?.call(TlsAlignmentEvent(TlsAlignmentEventType.failed, pos));
+      rethrow;
+    }
+  }
+
+  bool _packetsFitFrom(int start, List<int> packetSizes) {
+    var pos = start;
+    for (final size in packetSizes) {
+      if (size > tlsLinearFree(pos)) return false;
+      pos = (pos + size) % tlsPlainBufferSize;
+    }
+    return true;
+  }
+
+  int _positionAfter(int start, List<int> packetSizes) {
+    var pos = start;
+    for (final size in packetSizes) {
+      pos = (pos + size) % tlsPlainBufferSize;
+    }
+    return pos;
+  }
+
+  bool _hasUnalignableTail(int position) {
+    if (position == 0) return false;
+    final tail = tlsLinearFree(position);
+    return tail < _tlsMinNopPacket || (tail.isOdd && tail < _tlsMinOddRpcNop);
+  }
+
   /// Ensures that a complete TDS packet of [needed] bytes can be supplied to the
   /// current SecureSocket plaintext ring without crossing its physical wrap.
   ///
@@ -338,6 +484,7 @@ class TdsBuffer {
   /// Throws rather than writing when alignment cannot be represented as a valid
   /// TDS request within the negotiated [packetSize]. A failure here makes the
   /// mirrored TLS cursor unreliable, so the connection should be closed.
+  // ignore: unused_element
   Future<void> _ensureTlsLinearRoom(int needed) async {
     final pos = _tlsWritePos;
     if (pos == null) return;
@@ -348,7 +495,8 @@ class TdsBuffer {
       // Don't leave a tail that cannot host a valid wrap-fill packet.
       // Odd tails need an RPC nop (SQLBatch UCS-2 bodies are always even).
       final badTail = leftover > 0 &&
-          (leftover < _tlsMinNopPacket || (leftover.isOdd && leftover < _tlsMinOddRpcNop));
+          (leftover < _tlsMinNopPacket ||
+              (leftover.isOdd && leftover < _tlsMinOddRpcNop));
       if (badTail && _tlsNopAlignEnabled) {
         await _tlsNopFillToWrap();
       }
@@ -399,6 +547,18 @@ class TdsBuffer {
       totalSize: linear,
       transactionDescriptor: transactionDescriptor,
     );
+    onTlsAlignment?.call(TlsAlignmentEvent(
+      TlsAlignmentEventType.requested,
+      pos,
+      packetSize: linear,
+    ));
+    onTlsAlignment?.call(TlsAlignmentEvent(
+      pkt[0] == packSQLBatch
+          ? TlsAlignmentEventType.sqlBatchSent
+          : TlsAlignmentEventType.rpcSent,
+      pos,
+      packetSize: linear,
+    ));
     _socket.add(pkt);
     await _socket.flush();
     _tlsWritePos = 0;
@@ -408,8 +568,12 @@ class TdsBuffer {
     // TODO: process this through TokenStream rather than discarding the raw TDS
     // message. readAll() preserves byte synchronization, but it hides ERROR/INFO
     // tokens and does not apply ENVCHANGE or transaction-state updates.
+    onTlsAlignment
+        ?.call(TlsAlignmentEvent(TlsAlignmentEventType.responseStarted, 0));
     await beginRead();
     await readAll();
+    onTlsAlignment
+        ?.call(TlsAlignmentEvent(TlsAlignmentEventType.responseCompleted, 0));
   }
 
   /// Builds a no-op packet of exactly [totalSize] bytes (EOM) for TLS wrap
@@ -471,7 +635,8 @@ class TdsBuffer {
     o += 4;
     ByteData.sublistView(pkt).setUint16(o, 0x0002, Endian.little);
     o += 2;
-    ByteData.sublistView(pkt).setUint64(o, transactionDescriptor, Endian.little);
+    ByteData.sublistView(pkt)
+        .setUint64(o, transactionDescriptor, Endian.little);
     o += 8;
     ByteData.sublistView(pkt).setUint32(o, 1, Endian.little);
     o += 4;
@@ -605,8 +770,9 @@ class TdsBuffer {
       );
     }
     final bodyLen = size - headerSize;
-    final newBody =
-        bodyLen > 0 ? Uint8List.fromList(await _reader.readChunk(bodyLen)) : Uint8List(0);
+    final newBody = bodyLen > 0
+        ? Uint8List.fromList(await _reader.readChunk(bodyLen))
+        : Uint8List(0);
     if (newBody.length < bodyLen) {
       throw StateError('Connection closed mid-packet body');
     }

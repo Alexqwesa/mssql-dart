@@ -7,6 +7,13 @@
 
 Reimplement TLS + live tests
 
+* TLS: preflight complete TDS messages before encrypted writes so synthetic
+  alignment traffic can run only before an independent SQL batch or RPC, never
+  between packets of an active request or during login, Bulk Load, Attention,
+  SSPI, or transaction-manager traffic.
+* Tests: add deterministic TLS alignment packet coverage and opt-in live
+  regressions for row-count semantics, multi-packet batches, Attention, and
+  Bulk Load against the self-signed SQL Server containers.
 * TLS: replace fragile TLS-record reassembly with go-mssqldb-style PRELOGIN
   handshake wrap + opaque post-handshake byte passthrough (`TdsTlsBridge`).
 * TLS: avoid Dart `SecureSocket` splitting one TDS packet across two TLS
@@ -26,7 +33,6 @@ Reimplement TLS + live tests
   `MSSQL_*` configuration instead of the retired port `14330` and credentials.
 * Tests: configure the live Docker SQL Server with a short-lived self-signed
   TLS certificate (`forceencryption=0` on 14334; sibling force-TLS on 14335).
-
 * Security: deprecate Azure AD username/password (ROPC) token acquisition,
   reject blank bearer tokens, and expose bounded structured OAuth failures
   without including raw token endpoint response bodies in exception text.

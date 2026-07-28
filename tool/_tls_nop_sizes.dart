@@ -1,5 +1,3 @@
-import 'dart:typed_data';
-
 import 'package:mssql/src/tds/buf.dart';
 
 void main() {

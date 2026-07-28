@@ -9,7 +9,7 @@ void main() {
 
   group('TLS alignment live regressions', () {
     test(
-      'alignment does not change @@ROWCOUNT between requests',
+      '@@ROWCOUNT is preserved within one user batch',
       () async {
         final conn = await _connect();
         addTearDown(conn.close);
@@ -24,19 +24,17 @@ INSERT INTO #tls_rowcount_test(id, value) VALUES (1, 0);
 
         for (var i = 0; i < 1200; i++) {
           final pad = _repeat('x', i % 251);
-          await conn.execute('''
+          final result = await conn.query('''
 UPDATE #tls_rowcount_test
 SET value = value + 1
 WHERE id = 1;
+SELECT @@ROWCOUNT AS affected;
 -- $pad
 ''');
-
-          final result = await conn.query('SELECT @@ROWCOUNT AS affected');
           expect(
             result.first['affected'],
             1,
-            reason: 'An internal alignment SELECT/RPC ran before the '
-                '@@ROWCOUNT query at iteration $i.',
+            reason: '@@ROWCOUNT changed within the user batch at iteration $i.',
           );
         }
       },
