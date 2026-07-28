@@ -5,6 +5,7 @@ import 'package:async/async.dart';
 
 import '../protocol_limits.dart';
 import 'constants.dart';
+import 'transport.dart';
 
 /// Protocol boundary of a TDS write. Only independent user requests may run a
 /// synthetic TLS alignment request before their first packet.
@@ -168,7 +169,7 @@ class TdsBuffer {
   /// Smallest odd-length RPC alignment nop we can currently synthesize.
   static const int _tlsMinOddRpcNop = 139;
 
-  Socket _socket;
+  late TdsTransport _transport;
   int packetSize;
   final MssqlProtocolLimits limits;
 
@@ -219,8 +220,9 @@ class TdsBuffer {
     Socket socket, {
     this.packetSize = defaultPacketSize,
     this.limits = const MssqlProtocolLimits(),
-  })  : _socket = socket,
-        _reader = ChunkedStreamReader(socket);
+  }) : _reader = ChunkedStreamReader(socket) {
+    _transport = SocketTdsTransport(socket);
+  }
 
   /// The current stream reader. Used by the TLS bridge to keep a stable
   /// reference to the raw TCP reader before [replaceSocket] swaps it out.
@@ -228,11 +230,20 @@ class TdsBuffer {
 
   /// Replace the underlying socket (called after TLS upgrade).
   void replaceSocket(Socket newSocket) {
-    _socket = newSocket;
     _reader = ChunkedStreamReader(newSocket);
+    _transport = SocketTdsTransport(newSocket);
     // Handshake bytes do not advance the SecureSocket plaintext ring; the
     // first application write still starts at the initial midpoint.
     _tlsWritePos = newSocket is SecureSocket ? tlsPlainBufferStart : null;
+    _tlsNopAlignEnabled = false;
+  }
+
+  /// Replaces packet I/O while retaining the legacy raw socket only for
+  /// transitional connection ownership and close handling.
+  void replaceTransport(TdsTransport transport) {
+    _transport = transport;
+    _reader = ChunkedStreamReader(transport.incoming);
+    _tlsWritePos = null;
     _tlsNopAlignEnabled = false;
   }
 
@@ -369,8 +380,7 @@ class TdsBuffer {
         pkt.setRange(headerSize, totalSize, body, offset);
       }
 
-      _socket.add(pkt);
-      await _socket.flush();
+      await _transport.writePacket(pkt);
       if (applyReset && seq == 1) {
         resetConnectionPending = false;
         transactionDescriptor = 0;
@@ -568,8 +578,7 @@ class TdsBuffer {
       pos,
       packetSize: linear,
     ));
-    _socket.add(pkt);
-    await _socket.flush();
+    await _transport.writePacket(pkt);
     _tlsWritePos = 0;
     // The alignment request is a real SQL Server request. Its complete response
     // must be consumed before the caller's request is sent.
