@@ -101,12 +101,31 @@ void main() {
       expect(c.hostNameInCertificate, 'sql.contoso.local');
     });
 
+    test('PEM trust roots', () {
+      final c = MssqlConnectionString.parse(
+        'Server=sql01;User Id=sa;Password=x;'
+        r'Trusted Certificate File=C:\certs\ca.pem;'
+        r'Trusted Certificate Directory=C:\certs\roots',
+      );
+      expect(c.trustedCertificateFile, r'C:\certs\ca.pem');
+      expect(c.trustedCertificateDirectory, r'C:\certs\roots');
+    });
+
     test('sqlserver URL HostNameInCertificate', () {
       final c = MssqlConnectionString.parse(
         'sqlserver://sa:x@10.0.0.5:1433?'
         'encrypt=true&hostnameincertificate=sql.contoso.local',
       );
       expect(c.hostNameInCertificate, 'sql.contoso.local');
+    });
+
+    test('sqlserver URL PEM trust roots', () {
+      final c = MssqlConnectionString.parse(
+        'sqlserver://sa:x@sql01?cafile=%2Fetc%2Fssl%2Fca.pem'
+        '&capath=%2Fetc%2Fssl%2Fcerts',
+      );
+      expect(c.trustedCertificateFile, '/etc/ssl/ca.pem');
+      expect(c.trustedCertificateDirectory, '/etc/ssl/certs');
     });
 
     test('ApplicationIntent=ReadOnly requires Database', () {
@@ -187,6 +206,15 @@ void main() {
       expect(cfg.appName, 'lan');
       expect(cfg.max, 4);
       expect(cfg.ntlmDomain, isNull);
+    });
+
+    test('pool fromConnectionString maps PEM trust roots', () {
+      final cfg = MssqlPoolConfig.fromConnectionString(
+        'Server=sql01;User Id=sa;Password=x;'
+        'TrustedCertificateFile=ca.pem;TrustedCertificateDirectory=roots',
+      );
+      expect(cfg.trustedCertificateFile, 'ca.pem');
+      expect(cfg.trustedCertificateDirectory, 'roots');
     });
 
     test(r'pool fromConnectionString NTLM DOMAIN\user', () {

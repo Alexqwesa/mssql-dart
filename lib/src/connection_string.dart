@@ -23,6 +23,12 @@ class MssqlConnectionString {
   final bool encrypt;
   final bool trustServerCertificate;
 
+  /// Optional PEM file containing additional certificate authorities.
+  final String? trustedCertificateFile;
+
+  /// Optional directory containing hashed PEM certificate authorities.
+  final String? trustedCertificateDirectory;
+
   /// Hostname for SNI / cert validation (ADO `HostNameInCertificate`).
   final String? hostNameInCertificate;
 
@@ -58,6 +64,8 @@ class MssqlConnectionString {
     this.packetSize = defaultPacketSize,
     this.encrypt = true,
     this.trustServerCertificate = false,
+    this.trustedCertificateFile,
+    this.trustedCertificateDirectory,
     this.hostNameInCertificate,
     this.connectionTimeout = const Duration(seconds: 15),
     this.queryTimeout,
@@ -101,7 +109,8 @@ class MssqlConnectionString {
 
     final server = map['server'];
     if (server == null || server.isEmpty) {
-      throw FormatException('Connection string requires Server (or Data Source)');
+      throw FormatException(
+          'Connection string requires Server (or Data Source)');
     }
 
     var user = map['user'] ?? '';
@@ -127,7 +136,8 @@ class MssqlConnectionString {
       }
     }
 
-    final portOverride = map['port'] != null ? int.tryParse(map['port']!) : null;
+    final portOverride =
+        map['port'] != null ? int.tryParse(map['port']!) : null;
     if (map['port'] != null &&
         (portOverride == null || portOverride <= 0 || portOverride > 65535)) {
       throw FormatException('Invalid Port "${map['port']}"');
@@ -136,23 +146,21 @@ class MssqlConnectionString {
     final ep = _parseServer(server, portOverride: portOverride);
     final instance = ep.instanceName ?? map['instancename'];
 
-    final packetSize = map['packetsize'] != null
-        ? int.tryParse(map['packetsize']!)
-        : null;
-    if (map['packetsize'] != null &&
-        (packetSize == null || packetSize < 512)) {
+    final packetSize =
+        map['packetsize'] != null ? int.tryParse(map['packetsize']!) : null;
+    if (map['packetsize'] != null && (packetSize == null || packetSize < 512)) {
       throw FormatException('Invalid Packet Size "${map['packetsize']}"');
     }
 
     final loginSecs = _parseSeconds(
       map['connectiontimeout'] ?? map['logintimeout'],
     );
-    final querySecs = _parseSeconds(map['querytimeout'] ?? map['commandtimeout']);
+    final querySecs =
+        _parseSeconds(map['querytimeout'] ?? map['commandtimeout']);
 
     // Encrypt: missing → package default true; disable/false → false.
-    final encrypt = map.containsKey('encrypt')
-        ? _parseEncrypt(map['encrypt']!)
-        : true;
+    final encrypt =
+        map.containsKey('encrypt') ? _parseEncrypt(map['encrypt']!) : true;
     final trust = map.containsKey('trustservercertificate')
         ? _parseBool(map['trustservercertificate'])
         : false;
@@ -165,9 +173,8 @@ class MssqlConnectionString {
       );
     }
 
-    final failoverPort = map['failoverport'] != null
-        ? int.tryParse(map['failoverport']!)
-        : null;
+    final failoverPort =
+        map['failoverport'] != null ? int.tryParse(map['failoverport']!) : null;
     if (map['failoverport'] != null &&
         (failoverPort == null || failoverPort <= 0 || failoverPort > 65535)) {
       throw FormatException('Invalid Failover Port "${map['failoverport']}"');
@@ -184,12 +191,13 @@ class MssqlConnectionString {
       packetSize: packetSize ?? defaultPacketSize,
       encrypt: encrypt,
       trustServerCertificate: trust,
+      trustedCertificateFile: map['trustedcertificatefile'],
+      trustedCertificateDirectory: map['trustedcertificatedirectory'],
       hostNameInCertificate: map['hostnameincertificate'],
       connectionTimeout: loginSecs != null
           ? Duration(seconds: loginSecs)
           : const Duration(seconds: 15),
-      queryTimeout:
-          querySecs != null ? Duration(seconds: querySecs) : null,
+      queryTimeout: querySecs != null ? Duration(seconds: querySecs) : null,
       ntlmDomain: ntlmDomain,
       workstation: workstation,
       readOnlyIntent: readOnly,
@@ -234,8 +242,7 @@ class MssqlConnectionString {
 
     // Instance: first path segment (sqlserver://host/INSTANCE)
     String? instance;
-    final segments =
-        uri.pathSegments.where((p) => p.isNotEmpty).toList();
+    final segments = uri.pathSegments.where((p) => p.isNotEmpty).toList();
     if (segments.isNotEmpty) {
       instance = Uri.decodeComponent(segments.first);
     }
@@ -259,9 +266,8 @@ class MssqlConnectionString {
         ? uri.port
         : (q['port'] != null ? int.tryParse(q['port']!) : null) ?? defaultPort;
 
-    final packetSize = q['packetsize'] != null
-        ? int.tryParse(q['packetsize']!)
-        : null;
+    final packetSize =
+        q['packetsize'] != null ? int.tryParse(q['packetsize']!) : null;
     final loginSecs = _parseSeconds(
       q['connectiontimeout'] ?? q['logintimeout'],
     );
@@ -295,12 +301,13 @@ class MssqlConnectionString {
       packetSize: packetSize ?? defaultPacketSize,
       encrypt: encrypt,
       trustServerCertificate: trust,
+      trustedCertificateFile: q['trustedcertificatefile'],
+      trustedCertificateDirectory: q['trustedcertificatedirectory'],
       hostNameInCertificate: q['hostnameincertificate'],
       connectionTimeout: loginSecs != null
           ? Duration(seconds: loginSecs)
           : const Duration(seconds: 15),
-      queryTimeout:
-          querySecs != null ? Duration(seconds: querySecs) : null,
+      queryTimeout: querySecs != null ? Duration(seconds: querySecs) : null,
       ntlmDomain: ntlmDomain,
       workstation: q['workstation'],
       readOnlyIntent: readOnly,
@@ -324,7 +331,8 @@ class MssqlConnectionString {
 
       final eq = input.indexOf('=', i);
       if (eq < 0) {
-        throw FormatException('Expected key=value near "${input.substring(i)}"');
+        throw FormatException(
+            'Expected key=value near "${input.substring(i)}"');
       }
       final key = input.substring(i, eq).trim();
       i = eq + 1;
@@ -386,6 +394,12 @@ class MssqlConnectionString {
         return 'encrypt';
       case 'trustservercertificate':
         return 'trustservercertificate';
+      case 'trustedcertificatefile':
+      case 'cafile':
+        return 'trustedcertificatefile';
+      case 'trustedcertificatedirectory':
+      case 'capath':
+        return 'trustedcertificatedirectory';
       case 'hostnameincertificate':
         return 'hostnameincertificate';
       case 'packetsize':

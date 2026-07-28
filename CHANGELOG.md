@@ -8,6 +8,8 @@
   the `MSSQL_NATIVE_TLS` switch and Dart `SecureSocket` TLS bridge are removed.
 * **Breaking:** replace `securityContext` with `trustedCertificateFile` and
   `trustedCertificateDirectory` PEM trust-root options.
+* TLS: accept `TrustedCertificateFile` / `TrustedCertificateDirectory` (and
+  `CAFile` / `CAPath`) in ADO.NET-style and `sqlserver://` connection strings.
 * TLS: serialize native TLS input, output, and pending writes so Attention can
   be injected safely while a response is active. Multi-packet requests, Bulk
   Load, and TLS cancellation are supported by the same transport.

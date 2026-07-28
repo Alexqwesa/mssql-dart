@@ -285,8 +285,10 @@ class MssqlConnection {
         packetSize: c.packetSize,
         encrypt: c.encrypt,
         trustServerCertificate: c.trustServerCertificate,
-        trustedCertificateFile: trustedCertificateFile,
-        trustedCertificateDirectory: trustedCertificateDirectory,
+        trustedCertificateFile:
+            trustedCertificateFile ?? c.trustedCertificateFile,
+        trustedCertificateDirectory:
+            trustedCertificateDirectory ?? c.trustedCertificateDirectory,
         hostNameInCertificate: c.hostNameInCertificate,
         timeout: c.connectionTimeout,
         queryTimeout: c.queryTimeout,
@@ -310,8 +312,10 @@ class MssqlConnection {
       packetSize: c.packetSize,
       encrypt: c.encrypt,
       trustServerCertificate: c.trustServerCertificate,
-      trustedCertificateFile: trustedCertificateFile,
-      trustedCertificateDirectory: trustedCertificateDirectory,
+      trustedCertificateFile:
+          trustedCertificateFile ?? c.trustedCertificateFile,
+      trustedCertificateDirectory:
+          trustedCertificateDirectory ?? c.trustedCertificateDirectory,
       hostNameInCertificate: c.hostNameInCertificate,
       timeout: c.connectionTimeout,
       queryTimeout: c.queryTimeout,

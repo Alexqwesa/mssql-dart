@@ -586,15 +586,10 @@ Named parameters use `@name` placeholders. Supported Dart → SQL type mappings:
 ## TLS / Encryption
 
 TDS 7.x wraps the TLS handshake in PRELOGIN packets, then switches to raw TLS
-for the rest of the session. This package uses a go-mssqldb-style bridge:
-handshake wrap/unwrap, then **opaque byte passthrough** (no TLS-record
-reassembly on the bridge).
-
-Dart’s `SecureSocket` can split one `add` across two TLS records when its
-internal 8 KiB plaintext ring wraps. SQL Server requires each TDS packet to
-fit in one TLS application-data record, so the driver sizes/aligns writes
-accordingly (and may send a short no-op SQLBatch to reach a safe ring
-boundary).
+for the rest of the session. On Windows and Linux, encrypted connections use
+the bundled native OpenSSL transport. It serializes TLS reads and writes so
+multi-packet requests, Bulk Load, and Attention cancellation remain reliable.
+Cleartext connections continue to use Dart and TCP only.
 
 ```dart
 // Production (Azure SQL, SQL Server with TLS)
@@ -602,8 +597,9 @@ final conn = await MssqlConnection.connect(
   host: 'server.database.windows.net',
   encrypt: true,                  // default true
   trustServerCertificate: false,  // validate cert (default false)
-  // Optional: custom CA / client certs
+  // Optional: custom PEM trust roots
   // trustedCertificateFile: 'ca.pem',
+  // trustedCertificateDirectory: 'certs',
   // After Always On redirect to an IP, keep validating against the AG name:
   // hostNameInCertificate: 'ag-listener.contoso.local',
   ...
@@ -631,14 +627,15 @@ If the server requires encryption (`forceencryption=1`) but the client passes
 “not supported” and then upgrade (that path caused SQL Error 17828).
 
 Connection-string keys: `Encrypt`, `TrustServerCertificate`,
-`HostNameInCertificate` (also on `sqlserver://` URLs). The same options exist
-on `MssqlPoolConfig` / `MssqlPoolConfig.fromString`.
+`TrustedCertificateFile` (`CAFile`), `TrustedCertificateDirectory` (`CAPath`),
+and `HostNameInCertificate` (also on `sqlserver://` URLs). The same options
+exist on `MssqlPoolConfig` / `MssqlPoolConfig.fromConnectionString`.
 
 ---
 
 ## Requirements
 
-- Dart SDK ≥ 3.0
+- Dart SDK >= 3.10
 - SQL Server 2008 R2 or later (TDS 7.4 / protocol 0x04000074)
 - Azure SQL Database / Azure SQL Edge
 - Port 1433 (or custom) reachable from the Dart process
