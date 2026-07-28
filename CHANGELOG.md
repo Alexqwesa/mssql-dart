@@ -8,6 +8,8 @@
   SQL Server's PRELOGIN TLS wrapping in Dart while moving TLS records and
   packet encryption into the native helper. The connection path still uses the
   existing Dart transport until the `TdsBuffer` transport refactor lands.
+* TLS: introduce the `TdsTransport` boundary with cleartext-socket and native
+  TLS adapters, preparing TDS framing to stop writing directly to `Socket`.
 * Build: add a Windows MSVC/Ninja script for building and testing the native
   helper. Generated native binaries remain ignored by Git.
 
