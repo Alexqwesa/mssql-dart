@@ -8,6 +8,8 @@ import '../native_tls/native_tls_transport.dart';
 /// Implementations own their encryption boundary; [writePacket] receives one
 /// complete TDS packet and must not split it into separate logical writes.
 abstract interface class TdsTransport {
+  bool get isEncrypted;
+
   Stream<Uint8List> get incoming;
 
   Future<void> writePacket(Uint8List packet);
@@ -20,6 +22,9 @@ final class SocketTdsTransport implements TdsTransport {
   final Socket socket;
 
   SocketTdsTransport(this.socket);
+
+  @override
+  bool get isEncrypted => false;
 
   @override
   Stream<Uint8List> get incoming => socket.map(Uint8List.fromList);
@@ -39,6 +44,9 @@ final class NativeTlsTdsTransport implements TdsTransport {
   final NativeTlsTransport transport;
 
   NativeTlsTdsTransport(this.transport);
+
+  @override
+  bool get isEncrypted => true;
 
   @override
   Stream<Uint8List> get incoming => transport.plaintext;

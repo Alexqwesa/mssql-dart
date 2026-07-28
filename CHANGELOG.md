@@ -16,6 +16,10 @@
   rather than a TLS error.
 * TLS: route encrypted connections through the native TLS handshake and
   transport instead of Dart's `SecureSocket` bridge.
+* TLS: restore multi-packet SQL batch support over native TLS. Bulk Load over
+  TLS remains explicitly unsupported pending its separate protocol fix.
+* Tests: validate the native TLS path with forced-encryption connection, type,
+  pooling, error-recovery, large-response, and multi-packet request coverage.
 * Build: add a Windows MSVC/Ninja script for building and testing the native
   helper. Generated native binaries remain ignored by Git.
 

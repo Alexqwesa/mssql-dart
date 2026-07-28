@@ -271,7 +271,7 @@ class TdsBuffer {
   }
 
   /// Whether this buffer is currently writing through a TLS socket.
-  bool get isTls => _tlsWritePos != null;
+  bool get isTls => _transport.isEncrypted;
 
   // ── Write API ──────────────────────────────────────────────────────────────
 

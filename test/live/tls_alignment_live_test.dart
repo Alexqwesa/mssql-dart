@@ -43,16 +43,15 @@ SELECT @@ROWCOUNT AS affected;
     );
 
     test(
-      'multi-packet SQLBatch is rejected before encrypted bytes are written',
+      'multi-packet SQLBatch completes over native TLS',
       () async {
         final conn = await _connect();
         addTearDown(conn.close);
 
         final payload = _repeat('z', 6000);
-        await expectLater(
-          conn.query("SELECT LEN(N'$payload') AS payload_length"),
-          throwsUnsupportedError,
-        );
+        final result =
+            await conn.query("SELECT LEN(N'$payload') AS payload_length");
+        expect(result.first['payload_length'], payload.length);
         final health = await conn.query('SELECT 1 AS ok');
         expect(health.first['ok'], 1);
       },
