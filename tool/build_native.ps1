@@ -11,3 +11,7 @@ if (-not (Test-Path $vsDevCmd)) {
 }
 
 cmd /c "call `"$vsDevCmd`" -arch=x64 -host_arch=x64 && cmake -S `"$root\native`" -B `"$root\build\native`" -G Ninja -DBUILD_TESTING=ON && cmake --build `"$root\build\native`" --config $Configuration && ctest --test-dir `"$root\build\native`" --output-on-failure"
+
+$outputDir = Join-Path $root 'native\bin\windows-x64'
+New-Item -ItemType Directory -Force -Path $outputDir | Out-Null
+Copy-Item (Join-Path $root 'build\native\mssql_tls.dll') $outputDir -Force
