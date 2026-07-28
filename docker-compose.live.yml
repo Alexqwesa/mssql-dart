@@ -4,6 +4,8 @@ services:
     build:
       context: .
       dockerfile: docker/live/Dockerfile
+      args:
+        MSSQL_IMAGE: "${MSSQL_LIVE_IMAGE:-mcr.microsoft.com/mssql/server:2022-latest}"
     image: mssql-dart-live:local
     container_name: mssql-dart-live
     environment:
@@ -21,6 +23,8 @@ services:
     build:
       context: .
       dockerfile: docker/live/Dockerfile
+      args:
+        MSSQL_IMAGE: "${MSSQL_LIVE_IMAGE:-mcr.microsoft.com/mssql/server:2022-latest}"
     container_name: mssql-dart-live-force-tls
     environment:
       ACCEPT_EULA: "Y"

@@ -13,6 +13,13 @@
   Load, and TLS cancellation are supported by the same transport.
 * TLS: negotiate a 16,383-byte TDS packet size in encrypted LOGIN7 sessions,
   keeping SQL Server and the native TLS fragment boundary in agreement.
+* Tests: add `MSSQL_LIVE_IMAGE` for switching the Docker live-test pair among
+  SQL Server 2019, 2022 (default), 2025, or another compatible Linux image.
+* Tests: add `tool/full_tests.ps1` and a six-container Docker matrix to run
+  native CTest, offline Dart tests, and the full live suite against SQL Server
+  2017, 2019, 2022, and 2025 with optional and forced TLS.
+* Tests: keep the matrix runner's offline phase out of `test/live`, so its
+  output does not include expected live-test skips before containers start.
 * Tests: replace the retired Dart TLS bridge/alignment unit suites with a
   native CTest that performs a complete in-memory client/server handshake,
   certificate DER retrieval, encrypted request write, and encrypted response

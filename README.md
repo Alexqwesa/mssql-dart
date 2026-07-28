@@ -649,6 +649,23 @@ cmake --build build/native
 ctest --test-dir build/native --output-on-failure
 ```
 
+### Full SQL Server matrix
+
+`tool/full_tests.ps1` builds the native helper, runs offline Dart tests, then
+starts normal and force-encryption containers for SQL Server 2017, 2019, 2022,
+and 2025. It runs `test/live` once per edition and removes the containers and
+volumes afterwards.
+
+```powershell
+.\tool\full_tests.ps1
+```
+
+Use `-KeepContainers` to retain the matrix for diagnosis. The six host ports
+are 14330/14331 (2017), 14334/14335 (2019), 14336/14337 (2022), and
+14338/14339 (2025). SQL Server 2012 through 2016 have no official Linux
+container images; test those releases against externally provisioned Windows
+instances by setting the normal `MSSQL_*` environment variables.
+
 ### Live SQL Server (opt-in)
 
 One compose file starts **two** containers. One live command covers both:
@@ -673,6 +690,23 @@ dart test test/live --concurrency=1
 
 docker compose --env-file .env -f docker-compose.live.yml down
 ```
+
+`MSSQL_LIVE_IMAGE` selects the SQL Server Linux image for both containers.
+It defaults to SQL Server 2022. Set it before Compose (or edit `.env`) to run
+the same suite against other releases:
+
+```powershell
+$env:MSSQL_LIVE_IMAGE = 'mcr.microsoft.com/mssql/server:2019-latest'
+docker compose --env-file .env -f docker-compose.live.yml up -d --build
+
+# Or test the current major release.
+$env:MSSQL_LIVE_IMAGE = 'mcr.microsoft.com/mssql/server:2025-latest'
+docker compose --env-file .env -f docker-compose.live.yml up -d --build
+```
+
+Any compatible SQL Server Linux image can be supplied. It must support the
+standard `/var/opt/mssql` layout, run SQL Server as the `mssql` user, and be
+able to install OpenSSL while building the live-test image.
 
 `MSSQL_PASSWORD` is required whenever `MSSQL_LIVE_TESTS=1`. Compose has no
 persistent volume; `docker compose down` wipes both containers — do not use

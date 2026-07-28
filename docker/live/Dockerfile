@@ -1,4 +1,5 @@
-FROM mcr.microsoft.com/mssql/server:2022-latest
+ARG MSSQL_IMAGE=mcr.microsoft.com/mssql/server:2022-latest
+FROM ${MSSQL_IMAGE}
 
 USER root
 
