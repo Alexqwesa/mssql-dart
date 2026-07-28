@@ -47,7 +47,19 @@ final class NativeTlsBridge {
         if (body.length != length - headerSize) {
           throw StateError('Connection closed during TLS handshake packet.');
         }
-        engine.feedEncrypted(Uint8List.fromList(body));
+        var remaining = Uint8List.fromList(body);
+        while (remaining.isNotEmpty) {
+          final feed = engine.feedEncrypted(remaining);
+          if (feed.code < 0 ||
+              feed.consumed <= 0 ||
+              feed.consumed > remaining.length) {
+            throw StateError(
+              'Native TLS handshake input failed with code ${feed.code} '
+              'after consuming ${feed.consumed} bytes.',
+            );
+          }
+          remaining = Uint8List.sublistView(remaining, feed.consumed);
+        }
         result = engine.handshake();
       }
       return NativeTlsTransport(
@@ -68,7 +80,8 @@ final class NativeTlsBridge {
     while (true) {
       final ciphertext = engine.drainEncrypted();
       if (ciphertext.code < 0) {
-        throw StateError('Native TLS handshake drain failed: ${ciphertext.code}.');
+        throw StateError(
+            'Native TLS handshake drain failed: ${ciphertext.code}.');
       }
       if (ciphertext.bytes.isEmpty) break;
       final packet = Uint8List(headerSize + ciphertext.bytes.length);

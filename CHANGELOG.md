@@ -13,6 +13,8 @@
 * TLS: serialize native TLS input, output, and pending writes so Attention can
   be injected safely while a response is active. Multi-packet requests, Bulk
   Load, and TLS cancellation are supported by the same transport.
+* TLS: retain encrypted bytes not yet accepted by the native memory BIO instead
+  of treating partial BIO consumption as a transport failure.
 * TLS: negotiate a 16,383-byte TDS packet size in encrypted LOGIN7 sessions,
   keeping SQL Server and the native TLS fragment boundary in agreement.
 * TLS/NTLM: derive `tls-server-end-point` channel bindings from the native TLS

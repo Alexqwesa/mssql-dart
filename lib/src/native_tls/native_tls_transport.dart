@@ -87,11 +87,23 @@ final class NativeTlsTransport {
         var progressed = false;
 
         while (_incoming.isNotEmpty) {
-          final code = _engine.feedEncrypted(_incoming.removeFirst());
-          _checkResult(code, 'TLS input');
+          final input = _incoming.removeFirst();
+          final feed = _engine.feedEncrypted(input);
+          if (feed.consumed < 0 || feed.consumed > input.length) {
+            throw StateError(
+              'Native TLS reported an invalid input count: ${feed.consumed}.',
+            );
+          }
+          _checkResult(feed.code, 'TLS input');
           progressed = true;
           await _flushCiphertext();
           _emitPlaintext();
+          if (feed.consumed < input.length) {
+            if (feed.consumed == 0) {
+              throw StateError('Native TLS accepted no encrypted input bytes.');
+            }
+            _incoming.addFirst(Uint8List.sublistView(input, feed.consumed));
+          }
         }
 
         final active = _activeWrite ??= _takeWrite();
@@ -128,16 +140,17 @@ final class NativeTlsTransport {
         if (!progressed) break;
       }
       if (_ended && _activeWrite == null && _incoming.isEmpty) {
-        _fail(StateError('TLS peer closed while the connection was active.'), StackTrace.current);
+        _fail(StateError('TLS peer closed while the connection was active.'),
+            StackTrace.current);
       }
     } catch (error, stackTrace) {
       _fail(error, stackTrace);
     }
   }
 
-  _WriteRequest? _takeWrite() =>
-      _urgentWrites.isNotEmpty ? _urgentWrites.removeFirst() :
-      (_writes.isNotEmpty ? _writes.removeFirst() : null);
+  _WriteRequest? _takeWrite() => _urgentWrites.isNotEmpty
+      ? _urgentWrites.removeFirst()
+      : (_writes.isNotEmpty ? _writes.removeFirst() : null);
 
   Future<void> _flushCiphertext() async {
     var wrote = false;
@@ -161,7 +174,10 @@ final class NativeTlsTransport {
   }
 
   void _checkResult(int code, String operation, {bool allowWant = false}) {
-    if (code == _ok || (allowWant && (code == _wantInput || code == _wantOutput))) return;
+    if (code == _ok ||
+        (allowWant && (code == _wantInput || code == _wantOutput))) {
+      return;
+    }
     throw StateError('$operation failed with native result $code.');
   }
 

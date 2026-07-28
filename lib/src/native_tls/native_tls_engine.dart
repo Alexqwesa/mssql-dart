@@ -25,10 +25,18 @@ final class NativeTlsRead {
   const NativeTlsRead(this.code, this.bytes);
 }
 
+/// Result from accepting encrypted bytes into the native TLS BIO.
+final class NativeTlsFeed {
+  final int code;
+  final int consumed;
+
+  const NativeTlsFeed(this.code, this.consumed);
+}
+
 /// Synchronous native TLS operations owned exclusively by [NativeTlsTransport].
 abstract interface class NativeTlsDriver {
   int handshake();
-  int feedEncrypted(Uint8List bytes);
+  NativeTlsFeed feedEncrypted(Uint8List bytes);
   NativeTlsRead drainEncrypted({int capacity = 16384});
   NativeTlsRead readPlaintext({int capacity = 16384});
   int writePacket(Uint8List packet);
@@ -129,16 +137,13 @@ final class NativeTlsEngine implements Finalizable, NativeTlsDriver {
       int Function(Pointer<Void>)>('mssql_tls_handshake')(_handle);
 
   @override
-  int feedEncrypted(Uint8List bytes) {
+  NativeTlsFeed feedEncrypted(Uint8List bytes) {
     final input = calloc<Uint8>(bytes.length);
     final consumed = calloc<IntPtr>();
     try {
       input.asTypedList(bytes.length).setAll(0, bytes);
       final code = _feedEncrypted(_handle, input, bytes.length, consumed);
-      if (consumed.value != bytes.length) {
-        throw StateError('Native TLS consumed only ${consumed.value} bytes.');
-      }
-      return code;
+      return NativeTlsFeed(code, consumed.value);
     } finally {
       calloc.free(consumed);
       calloc.free(input);
@@ -178,8 +183,11 @@ final class NativeTlsEngine implements Finalizable, NativeTlsDriver {
       if (sizeCode != -3 || required.value == 0) return Uint8List(0);
       final output = calloc<Uint8>(required.value);
       try {
-        final code = _peerCertificateDer(_handle, output, required.value, required);
-        if (code != 0) throw StateError('Unable to read peer certificate: $code.');
+        final code =
+            _peerCertificateDer(_handle, output, required.value, required);
+        if (code != 0) {
+          throw StateError('Unable to read peer certificate: $code.');
+        }
         return Uint8List.fromList(output.asTypedList(required.value));
       } finally {
         calloc.free(output);
