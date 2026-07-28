@@ -16,6 +16,7 @@ final class NativeTlsTransport {
   final NativeTlsEngine _engine;
   final StreamController<Uint8List> _plaintext = StreamController();
   Future<void>? _pump;
+  Completer<void>? _inputReady;
   var _closed = false;
 
   NativeTlsTransport({
@@ -35,9 +36,15 @@ final class NativeTlsTransport {
 
   Future<void> writePacket(Uint8List packet) async {
     _checkOpen();
-    final result = _engine.writePacket(packet);
-    if (result != 0) {
-      throw StateError('Native TLS packet write failed with code $result.');
+    var result = _engine.writePacket(packet);
+    while (result != 0) {
+      await _drainCiphertext();
+      if (result != 1) {
+        throw StateError('Native TLS packet write failed with code $result.');
+      }
+      final ready = _inputReady ??= Completer<void>();
+      await ready.future;
+      result = _engine.retryWrite();
     }
     await _drainCiphertext();
   }
@@ -50,6 +57,8 @@ final class NativeTlsTransport {
         if (result < 0) {
           throw StateError('Native TLS input failed with code $result.');
         }
+        _inputReady?.complete();
+        _inputReady = null;
         await _drainCiphertext();
         while (true) {
           final plaintext = _engine.readPlaintext();

@@ -85,6 +85,11 @@ extern "C" mssql_tls_result mssql_tls_write_packet(mssql_tls* tls, const uint8_t
   if (length > tls->maximum_packet) return MSSQL_TLS_PACKET_TOO_LARGE;
   if (!SSL_is_init_finished(tls->ssl) || !tls->pending_write.empty()) return MSSQL_TLS_INVALID_STATE;
   tls->pending_write.assign(packet, packet + length);
+  return mssql_tls_retry_write(tls);
+}
+
+extern "C" mssql_tls_result mssql_tls_retry_write(mssql_tls* tls) {
+  if (tls == nullptr || tls->pending_write.empty()) return MSSQL_TLS_INVALID_STATE;
   size_t written = 0;
   const int value = SSL_write_ex(tls->ssl, tls->pending_write.data(), tls->pending_write.size(), &written);
   if (value == 1 && written == tls->pending_write.size()) {

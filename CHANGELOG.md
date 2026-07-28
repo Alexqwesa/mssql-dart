@@ -14,10 +14,12 @@
   transport replacement hook for the native TLS handoff.
 * TLS: treat an empty OpenSSL memory-BIO output drain as a normal retry state
   rather than a TLS error.
-* TLS: route encrypted connections through the native TLS handshake and
-  transport instead of Dart's `SecureSocket` bridge.
-* TLS: restore multi-packet SQL batch support over native TLS. Bulk Load over
-  TLS remains explicitly unsupported pending its separate protocol fix.
+* TLS: add an experimental native TLS handshake and transport, enabled with
+  `MSSQL_NATIVE_TLS=1`. The stable default remains Dart's TLS bridge while
+  native transport retry handling for Attention is completed.
+* TLS: validate multi-packet SQL batch and Bulk Load on the experimental
+  native transport. Bulk Load fixtures now match the encoder's nullable BCP
+  column metadata.
 * Tests: validate the native TLS path with forced-encryption connection, type,
   pooling, error-recovery, large-response, and multi-packet request coverage.
 * Build: add a Windows MSVC/Ninja script for building and testing the native

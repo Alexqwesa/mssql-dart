@@ -35,6 +35,7 @@ final class NativeTlsEngine implements Finalizable {
   late final int Function(Pointer<Void>, Pointer<Uint8>, int, Pointer<IntPtr>)
       _drainEncrypted;
   late final int Function(Pointer<Void>, Pointer<Uint8>, int) _writePacket;
+  late final int Function(Pointer<Void>) _retryWrite;
   late final int Function(Pointer<Void>, Pointer<Uint8>, int, Pointer<IntPtr>)
       _readPlaintext;
 
@@ -73,6 +74,8 @@ final class NativeTlsEngine implements Finalizable {
           int Function(Pointer<Void>, Pointer<Uint8>, int)>(
         'mssql_tls_write_packet',
       );
+      _retryWrite = _library.lookupFunction<Int32 Function(Pointer<Void>),
+          int Function(Pointer<Void>)>('mssql_tls_retry_write');
       _readPlaintext = _library.lookupFunction<
           Int32 Function(Pointer<Void>, Pointer<Uint8>, Size, Pointer<IntPtr>),
           int Function(Pointer<Void>, Pointer<Uint8>, int,
@@ -119,6 +122,8 @@ final class NativeTlsEngine implements Finalizable {
       calloc.free(input);
     }
   }
+
+  int retryWrite() => _retryWrite(_handle);
 
   Uint8List _read(
     int Function(Pointer<Void>, Pointer<Uint8>, int, Pointer<IntPtr>) call,

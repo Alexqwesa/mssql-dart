@@ -46,6 +46,7 @@ MSSQL_TLS_EXPORT mssql_tls_result mssql_tls_drain_encrypted(
     mssql_tls* tls, uint8_t* output, size_t capacity, size_t* written);
 MSSQL_TLS_EXPORT mssql_tls_result mssql_tls_write_packet(
     mssql_tls* tls, const uint8_t* packet, size_t length);
+MSSQL_TLS_EXPORT mssql_tls_result mssql_tls_retry_write(mssql_tls* tls);
 MSSQL_TLS_EXPORT mssql_tls_result mssql_tls_read_plaintext(
     mssql_tls* tls, uint8_t* output, size_t capacity, size_t* written);
 MSSQL_TLS_EXPORT int mssql_tls_is_handshake_complete(const mssql_tls* tls);

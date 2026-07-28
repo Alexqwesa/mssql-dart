@@ -22,6 +22,7 @@ import 'tds/prelogin.dart';
 import 'tds/rpc.dart';
 import 'tds/sql_browser.dart';
 import 'tds/transport.dart';
+import 'tds/tls_bridge.dart';
 import 'tds/token_stream.dart';
 
 /// Opens and manages a single connection to SQL Server.
@@ -586,8 +587,6 @@ class MssqlConnection {
   /// [table] may be `dbo.MyTable`. [table] and [columns] are bracket-quoted.
   /// Returns rows inserted. Empty [rows] is a no-op (returns 0).
   ///
-  /// Bulk Load over TLS is currently unsupported and throws [UnsupportedError]
-  /// before any Bulk Load bytes are written.
   ///
   /// ```dart
   /// await conn.bulkInsert(
@@ -612,12 +611,6 @@ class MssqlConnection {
       throw ArgumentError('columns must not be empty');
     }
     if (rows.isEmpty) return 0;
-    if (_buf.isTls) {
-      throw UnsupportedError(
-        'bulkInsert is not supported on encrypted connections. Use an '
-        'unencrypted trusted-network connection or another driver.',
-      );
-    }
     for (final row in rows) {
       if (row.length != columns.length) {
         throw ArgumentError(
@@ -1131,15 +1124,32 @@ class MssqlConnection {
   /// the handshake, ciphertext is forwarded as opaque TCP bytes.
   Future<void> _upgradeTls() async {
     final rawSocket = _socket;
-    final nativeTransport = await NativeTlsBridge.upgrade(
+    if (Platform.environment['MSSQL_NATIVE_TLS'] == '1') {
+      final nativeTransport = await NativeTlsBridge.upgrade(
+        rawSocket: rawSocket,
+        rawReader: _buf.rawReader,
+        host: _hostNameInCertificate ?? _host,
+        trustServerCertificate: _trustServerCertificate,
+      );
+      nativeTransport.start();
+      _buf.replaceTransport(NativeTlsTdsTransport(nativeTransport));
+      return;
+    }
+
+    final upgrade = await TdsTlsBridge.upgrade(
       rawSocket: rawSocket,
       rawReader: _buf.rawReader,
-      host: _hostNameInCertificate ?? _host,
+      host: _host,
       trustServerCertificate: _trustServerCertificate,
+      securityContext: _securityContext,
+      hostNameInCertificate: _hostNameInCertificate,
+      onBridgeDied: () => _connected = false,
     );
-    nativeTransport.start();
-    _buf.replaceTransport(NativeTlsTdsTransport(nativeTransport));
-    return;
+    _socket = upgrade.socket;
+    _rawTcpSocket = upgrade.rawTcpSocket;
+    _watchSocket(upgrade.rawTcpSocket);
+    _watchSocket(upgrade.socket);
+    _buf.replaceSocket(upgrade.socket);
   }
 
   Future<void> _sendLogin7() async {

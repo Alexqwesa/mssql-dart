@@ -5,6 +5,7 @@ import 'package:test/test.dart';
 
 void main() {
   final enabled = Platform.environment['MSSQL_LIVE_TESTS'] == '1';
+  final nativeTls = Platform.environment['MSSQL_NATIVE_TLS'] == '1';
   final skipReason = enabled ? false : 'Set MSSQL_LIVE_TESTS=1';
 
   group('TLS alignment live regressions', () {
@@ -38,7 +39,7 @@ SELECT @@ROWCOUNT AS affected;
           );
         }
       },
-      skip: skipReason,
+      skip: nativeTls ? skipReason : 'Set MSSQL_NATIVE_TLS=1',
       timeout: const Timeout(Duration(minutes: 2)),
     );
 
@@ -55,7 +56,7 @@ SELECT @@ROWCOUNT AS affected;
         final health = await conn.query('SELECT 1 AS ok');
         expect(health.first['ok'], 1);
       },
-      skip: skipReason,
+      skip: nativeTls ? skipReason : 'Set MSSQL_NATIVE_TLS=1',
       timeout: const Timeout(Duration(minutes: 2)),
     );
 
@@ -92,28 +93,26 @@ SELECT @@ROWCOUNT AS affected;
     );
 
     test(
-      'Bulk Load is rejected before encrypted Bulk Load bytes are written',
+      'Bulk Load completes over native TLS',
       () async {
         final conn = await _connect();
         addTearDown(conn.close);
 
         await conn.execute('''
 CREATE TABLE #tls_bulk_test (
-  id bigint NOT NULL,
-  label nvarchar(4000) NOT NULL
+  id bigint NULL,
+  label nvarchar(4000) NULL
 );
 ''');
 
-        await expectLater(
-          conn.bulkInsert(
-            '#tls_bulk_test',
-            const ['id', 'label'],
-            const [
-              [1, 'row'],
-            ],
-          ),
-          throwsUnsupportedError,
+        final inserted = await conn.bulkInsert(
+          '#tls_bulk_test',
+          const ['id', 'label'],
+          const [
+            [1, 'row'],
+          ],
         );
+        expect(inserted, 1);
         final health = await conn.query('SELECT 1 AS ok');
         expect(health.first['ok'], 1);
       },
