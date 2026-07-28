@@ -628,8 +628,26 @@ dart test
 ```
 
 `test/live/**` is gated: without `MSSQL_LIVE_TESTS=1` those files **skip** (they do
-not fail). Offline TLS helpers (`test/tls_bridge_test.dart`,
-`test/tls_align_test.dart`) always run.
+not fail).
+
+### Native TLS C++ tests
+
+The native OpenSSL ABI has an in-memory client/server CTest that covers the
+handshake, certificate extraction, and encrypted request/response flow.
+
+On Windows, with Visual Studio 2022, CMake, Ninja, and OpenSSL installed:
+
+```powershell
+.\tool\build_native.ps1
+```
+
+On Linux, with a C++ compiler, CMake, Ninja, and OpenSSL development headers:
+
+```bash
+cmake -S native -B build/native -G Ninja -DBUILD_TESTING=ON
+cmake --build build/native
+ctest --test-dir build/native --output-on-failure
+```
 
 ### Live SQL Server (opt-in)
 

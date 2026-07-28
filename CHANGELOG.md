@@ -11,6 +11,10 @@
 * TLS: serialize native TLS input, output, and pending writes so Attention can
   be injected safely while a response is active. Multi-packet requests, Bulk
   Load, and TLS cancellation are supported by the same transport.
+* Tests: replace the retired Dart TLS bridge/alignment unit suites with a
+  native CTest that performs a complete in-memory client/server handshake,
+  certificate DER retrieval, encrypted request write, and encrypted response
+  read through the exported OpenSSL ABI.
 * TLS: add an optional OpenSSL memory-BIO helper with a stable C ABI, CMake
   build, native CTest coverage, and Dart FFI smoke coverage.
 * TLS: add native handshake and post-handshake transport components that keep
