@@ -3,34 +3,126 @@ import 'dart:typed_data';
 
 import 'package:async/async.dart';
 
-import 'constants.dart';
 import '../protocol_limits.dart';
+import 'constants.dart';
 
-/// Wraps a [Socket] and provides TDS packet framing for reads and writes.
+/// Wraps a socket and provides TDS packet framing for reads and writes.
 ///
 /// TDS packets have an 8-byte header:
 ///   [0]   packet type
-///   [1]   status (0x01 = last packet in message)
-///   [2-3] total packet size (big-endian, including header)
-///   [4-5] server process ID (SPID) – zero from client
-///   [6]   packet sequence number (1-based, resets per message)
-///   [7]   window (always 0)
+///   [1]   status (`statusEOM` marks the final packet of a message)
+///   [2-3] total packet size, big-endian, including the header
+///   [4-5] server process ID; zero in client packets
+///   [6]   packet sequence number, starting at 1 for each message
+///   [7]   window; always zero
 ///
-/// ## TLS / SecureSocket plaintext ring
+/// ## TLS plaintext-ring alignment workaround
 ///
-/// `dart:io` SecureSocket copies application writes into an 8 KiB circular
-/// plaintext buffer that starts at offset 4 KiB. Each linear region is fed to
-/// a separate `SSL_write`, so a single [Socket.add] that straddles the wrap
-/// becomes **two TLS application-data records**. SQL Server's TDS-over-TLS
-/// path expects each TDS packet to arrive in one TLS record; a split packet
-/// closes the connection.
+/// This class contains a workaround for an implementation detail of the
+/// current Dart VM `SecureSocket`.
 ///
-/// When talking through a [SecureSocket] we therefore:
-/// - never emit short non-final TDS packets (TDS 7.3+ requires full
-///   [packetSize] for non-EOM packets after login);
-/// - if the next packet would not fit in the current linear region, send a
-///   complete no-op SQLBatch that ends exactly on the wrap, drain its
-///   response, then continue (see [_ensureTlsLinearRoom]).
+/// The VM currently copies outgoing application plaintext into an 8 KiB
+/// circular buffer. The buffer starts with both cursors at its midpoint,
+/// offset 4096. When a write crosses the end of that ring, the VM processes
+/// the tail and head as separate linear regions and passes them to TLS in
+/// separate `SSL_write` calls.
+///
+/// Live SQL Server testing showed that when one TDS packet is divided between
+/// those TLS writes, SQL Server closes the connection. This class therefore
+/// attempts to ensure that each complete TDS packet fits inside one contiguous
+/// region of the SecureSocket plaintext ring.
+///
+/// This behavior is not part of the public `dart:io` API. The constants and
+/// cursor model below mirror the current Dart VM implementation and may need
+/// review whenever the minimum supported Dart SDK changes.
+///
+/// ### Mirrored cursor
+///
+/// [_tlsWritePos] mirrors the end cursor of SecureSocket's outgoing plaintext
+/// ring:
+///
+/// - it is initialized to [tlsPlainBufferStart] after the TLS upgrade;
+/// - TLS handshake bytes do not advance this application-plaintext cursor;
+/// - after writing a TDS packet, its complete packet length is added modulo
+///   [tlsPlainBufferSize];
+/// - when the cursor is zero, one byte remains reserved by the circular-buffer
+///   implementation, so [tlsLinearFree] returns 8191 rather than 8192.
+///
+/// This mirror is valid only while all of the following invariants hold:
+///
+/// 1. Every post-handshake plaintext write goes through this [TdsBuffer].
+/// 2. TDS packet writes are serialized; no two writes run concurrently.
+/// 3. `await _socket.flush()` drains the plaintext supplied by the preceding
+///    write before the mirrored cursor is updated.
+/// 4. No library or caller writes directly to the underlying [SecureSocket].
+/// 5. Dart retains the mirrored ring size, initial position, and processing
+///    behavior.
+///
+/// If any invariant is broken, [_tlsWritePos] can diverge from SecureSocket's
+/// real cursor. Alignment based on a stale cursor can split a packet rather
+/// than prevent a split, so the affected connection must be treated as dead.
+///
+/// ### Packet alignment
+///
+/// Before writing a packet, [_ensureTlsLinearRoom] checks whether its complete
+/// TDS packet length fits in the current contiguous ring region.
+///
+/// If it fits, the packet is written normally. The method may still align
+/// first when writing the packet would leave a tail that cannot later hold a
+/// complete alignment request.
+///
+/// If it does not fit, the implementation sends a separate, complete TDS
+/// request whose encoded packet length exactly consumes the remaining ring
+/// tail. After its response has been consumed, the mirrored cursor is at zero
+/// and the original packet can be written at the start of the ring.
+///
+/// Even alignment lengths use a SQLBatch request. SQLBatch text is UTF-16LE,
+/// so its packet length has even parity. Odd alignment lengths use a specially
+/// encoded RPC request with a one-byte `varchar` value to produce an odd wire
+/// length.
+///
+/// Alignment requests are real SQL Server requests, not TLS padding and not
+/// continuation packets. They add a network round trip and can affect
+/// observable session state such as `@@ROWCOUNT`, server auditing, statistics,
+/// transaction diagnostics, and error handling.
+///
+/// ### TDS restrictions
+///
+/// Normal multi-packet TDS messages retain standard packetization:
+///
+/// - every non-final packet uses the negotiated [packetSize];
+/// - only the final `statusEOM` packet may be shorter;
+/// - an alignment request is always a separate `statusEOM` message;
+/// - empty or short non-final packets must never be used as filler.
+///
+/// An alignment request may be inserted only while SQL Server is ready to
+/// accept a new independent request. It must never be inserted:
+///
+/// - during PRELOGIN, LOGIN7, or an SSPI authentication continuation;
+/// - between `INSERT BULK` setup and its Bulk Load payload;
+/// - before or instead of an Attention packet for an active command;
+/// - between packets belonging to the same TDS message;
+/// - while another request or response is active without MARS.
+///
+/// The exact alignment packet must also fit within the negotiated [packetSize].
+/// If the ring tail cannot be consumed by one valid independent request, the
+/// driver must fail and close the connection rather than emit invalid TDS.
+///
+/// ### Response handling
+///
+/// The alignment response must be completely consumed before the caller's
+/// request is sent. It should be processed through the normal token parser so
+/// SQL Server ERROR, INFO, ENVCHANGE, DONE, transaction, and connection-state
+/// tokens are handled consistently. Blindly discarding response bytes can hide
+/// a failed alignment request and leave local session state stale.
+///
+/// ### Scope
+///
+/// This mechanism is a Dart-VM compatibility workaround, not a general TDS or
+/// TLS requirement and not a replacement for record-oriented TLS control.
+/// A TLS implementation that accepts one complete TDS packet in one controlled
+/// encryption operation would remove the need for mirrored ring tracking and
+/// synthetic alignment requests.
 class TdsBuffer {
   /// Matches `_ExternalBuffer.SIZE` in `dart:io` SecureSocket.
   static const int tlsPlainBufferSize = 8 * 1024;
@@ -76,7 +168,16 @@ class TdsBuffer {
   /// `ResetSession`). Cleared after that packet is written.
   bool resetConnectionPending = false;
 
-  /// Mirrored write offset in SecureSocket's plaintext ring; null when cleartext.
+  /// Mirrored end cursor of SecureSocket's outgoing plaintext circular buffer.
+  ///
+  /// Non-null only while [_socket] is a [SecureSocket]. The value is initialized
+  /// to [tlsPlainBufferStart] after the handshake and advanced by every complete
+  /// plaintext TDS packet written through this class.
+  ///
+  /// This is not obtained from `dart:io`; it is inferred from the current Dart VM
+  /// implementation. It remains valid only when writes are serialized, every TLS
+  /// plaintext write passes through this buffer, and each awaited flush fully
+  /// drains the preceding plaintext.
   int? _tlsWritePos;
 
   /// True after LOGINACK — wrap-alignment no-ops are safe only then.
@@ -152,6 +253,7 @@ class TdsBuffer {
   }
 
   void writeInt16LE(int v) => writeUint16LE(v & 0xFFFF);
+
   void writeInt32LE(int v) => writeUint32LE(v & 0xFFFFFFFF);
 
   /// Flush the accumulated write buffer as one or more TDS packets.
@@ -223,8 +325,19 @@ class TdsBuffer {
     return tlsPlainBufferSize - pos;
   }
 
-  /// Ensures the next [needed] plaintext bytes fit in one SecureSocket linear
-  /// region (so one [Socket.add] → one `SSL_write` → one TLS record).
+  /// Ensures that a complete TDS packet of [needed] bytes can be supplied to the
+  /// current SecureSocket plaintext ring without crossing its physical wrap.
+  ///
+  /// When necessary, this may send and consume an additional independent
+  /// alignment request before the caller's packet. It must therefore be invoked
+  /// only at a protocol boundary where SQL Server is ready for a new request.
+  ///
+  /// This method must not align by sending another request while handling LOGIN7,
+  /// SSPI, Bulk Load continuation, Attention, or another active request.
+  ///
+  /// Throws rather than writing when alignment cannot be represented as a valid
+  /// TDS request within the negotiated [packetSize]. A failure here makes the
+  /// mirrored TLS cursor unreliable, so the connection should be closed.
   Future<void> _ensureTlsLinearRoom(int needed) async {
     final pos = _tlsWritePos;
     if (pos == null) return;
@@ -235,8 +348,7 @@ class TdsBuffer {
       // Don't leave a tail that cannot host a valid wrap-fill packet.
       // Odd tails need an RPC nop (SQLBatch UCS-2 bodies are always even).
       final badTail = leftover > 0 &&
-          (leftover < _tlsMinNopPacket ||
-              (leftover.isOdd && leftover < _tlsMinOddRpcNop));
+          (leftover < _tlsMinNopPacket || (leftover.isOdd && leftover < _tlsMinOddRpcNop));
       if (badTail && _tlsNopAlignEnabled) {
         await _tlsNopFillToWrap();
       }
@@ -257,6 +369,22 @@ class TdsBuffer {
     }
   }
 
+  /// Sends one independent request whose complete TDS packet consumes exactly
+  /// the remaining contiguous SecureSocket plaintext-ring tail.
+  ///
+  /// Despite the historical "nop" name, this is not padding. SQL Server executes
+  /// and responds to the request. Even lengths are represented by SQLBatch;
+  /// odd lengths require an RPC request because UTF-16LE SQLBatch bodies cannot
+  /// change packet parity.
+  ///
+  /// Preconditions:
+  /// - login has completed;
+  /// - no request is currently active;
+  /// - SQL Server is ready for a new request;
+  /// - the exact tail length is a valid packet size not exceeding [packetSize].
+  ///
+  /// The response must be fully token-parsed before another request is written.
+  /// Any alignment error or unexpected response should poison the connection.
   Future<void> _tlsNopFillToWrap() async {
     final pos = _tlsWritePos!;
     if (pos == 0) return;
@@ -274,7 +402,12 @@ class TdsBuffer {
     _socket.add(pkt);
     await _socket.flush();
     _tlsWritePos = 0;
-    // Discard the no-op response so the caller’s next read sees their reply.
+    // The alignment request is a real SQL Server request. Its complete response
+    // must be consumed before the caller's request is sent.
+    //
+    // TODO: process this through TokenStream rather than discarding the raw TDS
+    // message. readAll() preserves byte synchronization, but it hides ERROR/INFO
+    // tokens and does not apply ENVCHANGE or transaction-state updates.
     await beginRead();
     await readAll();
   }
@@ -338,8 +471,7 @@ class TdsBuffer {
     o += 4;
     ByteData.sublistView(pkt).setUint16(o, 0x0002, Endian.little);
     o += 2;
-    ByteData.sublistView(pkt)
-        .setUint64(o, transactionDescriptor, Endian.little);
+    ByteData.sublistView(pkt).setUint64(o, transactionDescriptor, Endian.little);
     o += 8;
     ByteData.sublistView(pkt).setUint32(o, 1, Endian.little);
     o += 4;
@@ -473,9 +605,8 @@ class TdsBuffer {
       );
     }
     final bodyLen = size - headerSize;
-    final newBody = bodyLen > 0
-        ? Uint8List.fromList(await _reader.readChunk(bodyLen))
-        : Uint8List(0);
+    final newBody =
+        bodyLen > 0 ? Uint8List.fromList(await _reader.readChunk(bodyLen)) : Uint8List(0);
     if (newBody.length < bodyLen) {
       throw StateError('Connection closed mid-packet body');
     }
