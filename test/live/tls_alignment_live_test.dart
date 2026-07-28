@@ -43,27 +43,18 @@ SELECT @@ROWCOUNT AS affected;
     );
 
     test(
-      'multi-packet SQLBatch never receives an injected request in the middle',
+      'multi-packet SQLBatch is rejected before encrypted bytes are written',
       () async {
         final conn = await _connect();
         addTearDown(conn.close);
 
-        for (var i = 0; i < 120; i++) {
-          // First vary the ring position with a short request.
-          final prefixPad = _repeat('p', i % 97);
-          await conn.query('SELECT 1 AS n; -- $prefixPad');
-
-          // This batch is larger than the usual 4096-byte TDS packet and must
-          // be sent as one TDS message containing multiple packets.
-          final payload = _repeat('z', 6000 + (i % 257));
-          final result = await conn.query(
-            "SELECT LEN(N'$payload') AS payload_length",
-          );
-
-          expect(result.first['payload_length'], payload.length);
-          final health = await conn.query('SELECT 1 AS ok');
-          expect(health.first['ok'], 1);
-        }
+        final payload = _repeat('z', 6000);
+        await expectLater(
+          conn.query("SELECT LEN(N'$payload') AS payload_length"),
+          throwsUnsupportedError,
+        );
+        final health = await conn.query('SELECT 1 AS ok');
+        expect(health.first['ok'], 1);
       },
       skip: skipReason,
       timeout: const Timeout(Duration(minutes: 2)),
@@ -102,7 +93,7 @@ SELECT @@ROWCOUNT AS affected;
     );
 
     test(
-      'Bulk Load never receives SQL/RPC alignment traffic inside BCP phase',
+      'Bulk Load is rejected before encrypted Bulk Load bytes are written',
       () async {
         final conn = await _connect();
         addTearDown(conn.close);
@@ -114,35 +105,18 @@ CREATE TABLE #tls_bulk_test (
 );
 ''');
 
-        var expectedRows = 0;
-        for (var batch = 0; batch < 80; batch++) {
-          final pad = _repeat('b', batch % 127);
-          await conn.query('SELECT 1 AS n; -- $pad');
-
-          final rows = <List<Object?>>[
-            for (var i = 0; i < 12; i++)
-              <Object?>[
-                batch * 1000 + i,
-                'row-$batch-$i-${_repeat('v', (batch + i) % 73)}',
-              ],
-          ];
-
-          final inserted = await conn.bulkInsert(
+        await expectLater(
+          conn.bulkInsert(
             '#tls_bulk_test',
             const ['id', 'label'],
-            rows,
-          );
-          expectedRows += rows.length;
-          expect(inserted, rows.length);
-
-          final health = await conn.query('SELECT 1 AS ok');
-          expect(health.first['ok'], 1);
-        }
-
-        final count = await conn.query(
-          'SELECT COUNT_BIG(*) AS total FROM #tls_bulk_test',
+            const [
+              [1, 'row'],
+            ],
+          ),
+          throwsUnsupportedError,
         );
-        expect(count.first['total'], expectedRows);
+        final health = await conn.query('SELECT 1 AS ok');
+        expect(health.first['ok'], 1);
       },
       skip: skipReason,
       timeout: const Timeout(Duration(minutes: 3)),

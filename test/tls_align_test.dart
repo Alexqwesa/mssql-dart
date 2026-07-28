@@ -67,5 +67,24 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 20));
       expect(received, isEmpty);
     });
+
+    test('TLS rejects a multi-packet request before writing', () async {
+      final pair = await TdsSocketPair.open();
+      addTearDown(pair.close);
+      final received = <List<int>>[];
+      pair.server.listen(received.add);
+
+      final buffer = TdsBuffer(pair.client);
+      buffer.enableTlsAlignmentForTesting();
+      buffer.beginPacket(packSQLBatch);
+      buffer.writeBytes(List<int>.filled(5000, 0));
+
+      await expectLater(
+        buffer.finishPacket(packSQLBatch),
+        throwsUnsupportedError,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(received, isEmpty);
+    });
   });
 }

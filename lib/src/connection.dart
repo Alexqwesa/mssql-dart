@@ -584,6 +584,9 @@ class MssqlConnection {
   /// [table] may be `dbo.MyTable`. [table] and [columns] are bracket-quoted.
   /// Returns rows inserted. Empty [rows] is a no-op (returns 0).
   ///
+  /// Bulk Load over TLS is currently unsupported and throws [UnsupportedError]
+  /// before any Bulk Load bytes are written.
+  ///
   /// ```dart
   /// await conn.bulkInsert(
   ///   'dbo.Items',
@@ -607,6 +610,12 @@ class MssqlConnection {
       throw ArgumentError('columns must not be empty');
     }
     if (rows.isEmpty) return 0;
+    if (_buf.isTls) {
+      throw UnsupportedError(
+        'bulkInsert is not supported on encrypted connections. Use an '
+        'unencrypted trusted-network connection or another driver.',
+      );
+    }
     for (final row in rows) {
       if (row.length != columns.length) {
         throw ArgumentError(

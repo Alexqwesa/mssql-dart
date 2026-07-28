@@ -259,6 +259,9 @@ class TdsBuffer {
     _tlsWritePos = position;
   }
 
+  /// Whether this buffer is currently writing through a TLS socket.
+  bool get isTls => _tlsWritePos != null;
+
   // ── Write API ──────────────────────────────────────────────────────────────
 
   void beginPacket(int type) {
@@ -327,6 +330,12 @@ class TdsBuffer {
       packetSizes.add(headerSize + chunkLen);
       if (remaining <= maxBody) break;
       remaining -= chunkLen;
+    }
+    if (_tlsWritePos != null && packetSizes.length > 1) {
+      throw UnsupportedError(
+        'Encrypted TDS requests larger than one packet are not supported. '
+        'Use a smaller request or an unencrypted trusted-network connection.',
+      );
     }
     await _prepareTlsMessage(
       packetSizes,

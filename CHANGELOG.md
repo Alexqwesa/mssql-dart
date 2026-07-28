@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+## 0.4.1
+
+Throw UnsupportedError for multi-packet queries and bulk inserts over TLS. 
+(due to DartVM limitation...)
+
+* TLS: reject encrypted outbound SQL batches and RPC requests that require more
+  than one TDS packet. The current Dart `SecureSocket` bridge cannot safely
+  preserve those packet boundaries.
+* TLS: reject `bulkInsert` on encrypted connections for the same reason.
+  Use an unencrypted connection only on a trusted private network, or use a
+  driver with production-ready TLS Bulk Load support.
+* Tests: replace TLS alignment crash regressions with checks that unsupported
+  encrypted operations fail locally and leave the connection usable(see tests 
+  with throwsUnsupportedError).
 
 ## 0.4.0
 
