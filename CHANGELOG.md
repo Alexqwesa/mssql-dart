@@ -28,6 +28,8 @@
   2017, 2019, 2022, and 2025 with optional and forced TLS.
 * Tests: keep the matrix runner's offline phase out of `test/live`, so its
   output does not include expected live-test skips before containers start.
+* Tests: make the SQL Server matrix image compatible with 2017 through 2025 by
+  using the shared numeric SQL Server UID; rebuild only stale matrix images.
 * Tests: replace the retired Dart TLS bridge/alignment unit suites with a
   native CTest that performs a complete in-memory client/server handshake,
   certificate DER retrieval, encrypted request write, and encrypted response

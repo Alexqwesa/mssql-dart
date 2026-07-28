@@ -12,10 +12,19 @@ $matrixImages = @(
     @{ Service = 'sqlserver-2022'; Image = 'mssql-dart-live:2022' },
     @{ Service = 'sqlserver-2025'; Image = 'mssql-dart-live:2025' }
 )
+$matrixImageRevision = '2'
+$rebuiltServices = @()
 
 function Wait-SqlServer([string]$Container) {
     for ($attempt = 1; $attempt -le 90; $attempt++) {
-        & docker exec $Container /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P $password -Q 'SELECT 1' -No -C *> $null
+        & docker exec $Container test -x /opt/mssql-tools18/bin/sqlcmd *> $null
+        $sqlcmd = if ($LASTEXITCODE -eq 0) {
+            '/opt/mssql-tools18/bin/sqlcmd'
+        } else {
+            '/opt/mssql-tools/bin/sqlcmd'
+        }
+        # Keep the query as one native-command argument under Windows PowerShell.
+        & docker exec $Container $sqlcmd -S localhost -U sa -P $password -Q 'SELECT/**/1;' *> $null
         if ($LASTEXITCODE -eq 0) { return }
         Start-Sleep -Seconds 2
     }
@@ -26,8 +35,14 @@ function Wait-SqlServer([string]$Container) {
 function Build-MissingMatrixImages {
     $missingServices = @()
     foreach ($entry in $matrixImages) {
-        & docker image inspect $entry.Image *> $null
+        $imageJson = & docker image inspect $entry.Image 2> $null
         if ($LASTEXITCODE -ne 0) {
+            $missingServices += $entry.Service
+            continue
+        }
+        $image = $imageJson | ConvertFrom-Json
+        $revision = $image.Config.Labels.'org.mssql.dart.live.revision'
+        if ($revision -ne $matrixImageRevision) {
             $missingServices += $entry.Service
         }
     }
@@ -36,6 +51,19 @@ function Build-MissingMatrixImages {
     Write-Host "Building missing SQL Server matrix images: $($missingServices -join ', ')"
     & docker compose -f $compose build @missingServices
     if ($LASTEXITCODE -ne 0) { throw 'Docker Compose failed to build SQL Server matrix images.' }
+    $script:rebuiltServices = $missingServices
+}
+
+function Remove-StaleMatrixContainers {
+    if ($rebuiltServices.Count -eq 0) { return }
+    $staleServices = @()
+    foreach ($service in $rebuiltServices) {
+        $staleServices += $service, "$service-force-tls"
+    }
+    # Recreate only containers whose image was rebuilt. Healthy containers using
+    # the current image remain running and are reused by later test runs.
+    & docker compose -f $compose rm -sf @staleServices
+    if ($LASTEXITCODE -ne 0) { throw 'Docker Compose failed to remove stale SQL Server containers.' }
 }
 
 try {
@@ -49,6 +77,7 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Offline Dart tests failed.' }
 
     Build-MissingMatrixImages
+    Remove-StaleMatrixContainers
     # Do not rebuild or recreate the matrix on each test run. Existing healthy
     # containers keep their initialized databases and are simply reused.
     & docker compose -f $compose up -d --no-build --no-recreate
