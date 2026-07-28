@@ -676,15 +676,20 @@ ctest --test-dir build/native --output-on-failure
 
 `tool/full_tests.ps1` builds the native helper, runs offline Dart tests, then
 starts normal and force-encryption containers for SQL Server 2017, 2019, 2022,
-and 2025. It runs `test/live` once per edition and removes the containers and
-volumes afterwards.
+and 2025. It runs `test/live` once per edition and leaves the matrix running
+for reuse on later runs.
 
 ```powershell
 .\tool\full_tests.ps1
 ```
 
-Use `-KeepContainers` to retain the matrix for diagnosis. The six host ports
-are 14330/14331 (2017), 14334/14335 (2019), 14336/14337 (2022), and
+Stop the matrix when finished with:
+
+```powershell
+docker compose -f .\docker-compose.matrix.yml down
+```
+
+The eight host ports are 14330/14331 (2017), 14334/14335 (2019), 14336/14337 (2022), and
 14338/14339 (2025). SQL Server 2012 through 2016 have no official Linux
 container images; test those releases against externally provisioned Windows
 instances by setting the normal `MSSQL_*` environment variables.

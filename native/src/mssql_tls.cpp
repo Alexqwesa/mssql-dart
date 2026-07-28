@@ -14,6 +14,11 @@ struct mssql_tls {
   std::vector<uint8_t> pending_write;
   std::string error;
   size_t maximum_packet = 16383;
+
+  ~mssql_tls() {
+    SSL_free(ssl);
+    SSL_CTX_free(context);
+  }
 };
 
 static mssql_tls_result result(mssql_tls* tls, int ssl_result) {
@@ -45,22 +50,28 @@ extern "C" mssql_tls* mssql_tls_create(const mssql_tls_config* config) {
   }
   tls->ssl = SSL_new(tls->context);
   if (tls->ssl == nullptr) return nullptr;
-  SSL_set_tlsext_host_name(tls->ssl, config->server_name);
+  if (SSL_set_tlsext_host_name(tls->ssl, config->server_name) != 1) {
+    return nullptr;
+  }
   if (!config->trust_server_certificate && config->verify_hostname &&
       SSL_set1_host(tls->ssl, config->server_name) != 1) return nullptr;
-  SSL_set_max_send_fragment(tls->ssl, static_cast<long>(tls->maximum_packet));
+  if (SSL_set_max_send_fragment(tls->ssl,
+                                static_cast<long>(tls->maximum_packet)) != 1) {
+    return nullptr;
+  }
   BIO* input = BIO_new(BIO_s_mem());
   BIO* output = BIO_new(BIO_s_mem());
-  if (input == nullptr || output == nullptr) return nullptr;
+  if (input == nullptr || output == nullptr) {
+    BIO_free(input);
+    BIO_free(output);
+    return nullptr;
+  }
   SSL_set_bio(tls->ssl, input, output);
   SSL_set_connect_state(tls->ssl);
   return tls.release();
 }
 
 extern "C" void mssql_tls_destroy(mssql_tls* tls) {
-  if (tls == nullptr) return;
-  SSL_free(tls->ssl);
-  SSL_CTX_free(tls->context);
   delete tls;
 }
 

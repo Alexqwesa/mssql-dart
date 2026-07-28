@@ -15,6 +15,8 @@
   Load, and TLS cancellation are supported by the same transport.
 * TLS: retain encrypted bytes not yet accepted by the native memory BIO instead
   of treating partial BIO consumption as a transport failure.
+* TLS: release partially initialized OpenSSL resources when native session
+  creation fails and reject failed SNI or fragment-limit configuration.
 * TLS: negotiate a 16,383-byte TDS packet size in encrypted LOGIN7 sessions,
   keeping SQL Server and the native TLS fragment boundary in agreement.
 * TLS/NTLM: derive `tls-server-end-point` channel bindings from the native TLS

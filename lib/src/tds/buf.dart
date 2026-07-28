@@ -298,19 +298,6 @@ class TdsBuffer {
     return out;
   }
 
-  /// Reads exactly [n] raw bytes directly from the underlying stream,
-  /// bypassing TDS packet framing. Used only during the TLS handshake bridge.
-  /// Returns null if the stream closes.
-  Future<Uint8List?> readBytesRaw(int n) async {
-    try {
-      final chunk = await _reader.readChunk(n);
-      if (chunk.length < n) return null;
-      return Uint8List.fromList(chunk);
-    } catch (_) {
-      return null;
-    }
-  }
-
   Future<void> _ensureBytes(int n) async {
     while (_rbuf.length - _rpos < n) {
       if (_rFinal) throw StateError('TDS stream ended unexpectedly');

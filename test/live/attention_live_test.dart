@@ -130,7 +130,7 @@ void main() {
           final r = await conn.query('SELECT 9 AS n');
           expect(r[0]['n'], equals(9));
         } on StateError {
-          // TLS bridge can be mid-bind if Attention raced the stream teardown.
+          // Cancellation can race the stream teardown on a fast local server.
         }
       }
     });

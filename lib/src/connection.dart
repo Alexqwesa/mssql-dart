@@ -969,8 +969,7 @@ class MssqlConnection {
     // 2. PRELOGIN
     // encryptNotSupported (0x02) = client will not do TLS (cleartext / LAN).
     // encryptOn (0x01) = request TLS for the whole session.
-    // Do not advertise encryptOff and then upgrade: that races the TDS-TLS
-    // bridge and breaks long-lived connections. If the server requires
+    // Do not advertise encryptOff and then upgrade. If the server requires
     // encryption, fail with a clear error instead.
     final wantEncrypt =
         (_encrypt || _azureAdAuth != null) ? encryptOn : encryptNotSupported;
