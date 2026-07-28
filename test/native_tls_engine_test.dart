@@ -18,8 +18,8 @@ void main() {
       final result = engine.handshake();
       expect(result, anyOf(1, 2, 3));
       final bytes = engine.drainEncrypted();
-      expect(bytes, isNotEmpty);
-      expect(bytes.first, 0x16);
+      expect(bytes.bytes, isNotEmpty);
+      expect(bytes.bytes.first, 0x16);
     },
     skip: supported ? false : 'Native TLS is unsupported on this platform.',
   );

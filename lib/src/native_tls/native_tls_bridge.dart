@@ -16,10 +16,14 @@ final class NativeTlsBridge {
     required ChunkedStreamReader<int> rawReader,
     required String host,
     required bool trustServerCertificate,
+    String? trustedCertificateFile,
+    String? trustedCertificateDirectory,
   }) async {
     final engine = NativeTlsEngine(
       serverName: host,
       trustServerCertificate: trustServerCertificate,
+      trustedCertificateFile: trustedCertificateFile,
+      trustedCertificateDirectory: trustedCertificateDirectory,
     );
     try {
       var result = engine.handshake();
@@ -63,14 +67,17 @@ final class NativeTlsBridge {
   ) async {
     while (true) {
       final ciphertext = engine.drainEncrypted();
-      if (ciphertext.isEmpty) break;
-      final packet = Uint8List(headerSize + ciphertext.length);
+      if (ciphertext.code < 0) {
+        throw StateError('Native TLS handshake drain failed: ${ciphertext.code}.');
+      }
+      if (ciphertext.bytes.isEmpty) break;
+      final packet = Uint8List(headerSize + ciphertext.bytes.length);
       packet[0] = packPrelogin;
       packet[1] = statusEOM;
       packet[2] = (packet.length >> 8) & 0xff;
       packet[3] = packet.length & 0xff;
       packet[6] = 1;
-      packet.setRange(headerSize, packet.length, ciphertext);
+      packet.setRange(headerSize, packet.length, ciphertext.bytes);
       socket.add(packet);
     }
     await socket.flush();

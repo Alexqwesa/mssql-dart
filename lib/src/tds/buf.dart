@@ -380,16 +380,11 @@ class TdsBuffer {
         pkt.setRange(headerSize, totalSize, body, offset);
       }
 
-      await _transport.writePacket(pkt);
+      await _transport.writePacket(pkt, urgent: packetType == packAttention);
       if (applyReset && seq == 1) {
         resetConnectionPending = false;
         transactionDescriptor = 0;
       }
-      final pos = _tlsWritePos;
-      if (pos != null) {
-        _tlsWritePos = (pos + totalSize) % tlsPlainBufferSize;
-      }
-
       offset += chunkLen;
       seq++;
       if (isLast) break;

@@ -38,10 +38,16 @@ extern "C" mssql_tls* mssql_tls_create(const mssql_tls_config* config) {
   else {
     SSL_CTX_set_verify(tls->context, SSL_VERIFY_PEER, nullptr);
     if (SSL_CTX_set_default_verify_paths(tls->context) != 1) return nullptr;
+    if ((config->ca_file != nullptr || config->ca_path != nullptr) &&
+        SSL_CTX_load_verify_locations(tls->context, config->ca_file, config->ca_path) != 1) {
+      return nullptr;
+    }
   }
   tls->ssl = SSL_new(tls->context);
   if (tls->ssl == nullptr) return nullptr;
   SSL_set_tlsext_host_name(tls->ssl, config->server_name);
+  if (!config->trust_server_certificate && config->verify_hostname &&
+      SSL_set1_host(tls->ssl, config->server_name) != 1) return nullptr;
   SSL_set_max_send_fragment(tls->ssl, static_cast<long>(tls->maximum_packet));
   BIO* input = BIO_new(BIO_s_mem());
   BIO* output = BIO_new(BIO_s_mem());
@@ -99,12 +105,42 @@ extern "C" mssql_tls_result mssql_tls_retry_write(mssql_tls* tls) {
   return result(tls, value);
 }
 
+extern "C" int mssql_tls_has_pending_write(const mssql_tls* tls) {
+  return tls != nullptr && !tls->pending_write.empty();
+}
+
 extern "C" mssql_tls_result mssql_tls_read_plaintext(mssql_tls* tls, uint8_t* output, size_t capacity, size_t* written) {
   if (tls == nullptr || written == nullptr || (output == nullptr && capacity != 0)) return MSSQL_TLS_INVALID_ARGUMENT;
   size_t read = 0;
   const int value = SSL_read_ex(tls->ssl, output, capacity, &read);
   *written = read;
   return value == 1 ? MSSQL_TLS_OK : result(tls, value);
+}
+
+extern "C" mssql_tls_result mssql_tls_peer_certificate_der(
+    mssql_tls* tls, uint8_t* output, size_t capacity, size_t* written) {
+  if (tls == nullptr || written == nullptr || (output == nullptr && capacity != 0)) {
+    return MSSQL_TLS_INVALID_ARGUMENT;
+  }
+  X509* certificate = SSL_get1_peer_certificate(tls->ssl);
+  if (certificate == nullptr) {
+    *written = 0;
+    return MSSQL_TLS_PEER_CLOSED;
+  }
+  const int required = i2d_X509(certificate, nullptr);
+  if (required <= 0) {
+    X509_free(certificate);
+    return MSSQL_TLS_ERROR;
+  }
+  *written = static_cast<size_t>(required);
+  if (output == nullptr || capacity < *written) {
+    X509_free(certificate);
+    return MSSQL_TLS_PACKET_TOO_LARGE;
+  }
+  unsigned char* cursor = output;
+  const int encoded = i2d_X509(certificate, &cursor);
+  X509_free(certificate);
+  return encoded == required ? MSSQL_TLS_OK : MSSQL_TLS_ERROR;
 }
 
 extern "C" int mssql_tls_is_handshake_complete(const mssql_tls* tls) { return tls != nullptr && SSL_is_init_finished(tls->ssl); }

@@ -5,7 +5,6 @@ import 'package:test/test.dart';
 
 void main() {
   final enabled = Platform.environment['MSSQL_LIVE_TESTS'] == '1';
-  final nativeTls = Platform.environment['MSSQL_NATIVE_TLS'] == '1';
   final skipReason = enabled ? false : 'Set MSSQL_LIVE_TESTS=1';
 
   group('TLS alignment live regressions', () {
@@ -44,7 +43,7 @@ SELECT @@ROWCOUNT AS affected;
     );
 
     test(
-      'multi-packet SQLBatch completes over native TLS',
+      'multi-packet SQLBatch completes over TLS',
       () async {
         final conn = await _connect();
         addTearDown(conn.close);
@@ -56,7 +55,7 @@ SELECT @@ROWCOUNT AS affected;
         final health = await conn.query('SELECT 1 AS ok');
         expect(health.first['ok'], 1);
       },
-      skip: nativeTls ? skipReason : 'Set MSSQL_NATIVE_TLS=1',
+      skip: skipReason,
       timeout: const Timeout(Duration(minutes: 2)),
     );
 
@@ -93,7 +92,7 @@ SELECT @@ROWCOUNT AS affected;
     );
 
     test(
-      'Bulk Load completes over native TLS',
+      'Bulk Load completes over TLS',
       () async {
         final conn = await _connect();
         addTearDown(conn.close);
@@ -116,7 +115,7 @@ CREATE TABLE #tls_bulk_test (
         final health = await conn.query('SELECT 1 AS ok');
         expect(health.first['ok'], 1);
       },
-      skip: nativeTls ? skipReason : 'Set MSSQL_NATIVE_TLS=1',
+      skip: skipReason,
       timeout: const Timeout(Duration(minutes: 3)),
     );
   });

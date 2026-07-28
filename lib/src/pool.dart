@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'auth/azure_ad_auth.dart';
 import 'connection.dart';
@@ -28,8 +27,9 @@ class MssqlPoolConfig {
   final bool encrypt;
   final bool trustServerCertificate;
 
-  /// Optional custom [SecurityContext] (e.g. corporate CA).
-  final SecurityContext? securityContext;
+  /// Optional PEM trust roots for native TLS certificate validation.
+  final String? trustedCertificateFile;
+  final String? trustedCertificateDirectory;
 
   /// Hostname for SNI / certificate validation (defaults to [host]).
   final String? hostNameInCertificate;
@@ -115,7 +115,8 @@ class MssqlPoolConfig {
     this.packetSize = defaultPacketSize,
     this.encrypt = true,
     this.trustServerCertificate = false,
-    this.securityContext,
+    this.trustedCertificateFile,
+    this.trustedCertificateDirectory,
     this.hostNameInCertificate,
     this.connectionTimeout = const Duration(seconds: 15),
     this.queryTimeout,
@@ -240,7 +241,8 @@ class MssqlPoolConfig {
     String appName = 'mssql-dart',
     int packetSize = defaultPacketSize,
     bool trustServerCertificate = false,
-    SecurityContext? securityContext,
+    String? trustedCertificateFile,
+    String? trustedCertificateDirectory,
     String? hostNameInCertificate,
     Duration connectionTimeout = const Duration(seconds: 15),
     Duration? queryTimeout,
@@ -272,7 +274,8 @@ class MssqlPoolConfig {
       packetSize: packetSize,
       encrypt: true,
       trustServerCertificate: trustServerCertificate,
-      securityContext: securityContext,
+      trustedCertificateFile: trustedCertificateFile,
+      trustedCertificateDirectory: trustedCertificateDirectory,
       hostNameInCertificate: hostNameInCertificate,
       connectionTimeout: connectionTimeout,
       queryTimeout: queryTimeout,
@@ -310,7 +313,8 @@ class MssqlPoolConfig {
     int packetSize = defaultPacketSize,
     bool encrypt = true,
     bool trustServerCertificate = false,
-    SecurityContext? securityContext,
+    String? trustedCertificateFile,
+    String? trustedCertificateDirectory,
     String? hostNameInCertificate,
     Duration connectionTimeout = const Duration(seconds: 15),
     Duration? queryTimeout,
@@ -342,7 +346,8 @@ class MssqlPoolConfig {
       packetSize: packetSize,
       encrypt: encrypt,
       trustServerCertificate: trustServerCertificate,
-      securityContext: securityContext,
+      trustedCertificateFile: trustedCertificateFile,
+      trustedCertificateDirectory: trustedCertificateDirectory,
       hostNameInCertificate: hostNameInCertificate,
       connectionTimeout: connectionTimeout,
       queryTimeout: queryTimeout,
@@ -817,7 +822,8 @@ class MssqlPool {
         appName: config.appName,
         packetSize: config.packetSize,
         trustServerCertificate: config.trustServerCertificate,
-        securityContext: config.securityContext,
+        trustedCertificateFile: config.trustedCertificateFile,
+        trustedCertificateDirectory: config.trustedCertificateDirectory,
         hostNameInCertificate: config.hostNameInCertificate,
         timeout: config.connectionTimeout,
         queryTimeout: config.queryTimeout,
@@ -846,7 +852,8 @@ class MssqlPool {
           packetSize: config.packetSize,
           encrypt: config.encrypt,
           trustServerCertificate: config.trustServerCertificate,
-          securityContext: config.securityContext,
+          trustedCertificateFile: config.trustedCertificateFile,
+          trustedCertificateDirectory: config.trustedCertificateDirectory,
           hostNameInCertificate: config.hostNameInCertificate,
           timeout: config.connectionTimeout,
           queryTimeout: config.queryTimeout,
@@ -871,7 +878,8 @@ class MssqlPool {
           packetSize: config.packetSize,
           encrypt: config.encrypt,
           trustServerCertificate: config.trustServerCertificate,
-          securityContext: config.securityContext,
+          trustedCertificateFile: config.trustedCertificateFile,
+          trustedCertificateDirectory: config.trustedCertificateDirectory,
           hostNameInCertificate: config.hostNameInCertificate,
           timeout: config.connectionTimeout,
           queryTimeout: config.queryTimeout,

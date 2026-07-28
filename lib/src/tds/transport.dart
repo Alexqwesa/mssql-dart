@@ -12,7 +12,9 @@ abstract interface class TdsTransport {
 
   Stream<Uint8List> get incoming;
 
-  Future<void> writePacket(Uint8List packet);
+  Future<void> writePacket(Uint8List packet, {bool urgent = false});
+
+  Future<void> writePackets(List<Uint8List> packets, {bool urgent = false});
 
   Future<void> close();
 }
@@ -30,9 +32,16 @@ final class SocketTdsTransport implements TdsTransport {
   Stream<Uint8List> get incoming => socket.map(Uint8List.fromList);
 
   @override
-  Future<void> writePacket(Uint8List packet) async {
+  Future<void> writePacket(Uint8List packet, {bool urgent = false}) async {
     socket.add(packet);
     await socket.flush();
+  }
+
+  @override
+  Future<void> writePackets(List<Uint8List> packets, {bool urgent = false}) async {
+    for (final packet in packets) {
+      await writePacket(packet, urgent: urgent);
+    }
   }
 
   @override
@@ -52,7 +61,29 @@ final class NativeTlsTdsTransport implements TdsTransport {
   Stream<Uint8List> get incoming => transport.plaintext;
 
   @override
-  Future<void> writePacket(Uint8List packet) => transport.writePacket(packet);
+  Future<void> writePacket(Uint8List packet, {bool urgent = false}) =>
+      transport.writePacket(packet, urgent: urgent);
+
+  @override
+  Future<void> writePackets(List<Uint8List> packets, {bool urgent = false}) {
+    final size = packets.fold<int>(0, (sum, packet) => sum + packet.length);
+    if (size <= 16383) {
+      final message = Uint8List(size);
+      var offset = 0;
+      for (final packet in packets) {
+        message.setRange(offset, offset + packet.length, packet);
+        offset += packet.length;
+      }
+      return transport.writePacket(message, urgent: urgent);
+    }
+    return _writeIndividually(packets, urgent);
+  }
+
+  Future<void> _writeIndividually(List<Uint8List> packets, bool urgent) async {
+    for (final packet in packets) {
+      await transport.writePacket(packet, urgent: urgent);
+    }
+  }
 
   @override
   Future<void> close() => transport.close();

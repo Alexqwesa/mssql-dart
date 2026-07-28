@@ -17,8 +17,29 @@ final class _MssqlTlsConfig extends Struct {
   external int maximumPlaintextPacket;
 }
 
+/// Result from an OpenSSL read/drain operation.
+final class NativeTlsRead {
+  final int code;
+  final Uint8List bytes;
+
+  const NativeTlsRead(this.code, this.bytes);
+}
+
+/// Synchronous native TLS operations owned exclusively by [NativeTlsTransport].
+abstract interface class NativeTlsDriver {
+  int handshake();
+  int feedEncrypted(Uint8List bytes);
+  NativeTlsRead drainEncrypted({int capacity = 16384});
+  NativeTlsRead readPlaintext({int capacity = 16384});
+  int writePacket(Uint8List packet);
+  int retryWrite();
+  bool get hasPendingWrite;
+  Uint8List peerCertificateDer();
+  void dispose();
+}
+
 /// Minimal FFI owner for one OpenSSL memory-BIO TLS session.
-final class NativeTlsEngine implements Finalizable {
+final class NativeTlsEngine implements Finalizable, NativeTlsDriver {
   static final _finalizer = NativeFinalizer(
     loadMssqlTls()
         .lookup<NativeFunction<Void Function(Pointer<Void>)>>(
@@ -36,23 +57,30 @@ final class NativeTlsEngine implements Finalizable {
       _drainEncrypted;
   late final int Function(Pointer<Void>, Pointer<Uint8>, int) _writePacket;
   late final int Function(Pointer<Void>) _retryWrite;
+  late final int Function(Pointer<Void>) _hasPendingWrite;
   late final int Function(Pointer<Void>, Pointer<Uint8>, int, Pointer<IntPtr>)
       _readPlaintext;
+  late final int Function(Pointer<Void>, Pointer<Uint8>, int, Pointer<IntPtr>)
+      _peerCertificateDer;
 
   NativeTlsEngine({
     required String serverName,
     required bool trustServerCertificate,
+    String? trustedCertificateFile,
+    String? trustedCertificateDirectory,
   }) : _library = loadMssqlTls() {
     final create = _library.lookupFunction<
         Pointer<Void> Function(Pointer<_MssqlTlsConfig>),
         Pointer<Void> Function(Pointer<_MssqlTlsConfig>)>('mssql_tls_create');
     final config = calloc<_MssqlTlsConfig>();
     final name = serverName.toNativeUtf8();
+    final caFile = trustedCertificateFile?.toNativeUtf8() ?? nullptr;
+    final caPath = trustedCertificateDirectory?.toNativeUtf8() ?? nullptr;
     try {
       config.ref
         ..serverName = name
-        ..caFile = nullptr
-        ..caPath = nullptr
+        ..caFile = caFile
+        ..caPath = caPath
         ..trustServerCertificate = trustServerCertificate ? 1 : 0
         ..verifyHostname = trustServerCertificate ? 0 : 1
         ..maximumPlaintextPacket = 16383;
@@ -76,21 +104,31 @@ final class NativeTlsEngine implements Finalizable {
       );
       _retryWrite = _library.lookupFunction<Int32 Function(Pointer<Void>),
           int Function(Pointer<Void>)>('mssql_tls_retry_write');
+      _hasPendingWrite = _library.lookupFunction<Int32 Function(Pointer<Void>),
+          int Function(Pointer<Void>)>('mssql_tls_has_pending_write');
       _readPlaintext = _library.lookupFunction<
           Int32 Function(Pointer<Void>, Pointer<Uint8>, Size, Pointer<IntPtr>),
           int Function(Pointer<Void>, Pointer<Uint8>, int,
               Pointer<IntPtr>)>('mssql_tls_read_plaintext');
+      _peerCertificateDer = _library.lookupFunction<
+          Int32 Function(Pointer<Void>, Pointer<Uint8>, Size, Pointer<IntPtr>),
+          int Function(Pointer<Void>, Pointer<Uint8>, int,
+              Pointer<IntPtr>)>('mssql_tls_peer_certificate_der');
       _finalizer.attach(this, _handle, detach: this);
     } finally {
       calloc.free(name);
+      if (caFile != nullptr) calloc.free(caFile);
+      if (caPath != nullptr) calloc.free(caPath);
       calloc.free(config);
     }
   }
 
   /// Starts or continues the TLS handshake. The caller drains ciphertext after.
+  @override
   int handshake() => _library.lookupFunction<Int32 Function(Pointer<Void>),
       int Function(Pointer<Void>)>('mssql_tls_handshake')(_handle);
 
+  @override
   int feedEncrypted(Uint8List bytes) {
     final input = calloc<Uint8>(bytes.length);
     final consumed = calloc<IntPtr>();
@@ -107,12 +145,15 @@ final class NativeTlsEngine implements Finalizable {
     }
   }
 
-  Uint8List drainEncrypted({int capacity = 16384}) =>
+  @override
+  NativeTlsRead drainEncrypted({int capacity = 16384}) =>
       _read(_drainEncrypted, capacity);
 
-  Uint8List readPlaintext({int capacity = 16384}) =>
+  @override
+  NativeTlsRead readPlaintext({int capacity = 16384}) =>
       _read(_readPlaintext, capacity);
 
+  @override
   int writePacket(Uint8List packet) {
     final input = calloc<Uint8>(packet.length);
     try {
@@ -123,9 +164,32 @@ final class NativeTlsEngine implements Finalizable {
     }
   }
 
+  @override
   int retryWrite() => _retryWrite(_handle);
 
-  Uint8List _read(
+  @override
+  bool get hasPendingWrite => _hasPendingWrite(_handle) != 0;
+
+  @override
+  Uint8List peerCertificateDer() {
+    final required = calloc<IntPtr>();
+    try {
+      final sizeCode = _peerCertificateDer(_handle, nullptr, 0, required);
+      if (sizeCode != -3 || required.value == 0) return Uint8List(0);
+      final output = calloc<Uint8>(required.value);
+      try {
+        final code = _peerCertificateDer(_handle, output, required.value, required);
+        if (code != 0) throw StateError('Unable to read peer certificate: $code.');
+        return Uint8List.fromList(output.asTypedList(required.value));
+      } finally {
+        calloc.free(output);
+      }
+    } finally {
+      calloc.free(required);
+    }
+  }
+
+  NativeTlsRead _read(
     int Function(Pointer<Void>, Pointer<Uint8>, int, Pointer<IntPtr>) call,
     int capacity,
   ) {
@@ -133,14 +197,17 @@ final class NativeTlsEngine implements Finalizable {
     final written = calloc<IntPtr>();
     try {
       final code = call(_handle, output, capacity, written);
-      if (code < 0) throw StateError('Native TLS read failed with code $code.');
-      return Uint8List.fromList(output.asTypedList(written.value));
+      return NativeTlsRead(
+        code,
+        Uint8List.fromList(output.asTypedList(written.value)),
+      );
     } finally {
       calloc.free(written);
       calloc.free(output);
     }
   }
 
+  @override
   void dispose() {
     _finalizer.detach(this);
     _destroy.asFunction<void Function(Pointer<Void>)>()(_handle);

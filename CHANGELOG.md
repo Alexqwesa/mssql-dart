@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+## 0.5.0
+
+* **Breaking:** TLS now uses the native OpenSSL transport on Windows and Linux;
+  the `MSSQL_NATIVE_TLS` switch and Dart `SecureSocket` TLS bridge are removed.
+* **Breaking:** replace `securityContext` with `trustedCertificateFile` and
+  `trustedCertificateDirectory` PEM trust-root options.
+* TLS: serialize native TLS input, output, and pending writes so Attention can
+  be injected safely while a response is active. Multi-packet requests, Bulk
+  Load, and TLS cancellation are supported by the same transport.
 * TLS: add an optional OpenSSL memory-BIO helper with a stable C ABI, CMake
   build, native CTest coverage, and Dart FFI smoke coverage.
 * TLS: add native handshake and post-handshake transport components that keep

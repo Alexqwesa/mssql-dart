@@ -577,7 +577,7 @@ final conn = await MssqlConnection.connect(
   encrypt: true,                  // default true
   trustServerCertificate: false,  // validate cert (default false)
   // Optional: custom CA / client certs
-  // securityContext: SecurityContext()..setTrustedCertificates('ca.pem'),
+  // trustedCertificateFile: 'ca.pem',
   // After Always On redirect to an IP, keep validating against the AG name:
   // hostNameInCertificate: 'ag-listener.contoso.local',
   ...

@@ -22,7 +22,6 @@ import 'tds/prelogin.dart';
 import 'tds/rpc.dart';
 import 'tds/sql_browser.dart';
 import 'tds/transport.dart';
-import 'tds/tls_bridge.dart';
 import 'tds/token_stream.dart';
 
 /// Opens and manages a single connection to SQL Server.
@@ -53,8 +52,8 @@ class MssqlConnection {
   final NtlmAuth? _ntlmAuth;
   final bool _encrypt;
   final bool _trustServerCertificate;
-  // ignore: unused_field
-  final SecurityContext? _securityContext;
+  final String? _trustedCertificateFile;
+  final String? _trustedCertificateDirectory;
   final String? _hostNameInCertificate;
 
   /// Covers TCP + PRELOGIN + optional TLS + LOGIN7 (+ NTLM) — not TCP alone.
@@ -113,7 +112,8 @@ class MssqlConnection {
     NtlmAuth? ntlmAuth,
     required bool encrypt,
     required bool trustServerCertificate,
-    SecurityContext? securityContext,
+    String? trustedCertificateFile,
+    String? trustedCertificateDirectory,
     String? hostNameInCertificate,
     required Duration timeout,
     Duration? queryTimeout,
@@ -137,7 +137,8 @@ class MssqlConnection {
         _ntlmAuth = ntlmAuth,
         _encrypt = encrypt,
         _trustServerCertificate = trustServerCertificate,
-        _securityContext = securityContext,
+        _trustedCertificateFile = trustedCertificateFile,
+        _trustedCertificateDirectory = trustedCertificateDirectory,
         _hostNameInCertificate = hostNameInCertificate,
         _timeout = timeout,
         _queryTimeout = queryTimeout,
@@ -160,8 +161,9 @@ class MssqlConnection {
   /// Required for typical local Docker SQL Server. Has no effect when
   /// [encrypt] is `false`.
   ///
-  /// [securityContext] — optional custom [SecurityContext] (e.g. with a
-  /// corporate CA). Ignored when [trustServerCertificate] is `true`.
+  /// [trustedCertificateFile] / [trustedCertificateDirectory] — optional PEM
+  /// trust roots for native OpenSSL certificate validation. Ignored when
+  /// [trustServerCertificate] is `true`.
   ///
   /// [hostNameInCertificate] — hostname used for SNI / certificate validation
   /// (defaults to [host]). Use when dialing an IP or Always On listener while
@@ -211,7 +213,8 @@ class MssqlConnection {
     int packetSize = defaultPacketSize,
     bool encrypt = true,
     bool trustServerCertificate = false,
-    SecurityContext? securityContext,
+    String? trustedCertificateFile,
+    String? trustedCertificateDirectory,
     String? hostNameInCertificate,
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
@@ -243,7 +246,8 @@ class MssqlConnection {
         sqlAuth: SqlAuth(username: user, password: password),
         encrypt: encrypt,
         trustServerCertificate: trustServerCertificate,
-        securityContext: securityContext,
+        trustedCertificateFile: trustedCertificateFile,
+        trustedCertificateDirectory: trustedCertificateDirectory,
         hostNameInCertificate: hostNameInCertificate,
         timeout: timeout,
         queryTimeout: queryTimeout,
@@ -267,7 +271,8 @@ class MssqlConnection {
     String connectionString, {
     String? sessionInitSql,
     MssqlProtocolLimits protocolLimits = const MssqlProtocolLimits(),
-    SecurityContext? securityContext,
+    String? trustedCertificateFile,
+    String? trustedCertificateDirectory,
   }) {
     final c = MssqlConnectionString.parse(connectionString);
     if (c.useNtlm) {
@@ -284,7 +289,8 @@ class MssqlConnection {
         packetSize: c.packetSize,
         encrypt: c.encrypt,
         trustServerCertificate: c.trustServerCertificate,
-        securityContext: securityContext,
+        trustedCertificateFile: trustedCertificateFile,
+        trustedCertificateDirectory: trustedCertificateDirectory,
         hostNameInCertificate: c.hostNameInCertificate,
         timeout: c.connectionTimeout,
         queryTimeout: c.queryTimeout,
@@ -308,7 +314,8 @@ class MssqlConnection {
       packetSize: c.packetSize,
       encrypt: c.encrypt,
       trustServerCertificate: c.trustServerCertificate,
-      securityContext: securityContext,
+      trustedCertificateFile: trustedCertificateFile,
+      trustedCertificateDirectory: trustedCertificateDirectory,
       hostNameInCertificate: c.hostNameInCertificate,
       timeout: c.connectionTimeout,
       queryTimeout: c.queryTimeout,
@@ -332,7 +339,8 @@ class MssqlConnection {
     String appName = 'mssql-dart',
     int packetSize = defaultPacketSize,
     bool trustServerCertificate = false,
-    SecurityContext? securityContext,
+    String? trustedCertificateFile,
+    String? trustedCertificateDirectory,
     String? hostNameInCertificate,
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
@@ -364,7 +372,8 @@ class MssqlConnection {
         azureAdAuth: azureAdAuth,
         encrypt: true, // Azure AD always requires TLS
         trustServerCertificate: trustServerCertificate,
-        securityContext: securityContext,
+        trustedCertificateFile: trustedCertificateFile,
+        trustedCertificateDirectory: trustedCertificateDirectory,
         hostNameInCertificate: hostNameInCertificate,
         timeout: timeout,
         queryTimeout: queryTimeout,
@@ -398,7 +407,8 @@ class MssqlConnection {
     int packetSize = defaultPacketSize,
     bool encrypt = true,
     bool trustServerCertificate = false,
-    SecurityContext? securityContext,
+    String? trustedCertificateFile,
+    String? trustedCertificateDirectory,
     String? hostNameInCertificate,
     Duration timeout = const Duration(seconds: 15),
     Duration? queryTimeout,
@@ -435,7 +445,8 @@ class MssqlConnection {
         ),
         encrypt: encrypt,
         trustServerCertificate: trustServerCertificate,
-        securityContext: securityContext,
+        trustedCertificateFile: trustedCertificateFile,
+        trustedCertificateDirectory: trustedCertificateDirectory,
         hostNameInCertificate: hostNameInCertificate,
         timeout: timeout,
         queryTimeout: queryTimeout,
@@ -1124,32 +1135,16 @@ class MssqlConnection {
   /// the handshake, ciphertext is forwarded as opaque TCP bytes.
   Future<void> _upgradeTls() async {
     final rawSocket = _socket;
-    if (Platform.environment['MSSQL_NATIVE_TLS'] == '1') {
-      final nativeTransport = await NativeTlsBridge.upgrade(
-        rawSocket: rawSocket,
-        rawReader: _buf.rawReader,
-        host: _hostNameInCertificate ?? _host,
-        trustServerCertificate: _trustServerCertificate,
-      );
-      nativeTransport.start();
-      _buf.replaceTransport(NativeTlsTdsTransport(nativeTransport));
-      return;
-    }
-
-    final upgrade = await TdsTlsBridge.upgrade(
+    final nativeTransport = await NativeTlsBridge.upgrade(
       rawSocket: rawSocket,
       rawReader: _buf.rawReader,
-      host: _host,
+      host: _hostNameInCertificate ?? _host,
       trustServerCertificate: _trustServerCertificate,
-      securityContext: _securityContext,
-      hostNameInCertificate: _hostNameInCertificate,
-      onBridgeDied: () => _connected = false,
+      trustedCertificateFile: _trustedCertificateFile,
+      trustedCertificateDirectory: _trustedCertificateDirectory,
     );
-    _socket = upgrade.socket;
-    _rawTcpSocket = upgrade.rawTcpSocket;
-    _watchSocket(upgrade.rawTcpSocket);
-    _watchSocket(upgrade.socket);
-    _buf.replaceSocket(upgrade.socket);
+    nativeTransport.start();
+    _buf.replaceTransport(NativeTlsTdsTransport(nativeTransport));
   }
 
   Future<void> _sendLogin7() async {
