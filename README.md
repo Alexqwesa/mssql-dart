@@ -1,7 +1,23 @@
 # mssql
 
-A pure-Dart driver for Microsoft SQL Server, built on the **TDS 7.4** wire protocol.
-No native extensions, no FFI — just Dart and TCP.
+A Dart-first driver for Microsoft SQL Server, built on the TDS 7.4 wire
+protocol, with the long-term goal of becoming a fully pure-Dart implementation.
+TDS encoding, decoding, connection pooling, authentication, and query handling
+are implemented in Dart. Encrypted connections currently use a native OpenSSL
+TLS helper.
+
+The native helper is currently required for TLS (support Windows and Linux). This is
+the compatibility trade-off for reliable encrypted multi-packet requests, Bulk
+Load, and Attention cancellation. Version `0.4.1` used only Dart `SecureSocket`,
+but had to reject those encrypted workflows because of its plaintext-ring
+limitation. Unencrypted connections continue to use only Dart and TCP.
+
+The native TLS helper can be removed once Dart exposes a supported
+`SecureSocket` write API that guarantees caller-controlled TLS plaintext record
+boundaries, or fixes the current implementation so fragmented TDS messages are
+reliably preserved across its internal plaintext buffer. That is the Dart SDK
+feature this package needs; until then, the C++ helper is the contained
+workaround for encrypted connections.
 
 ```
 dart pub add mssql
@@ -201,6 +217,11 @@ await conn.transaction((c) async {
 
 ### Typed GUID / money / datetimeoffset / decimal / varchar / date / time / datetime / xml / varbinary
 
+Use these wrappers when a Dart value alone cannot express the SQL Server type
+you need. Bare `String`, `DateTime`, and `List<int>` map to `nvarchar`,
+`datetime2`, and `varbinary(max)`; the wrappers select legacy, fixed-width,
+sized, or non-Unicode column types without SQL casts.
+
 ```dart
 await conn.query('SELECT @g, @m, @d, @dec, @v, @day, @tod, @dt, @sd, @x, @b, @n, @c, @bin, @rv', {
   'g': MssqlGuid('6F9619FF-8B86-D011-B42D-00C04FC964FF'),
@@ -230,6 +251,11 @@ await conn.query('SELECT @g, @m, @d, @dec, @v, @day, @tod, @dt, @sd, @x, @b, @n,
 ```
 
 ### Always On / HA
+
+Connection establishment supports Always On read-only routing, parallel dialing
+of multi-subnet listeners, and an initial database-mirroring failover partner.
+This is not transparent failover for an already-running command: an in-flight
+connection lost during a role change must be retried by the application.
 
 ```dart
 // Read-only routing via AG listener (database required)
@@ -725,5 +751,11 @@ dart test test/live --concurrency=1
 
 ## Limitations
 
+- Tested with SQL Server 2017, 2019, 2022, and 2025. Earlier versions from SQL
+  Server 2012 onward should be protocol-compatible through TDS 7.4 but are not
+  currently tested.
+- TLS on Windows and Linux requires the native OpenSSL helper. A pure-Dart TLS
+  fallback is not provided in 0.5.0; use 0.4.1 only when its encrypted
+  multi-packet and Bulk Load limitations are acceptable.
 - Azure AD authentication requires a bearer token supplied by the caller (e.g. obtained via `azure_identity`); the driver does not fetch tokens itself.
 - Prepared statement handles (`sp_prepare` / `sp_execute`) are not supported. All parameterized queries use `sp_executesql`, which SQL Server plan-caches by query hash, so repeated-query performance is similar in practice.
