@@ -15,6 +15,8 @@
   keeping SQL Server and the native TLS fragment boundary in agreement.
 * TLS/NTLM: derive `tls-server-end-point` channel bindings from the native TLS
   peer certificate before sending NTLM authentication.
+* TLS: remove the retired Dart `SecureSocket` ring-alignment and synthetic NOP
+  implementation now that encrypted I/O exclusively uses the native transport.
 * Tests: add `MSSQL_LIVE_IMAGE` for switching the Docker live-test pair among
   SQL Server 2019, 2022 (default), 2025, or another compatible Linux image.
 * Tests: add `tool/full_tests.ps1` and a six-container Docker matrix to run

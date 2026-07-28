@@ -83,10 +83,6 @@ class MssqlConnection {
 
   late TdsBuffer _buf;
   late Socket _socket;
-  // The raw TCP socket to SQL Server. Only non-null when TLS is active;
-  // in that case _socket is the SecureSocket and _rawTcpSocket is the
-  // underlying TCP connection that the bridge loop reads from.
-  Socket? _rawTcpSocket;
   bool _connected = false;
   bool _busy = false;
   String _currentDatabase = '';
@@ -572,7 +568,6 @@ class MssqlConnection {
         // Prefer [cancel] instead of breaking when reuse is required.
         _connected = false;
         unawaited(_socket.close().catchError((_) {}));
-        unawaited(_rawTcpSocket?.close().catchError((_) {}));
       }
       _busy = false;
     }
@@ -806,19 +801,11 @@ class MssqlConnection {
 
   /// Closes the connection.
   ///
-  /// Both the TLS SecureSocket (if active) and the underlying raw TCP socket
-  /// are closed so the server-side session is released promptly.
   Future<void> close() async {
     _connected = false;
     try {
       await _socket.close();
     } catch (_) {}
-    // If TLS is active, _socket is the SecureSocket; _rawTcpSocket is the
-    // underlying TCP connection. Closing it also terminates the bridge loop.
-    try {
-      await _rawTcpSocket?.close();
-    } catch (_) {}
-    _rawTcpSocket = null;
   }
 
   // ── Transaction helpers ────────────────────────────────────────────────────
@@ -1029,7 +1016,6 @@ class MssqlConnection {
     if ((_encrypt || _azureAdAuth != null) && _buf.packetSize > 16383) {
       _buf.packetSize = 16383;
     }
-    _buf.enableTlsNopAlign();
     // Routing: stay unconnected until caller reconnects to the alternate.
     if (loginResult.routing == null) {
       _connected = true;
@@ -1131,8 +1117,8 @@ class MssqlConnection {
 
   /// Performs the TDS-wrapped TLS handshake (ms-tds §2.1.1 PRELOGIN encryption).
   ///
-  /// See [TdsTlsBridge] — handshake records are wrapped in PRELOGIN; after
-  /// the handshake, ciphertext is forwarded as opaque TCP bytes.
+  /// TLS handshake records are carried in PRELOGIN packets; afterwards the
+  /// native transport owns the encrypted TCP byte stream.
   Future<void> _upgradeTls() async {
     final rawSocket = _socket;
     final nativeTransport = await NativeTlsBridge.upgrade(
@@ -1165,7 +1151,8 @@ class MssqlConnection {
     // Negotiate TDS packets that fit in one native TLS plaintext fragment.
     // This is sent in LOGIN7, so SQL Server agrees to the larger size rather
     // than the client changing its packet boundary after login.
-    final loginPacketSize = _encrypt || _azureAdAuth != null ? 16383 : _packetSize;
+    final loginPacketSize =
+        _encrypt || _azureAdAuth != null ? 16383 : _packetSize;
     if (ntlm != null) {
       await Login7.send(
         _buf,
@@ -1247,10 +1234,6 @@ class MssqlConnection {
     try {
       await _socket.close();
     } catch (_) {}
-    try {
-      await _rawTcpSocket?.close();
-    } catch (_) {}
-    _rawTcpSocket = null;
   }
 
   void _assertOpen() {
