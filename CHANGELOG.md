@@ -12,6 +12,8 @@
   TLS adapters, preparing TDS framing to stop writing directly to `Socket`.
 * TLS: migrate `TdsBuffer` packet writes onto `TdsTransport`, including a
   transport replacement hook for the native TLS handoff.
+* TLS: treat an empty OpenSSL memory-BIO output drain as a normal retry state
+  rather than a TLS error.
 * Build: add a Windows MSVC/Ninja script for building and testing the native
   helper. Generated native binaries remain ignored by Git.
 

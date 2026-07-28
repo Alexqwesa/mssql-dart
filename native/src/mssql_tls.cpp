@@ -76,6 +76,7 @@ extern "C" mssql_tls_result mssql_tls_drain_encrypted(mssql_tls* tls, uint8_t* o
   if (tls == nullptr || written == nullptr || (output == nullptr && capacity != 0)) return MSSQL_TLS_INVALID_ARGUMENT;
   const int read = BIO_read(SSL_get_wbio(tls->ssl), output, static_cast<int>(capacity));
   *written = read > 0 ? static_cast<size_t>(read) : 0;
+  if (read <= 0 && BIO_should_retry(SSL_get_wbio(tls->ssl))) return MSSQL_TLS_OK;
   return read >= 0 ? MSSQL_TLS_OK : MSSQL_TLS_ERROR;
 }
 
