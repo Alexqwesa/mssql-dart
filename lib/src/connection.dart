@@ -1154,6 +1154,10 @@ class MssqlConnection {
         : _host;
 
     final ntlm = _ntlmAuth;
+    // Negotiate TDS packets that fit in one native TLS plaintext fragment.
+    // This is sent in LOGIN7, so SQL Server agrees to the larger size rather
+    // than the client changing its packet boundary after login.
+    final loginPacketSize = _encrypt || _azureAdAuth != null ? 16383 : _packetSize;
     if (ntlm != null) {
       await Login7.send(
         _buf,
@@ -1164,7 +1168,7 @@ class MssqlConnection {
           appName: _appName,
           serverName: serverName,
           database: _database,
-          packetSize: _packetSize,
+          packetSize: loginPacketSize,
           sspi: ntlm.negotiateMessage(),
           readOnlyIntent: _readOnlyIntent,
         ),
@@ -1182,7 +1186,7 @@ class MssqlConnection {
         appName: _appName,
         serverName: serverName,
         database: _database,
-        packetSize: _packetSize,
+        packetSize: loginPacketSize,
         fedAuthToken: _azureAdAuth?.bearerToken,
         readOnlyIntent: _readOnlyIntent,
       ),

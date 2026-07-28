@@ -11,6 +11,8 @@
 * TLS: serialize native TLS input, output, and pending writes so Attention can
   be injected safely while a response is active. Multi-packet requests, Bulk
   Load, and TLS cancellation are supported by the same transport.
+* TLS: negotiate a 16,383-byte TDS packet size in encrypted LOGIN7 sessions,
+  keeping SQL Server and the native TLS fragment boundary in agreement.
 * Tests: replace the retired Dart TLS bridge/alignment unit suites with a
   native CTest that performs a complete in-memory client/server handshake,
   certificate DER retrieval, encrypted request write, and encrypted response
