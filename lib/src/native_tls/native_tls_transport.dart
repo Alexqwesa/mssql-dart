@@ -43,6 +43,9 @@ final class NativeTlsTransport {
 
   Stream<Uint8List> get plaintext => _plaintext.stream;
 
+  /// DER-encoded leaf certificate from the completed TLS session.
+  Uint8List peerCertificateDer() => _engine.peerCertificateDer();
+
   void start() => _readerTask ??= _readCiphertext();
 
   Future<void> writePacket(Uint8List packet, {bool urgent = false}) {

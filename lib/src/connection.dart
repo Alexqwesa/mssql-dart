@@ -1143,6 +1143,14 @@ class MssqlConnection {
       trustedCertificateFile: _trustedCertificateFile,
       trustedCertificateDirectory: _trustedCertificateDirectory,
     );
+    final ntlm = _ntlmAuth;
+    if (ntlm != null) {
+      final certificate = nativeTransport.peerCertificateDer();
+      if (certificate.isNotEmpty) {
+        ntlm.channelBindings =
+            NtlmAuth.channelBindingTokenFromCertificate(certificate);
+      }
+    }
     nativeTransport.start();
     _buf.replaceTransport(NativeTlsTdsTransport(nativeTransport));
   }
