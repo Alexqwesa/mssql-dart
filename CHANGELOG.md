@@ -32,6 +32,8 @@
   output does not include expected live-test skips before containers start.
 * Tests: make the SQL Server matrix image compatible with 2017 through 2025 by
   using the shared numeric SQL Server UID; rebuild only stale matrix images.
+* CI: build, CTest, smoke-test, checksum, and publish Windows x64 and Linux
+  x64 native TLS helper artifacts on GitHub Actions.
 * Tests: replace the retired Dart TLS bridge/alignment unit suites with a
   native CTest that performs a complete in-memory client/server handshake,
   certificate DER retrieval, encrypted request write, and encrypted response

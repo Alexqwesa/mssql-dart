@@ -14,4 +14,4 @@ pubspec.lock
 
 coverage/
 .env
-/native/bin/windows-x64/mssql_tls.dll
+/native/bin/

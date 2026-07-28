@@ -658,6 +658,11 @@ not fail).
 The native OpenSSL ABI has an in-memory client/server CTest that covers the
 handshake, certificate extraction, and encrypted request/response flow.
 
+GitHub Actions builds and tests self-contained Windows x64 and Linux x64
+helpers on every pull request. The `mssql-tls-windows-x64` and
+`mssql-tls-linux-x64` workflow artifacts contain the distributable helpers;
+tagged builds also attach them, with `SHA256SUMS`, to the GitHub release.
+
 On Windows, with Visual Studio 2022, CMake, Ninja, and OpenSSL installed:
 
 ```powershell
