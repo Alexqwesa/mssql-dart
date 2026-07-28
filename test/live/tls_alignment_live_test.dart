@@ -39,7 +39,7 @@ SELECT @@ROWCOUNT AS affected;
           );
         }
       },
-      skip: nativeTls ? skipReason : 'Set MSSQL_NATIVE_TLS=1',
+      skip: skipReason,
       timeout: const Timeout(Duration(minutes: 2)),
     );
 
@@ -116,7 +116,7 @@ CREATE TABLE #tls_bulk_test (
         final health = await conn.query('SELECT 1 AS ok');
         expect(health.first['ok'], 1);
       },
-      skip: skipReason,
+      skip: nativeTls ? skipReason : 'Set MSSQL_NATIVE_TLS=1',
       timeout: const Timeout(Duration(minutes: 3)),
     );
   });
