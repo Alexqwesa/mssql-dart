@@ -24,8 +24,16 @@ function Wait-SqlServer([string]$Container) {
             '/opt/mssql-tools/bin/sqlcmd'
         }
         # Keep the query as one native-command argument under Windows PowerShell.
-        & docker exec $Container $sqlcmd -S localhost -U sa -P $password -Q 'SELECT/**/1;' *> $null
-        if ($LASTEXITCODE -eq 0) { return }
+        # ODBC 18 encrypts by default; trust the self-signed test certificate.
+        $previousErrorAction = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            & docker exec $Container $sqlcmd -S localhost -U sa -P $password -C -Q 'SELECT/**/1;' *> $null
+            $sqlcmdExitCode = $LASTEXITCODE
+        } finally {
+            $ErrorActionPreference = $previousErrorAction
+        }
+        if ($sqlcmdExitCode -eq 0) { return }
         Start-Sleep -Seconds 2
     }
     & docker compose -f $compose logs
