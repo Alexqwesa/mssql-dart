@@ -8,6 +8,7 @@ import 'connection_string.dart';
 import 'exception.dart';
 import 'info_message.dart';
 import 'isolation.dart';
+import 'native_tls/native_tls_bridge.dart';
 import 'params.dart';
 import 'protocol_limits.dart';
 import 'result.dart';
@@ -20,7 +21,7 @@ import 'tds/login7.dart';
 import 'tds/prelogin.dart';
 import 'tds/rpc.dart';
 import 'tds/sql_browser.dart';
-import 'tds/tls_bridge.dart';
+import 'tds/transport.dart';
 import 'tds/token_stream.dart';
 
 /// Opens and manages a single connection to SQL Server.
@@ -51,6 +52,7 @@ class MssqlConnection {
   final NtlmAuth? _ntlmAuth;
   final bool _encrypt;
   final bool _trustServerCertificate;
+  // ignore: unused_field
   final SecurityContext? _securityContext;
   final String? _hostNameInCertificate;
 
@@ -1129,30 +1131,15 @@ class MssqlConnection {
   /// the handshake, ciphertext is forwarded as opaque TCP bytes.
   Future<void> _upgradeTls() async {
     final rawSocket = _socket;
-    final upgrade = await TdsTlsBridge.upgrade(
+    final nativeTransport = await NativeTlsBridge.upgrade(
       rawSocket: rawSocket,
       rawReader: _buf.rawReader,
-      host: _host,
+      host: _hostNameInCertificate ?? _host,
       trustServerCertificate: _trustServerCertificate,
-      securityContext: _securityContext,
-      hostNameInCertificate: _hostNameInCertificate,
-      onBridgeDied: () {
-        _connected = false;
-      },
     );
-
-    final ntlm = _ntlmAuth;
-    final peer = upgrade.peerCertificate;
-    if (ntlm != null && peer != null) {
-      ntlm.channelBindings =
-          NtlmAuth.channelBindingTokenFromCertificate(peer.der);
-    }
-
-    _socket = upgrade.socket;
-    _rawTcpSocket = upgrade.rawTcpSocket;
-    _watchSocket(upgrade.rawTcpSocket);
-    _watchSocket(upgrade.socket);
-    _buf.replaceSocket(upgrade.socket);
+    nativeTransport.start();
+    _buf.replaceTransport(NativeTlsTdsTransport(nativeTransport));
+    return;
   }
 
   Future<void> _sendLogin7() async {

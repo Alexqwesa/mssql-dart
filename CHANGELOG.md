@@ -14,6 +14,8 @@
   transport replacement hook for the native TLS handoff.
 * TLS: treat an empty OpenSSL memory-BIO output drain as a normal retry state
   rather than a TLS error.
+* TLS: route encrypted connections through the native TLS handshake and
+  transport instead of Dart's `SecureSocket` bridge.
 * Build: add a Windows MSVC/Ninja script for building and testing the native
   helper. Generated native binaries remain ignored by Git.
 
