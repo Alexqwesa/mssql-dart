@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+* TLS: add an optional OpenSSL memory-BIO helper with a stable C ABI, CMake
+  build, native CTest coverage, and Dart FFI smoke coverage.
+* TLS: add native handshake and post-handshake transport components that keep
+  SQL Server's PRELOGIN TLS wrapping in Dart while moving TLS records and
+  packet encryption into the native helper. The connection path still uses the
+  existing Dart transport until the `TdsBuffer` transport refactor lands.
+* Build: add a Windows MSVC/Ninja script for building and testing the native
+  helper. Generated native binaries remain ignored by Git.
+
 ## 0.4.1
 
 Throw UnsupportedError for multi-packet queries and bulk inserts over TLS. 
