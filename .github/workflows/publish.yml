@@ -59,6 +59,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist/windows-x64, native/bin/windows-x64 | Out-Null
           Copy-Item build/native/mssql_tls.dll dist/windows-x64/mssql_tls.dll
+          Copy-Item THIRD_PARTY_NOTICES.md dist/windows-x64/THIRD_PARTY_NOTICES.md
           Copy-Item build/native/mssql_tls.dll native/bin/windows-x64/mssql_tls.dll
           (Get-FileHash dist/windows-x64/mssql_tls.dll -Algorithm SHA256).Hash.ToLower() + '  mssql_tls.dll' |
             Set-Content dist/windows-x64/SHA256SUMS
@@ -67,6 +68,7 @@ jobs:
         run: |
           mkdir -p dist/linux-x64 native/bin/linux-x64
           cp build/native/libmssql_tls.so dist/linux-x64/libmssql_tls.so
+          cp THIRD_PARTY_NOTICES.md dist/linux-x64/THIRD_PARTY_NOTICES.md
           cp build/native/libmssql_tls.so native/bin/linux-x64/libmssql_tls.so
           (cd dist/linux-x64 && sha256sum libmssql_tls.so > SHA256SUMS)
       - name: Run Dart native TLS smoke test
