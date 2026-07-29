@@ -15,9 +15,10 @@ The native OpenSSL ABI has an in-memory client/server CTest that covers the
 handshake, certificate extraction, and encrypted request/response flow.
 
 GitHub Actions builds and tests self-contained Windows x64 and Linux x64
-helpers on every pull request. The `mssql-tls-windows-x64` and
-`mssql-tls-linux-x64` workflow artifacts contain the distributable helpers;
-tagged builds also attach them, with `SHA256SUMS`, to the GitHub release.
+helpers on every pull request. It also cross-builds Android `arm64-v8a`,
+`armeabi-v7a`, and `x86_64` helpers, statically linking OpenSSL into each
+`libmssql_tls.so`. Tagged builds attach platform ZIPs, with `SHA256SUMS`, to
+the GitHub release.
 
 On Windows, with Visual Studio 2022, CMake, Ninja, and OpenSSL installed:
 
@@ -32,6 +33,34 @@ cmake -S native -B build/native -G Ninja -DBUILD_TESTING=ON
 cmake --build build/native
 ctest --test-dir build/native --output-on-failure
 ```
+
+## Android native TLS helper
+
+Android encrypted connections load `libmssql_tls.so` through the platform
+linker. Package the ABI-specific helpers from the `mssql-tls-android` release
+asset in the consuming Flutter/Android app under:
+
+```text
+android/app/src/main/jniLibs/arm64-v8a/libmssql_tls.so
+android/app/src/main/jniLibs/armeabi-v7a/libmssql_tls.so
+android/app/src/main/jniLibs/x86_64/libmssql_tls.so
+```
+
+Build them locally with Android NDK r27 (or a compatible NDK), CMake, Ninja,
+Perl, Make, and curl. The helper statically links both OpenSSL and the C++
+runtime. The script downloads pinned OpenSSL 3.5.7 and verifies its SHA-256
+before compiling:
+
+```bash
+export ANDROID_NDK_HOME=/path/to/android-ndk
+bash tool/build_android_native.sh
+```
+
+The resulting files are written to `dist/android/<abi>/`. Android has no
+OpenSSL integration with its Java trust store; for certificate validation,
+provide `trustedCertificateFile` or `trustedCertificateDirectory` with PEM
+roots accessible to the app. `trustServerCertificate: true` remains suitable
+only for local development and controlled test environments.
 
 ## Full SQL Server matrix
 

@@ -4,8 +4,15 @@
 
 ## 0.5.0
 
-* **Breaking:** TLS now uses the native OpenSSL transport on Windows and Linux;
+* **Breaking:** TLS now uses the native OpenSSL transport on Windows, Linux,
+  and Android;
   the `MSSQL_NATIVE_TLS` switch and Dart `SecureSocket` TLS bridge are removed.
+* TLS: add Android native TLS support for `arm64-v8a`, `armeabi-v7a`, and
+  `x86_64`; encrypted apps load the ABI-specific `libmssql_tls.so` packaged by
+  the consumer, while cleartext remains Dart and TCP only.
+* Build: cross-build, checksum, and release statically-linked Android helper
+  archives from GitHub Actions; the local script verifies its pinned OpenSSL
+  source before compiling.
 * **Breaking:** replace `securityContext` with `trustedCertificateFile` and
   `trustedCertificateDirectory` PEM trust-root options.
 * TLS: accept `TrustedCertificateFile` / `TrustedCertificateDirectory` (and

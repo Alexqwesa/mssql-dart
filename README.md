@@ -6,8 +6,8 @@ TDS encoding, decoding, connection pooling, authentication, and query handling
 are implemented in Dart. Encrypted connections currently use a native OpenSSL
 TLS helper.
 
-The native helper is currently required for TLS (support Windows and Linux). This is
-the compatibility trade-off for reliable encrypted multi-packet requests, Bulk
+The native helper is currently required for TLS (support Windows, Linux, and
+Android). This is the compatibility trade-off for reliable encrypted multi-packet requests, Bulk
 Load, and Attention cancellation. Version `0.4.1` used only Dart `SecureSocket`,
 but had to reject those encrypted workflows because of its plaintext-ring
 limitation. Unencrypted connections continue to use only Dart and TCP.
@@ -215,12 +215,25 @@ await conn.transaction((c) async {
 }, isolation: MssqlIsolationLevel.repeatableRead);
 ```
 
-### Typed GUID / money / datetimeoffset / decimal / varchar / date / time / datetime / xml / varbinary
+### Parameters and SQL Server-specific types
 
-Use these wrappers when a Dart value alone cannot express the SQL Server type
-you need. Bare `String`, `DateTime`, and `List<int>` map to `nvarchar`,
-`datetime2`, and `varbinary(max)`; the wrappers select legacy, fixed-width,
-sized, or non-Unicode column types without SQL casts.
+Use ordinary Dart values first. The driver infers the usual SQL Server types:
+
+```dart
+await conn.query('SELECT @id, @price, @enabled, @name, @created, @data, @none', {
+  'id': 42,                         // bigint
+  'price': 19.99,                   // float
+  'enabled': true,                  // bit
+  'name': 'Ada',                    // nvarchar
+  'created': DateTime.now().toUtc(), // datetime2
+  'data': [0xDE, 0xAD],             // varbinary(max)
+  'none': null,
+});
+```
+
+Use an `Mssql*` helper when the SQL Server type cannot be represented by a
+bare Dart value, or when its exact width, encoding, precision, or legacy type
+matters:
 
 ```dart
 await conn.query('SELECT @g, @m, @d, @dec, @v, @day, @tod, @dt, @sd, @x, @b, @n, @c, @bin, @rv', {
@@ -231,18 +244,13 @@ await conn.query('SELECT @g, @m, @d, @dec, @v, @day, @tod, @dt, @sd, @x, @b, @n,
     offset: Duration(hours: 5, minutes: 30),
   ),
   'dec': MssqlDecimal(19.99, precision: 10, scale: 2),
-  // Bare String → nvarchar; use MssqlVarchar for varchar columns (LAN collations)
   'v': MssqlVarchar('bob'),
   'day': MssqlDate(2024, 7, 24),
   'tod': MssqlTime(hour: 14, minute: 30, second: 0),
-  // Bare DateTime → datetime2; use these for legacy columns
   'dt': MssqlDateTime(DateTime.utc(2024, 3, 15, 10, 30)),
   'sd': MssqlSmallDateTime(DateTime.utc(2024, 3, 15, 10, 30)),
-  // Bare String → nvarchar; use MssqlXml for xml columns
   'x': MssqlXml('<root/>'),
-  // Bare List<int> → varbinary(max); use MssqlVarbinary for varbinary(n)
   'b': MssqlVarbinary([0xDE, 0xAD], length: 16),
-  // Sized Unicode / fixed binary / rowversion compare
   'n': MssqlNVarchar('lan', length: 32),
   'c': MssqlNChar('ab', length: 4),
   'bin': MssqlBinary([1, 2], length: 4),
@@ -586,7 +594,7 @@ Named parameters use `@name` placeholders. Supported Dart → SQL type mappings:
 ## TLS / Encryption
 
 TDS 7.x wraps the TLS handshake in PRELOGIN packets, then switches to raw TLS
-for the rest of the session. On Windows and Linux, encrypted connections use
+for the rest of the session. On Windows, Linux, and Android, encrypted connections use
 the bundled native OpenSSL transport. It serializes TLS reads and writes so
 multi-packet requests, Bulk Load, and Attention cancellation remain reliable.
 Cleartext connections continue to use Dart and TCP only.
@@ -652,7 +660,7 @@ and opt-in live SQL Server testing instructions.
 - Tested with SQL Server 2017, 2019, 2022, and 2025. Earlier versions from SQL
   Server 2012 onward should be protocol-compatible through TDS 7.4 but are not
   currently tested.
-- TLS on Windows and Linux requires the native OpenSSL helper. A pure-Dart TLS
+- TLS on Windows, Linux, and Android requires the native OpenSSL helper. A pure-Dart TLS
   fallback is not provided in 0.5.0; use 0.4.1 only when its encrypted
   multi-packet and Bulk Load limitations are acceptable.
 - Azure AD authentication requires a bearer token supplied by the caller (e.g. obtained via `azure_identity`); the driver does not fetch tokens itself.

@@ -79,9 +79,34 @@ jobs:
           path: dist/${{ matrix.artifact }}/
           if-no-files-found: error
 
+  android-native-tls:
+    name: Native TLS (Android)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: android-actions/setup-android@v3
+      - name: Install Android NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager 'ndk;27.2.12479018'
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/27.2.12479018" >> "$GITHUB_ENV"
+      - name: Build Android native helpers
+        run: bash tool/build_android_native.sh
+      - name: Inspect Android helpers
+        run: |
+          find dist/android -name libmssql_tls.so -print -exec file {} \;
+          test -f dist/android/arm64-v8a/libmssql_tls.so
+          test -f dist/android/armeabi-v7a/libmssql_tls.so
+          test -f dist/android/x86_64/libmssql_tls.so
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mssql-tls-android
+          path: dist/android/
+          if-no-files-found: error
+
   release-native-assets:
     name: Release native TLS assets
-    needs: native-tls
+    needs: [native-tls, android-native-tls]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
@@ -91,14 +116,16 @@ jobs:
         with:
           pattern: mssql-tls-*
           path: native-assets
-          merge-multiple: true
       - name: Create or update release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
             gh release create "$GITHUB_REF_NAME" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" native-assets/* --clobber
+          for asset in native-assets/*; do
+            (cd "$asset" && zip -r "../$(basename "$asset").zip" .)
+          done
+          gh release upload "$GITHUB_REF_NAME" native-assets/*.zip --clobber
 
   # ════════════════════════════════════════════════════════════════════════════
   # 1 · Static analysis

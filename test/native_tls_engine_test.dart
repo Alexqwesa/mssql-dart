@@ -4,7 +4,8 @@ import 'package:mssql/src/native_tls/native_tls_engine.dart';
 import 'package:test/test.dart';
 
 void main() {
-  final supported = Platform.isWindows || Platform.isLinux;
+  final supported =
+      Platform.isWindows || Platform.isLinux || Platform.isAndroid;
 
   test(
     'native TLS engine emits a ClientHello',

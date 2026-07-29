@@ -42,9 +42,12 @@ extern "C" mssql_tls* mssql_tls_create(const mssql_tls_config* config) {
   if (config->trust_server_certificate) SSL_CTX_set_verify(tls->context, SSL_VERIFY_NONE, nullptr);
   else {
     SSL_CTX_set_verify(tls->context, SSL_VERIFY_PEER, nullptr);
-    if (SSL_CTX_set_default_verify_paths(tls->context) != 1) return nullptr;
-    if ((config->ca_file != nullptr || config->ca_path != nullptr) &&
-        SSL_CTX_load_verify_locations(tls->context, config->ca_file, config->ca_path) != 1) {
+    const bool has_custom_roots = config->ca_file != nullptr || config->ca_path != nullptr;
+    if (has_custom_roots) {
+      if (SSL_CTX_load_verify_locations(tls->context, config->ca_file, config->ca_path) != 1) {
+        return nullptr;
+      }
+    } else if (SSL_CTX_set_default_verify_paths(tls->context) != 1) {
       return nullptr;
     }
   }
