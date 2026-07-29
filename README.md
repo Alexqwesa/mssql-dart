@@ -84,8 +84,7 @@ Protocol size limits are enabled by default to avoid allocating unexpectedly
 large server-controlled values. Tune them for workloads that intentionally read
 large LOB values, use `MssqlProtocolLimits.sqlServerMaximums` for documented SQL
 Server ceilings, or `MssqlProtocolLimits.unlimited` for the old compatibility
-behaviour. The default constructor caps token bodies at 16 MiB, single values at
-64 MiB, PLP chunks at 4 MiB, columns at 4,096, and result sets at 256.
+behaviour.
 
 ```dart
 final conn = await MssqlConnection.connect(
@@ -93,12 +92,13 @@ final conn = await MssqlConnection.connect(
   user: 'sa',
   password: '…',
   encrypt: false,
+  // Limits below are equivalent to the default: const MssqlProtocolLimits().
   protocolLimits: const MssqlProtocolLimits(
     maximumTokenBytes: 16 * 1024 * 1024,
-    maximumValueBytes: 8 * 1024 * 1024,
-    maximumPlpChunkBytes: 1024 * 1024,
-    maximumColumns: 256,
-    maximumResultSets: 16,
+    maximumValueBytes: 64 * 1024 * 1024,
+    maximumPlpChunkBytes: 4 * 1024 * 1024,
+    maximumColumns: 4096,
+    maximumResultSets: 256,
   ),
 );
 ```
