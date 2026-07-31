@@ -108,4 +108,39 @@ void main() {
     final n = await conn.bulkInsert('#nope', ['Id'], []);
     expect(n, 0);
   });
+
+  test('bulkInsert resolves NOT NULL destination metadata', () async {
+    if (!available) {
+      markTestSkipped('SQL Server not available on :$_port');
+      return;
+    }
+
+    final conn = await MssqlConnection.connect(
+      host: _host,
+      port: _port,
+      user: _user,
+      password: _password,
+      database: 'tempdb',
+      encrypt: false,
+      trustServerCertificate: true,
+    );
+    addTearDown(conn.close);
+
+    await conn.query('''
+      CREATE TABLE #bulk_not_null (
+        Id BIGINT NOT NULL,
+        Name NVARCHAR(100) NOT NULL
+      );
+    ''');
+
+    final n = await conn.bulkInsert(
+      '#bulk_not_null',
+      ['Id', 'Name'],
+      const [
+        [1, 'one'],
+        [2, 'two'],
+      ],
+    );
+    expect(n, greaterThanOrEqualTo(2));
+  });
 }

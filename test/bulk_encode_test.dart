@@ -41,6 +41,7 @@ void main() {
         BulkColumnType.float64,
         BulkColumnType.dateTime2,
       ]);
+      expect(cols.every((c) => c.nullable == null), isTrue);
     });
 
     test('insertBulkSql brackets names', () {
@@ -51,6 +52,17 @@ void main() {
       expect(
         sql,
         'INSERT BULK [dbo].[T] ([Id] bigint, [Name] nvarchar(4000))',
+      );
+    });
+
+    test('selectMetadataSql brackets table and column names', () {
+      final sql = BulkLoad.selectMetadataSql(
+        'dbo.T',
+        ['Id', 'Name With Spaces'],
+      );
+      expect(
+        sql,
+        'SELECT TOP (0) [Id], [Name With Spaces] FROM [dbo].[T]',
       );
     });
 
@@ -101,7 +113,8 @@ void main() {
 
     test('empty rows is caller no-op at API layer', () {
       // Connection.bulkInsert returns 0; encode path requires rows.
-      expect(BulkLoad.inferColumns(['a'], []).single.type, BulkColumnType.nVarChar);
+      expect(BulkLoad.inferColumns(['a'], []).single.type,
+          BulkColumnType.nVarChar);
     });
   });
 
@@ -143,6 +156,37 @@ void main() {
       final row1 = body.indexOf(tokenRow, row0 + 1);
       expect(body[row1 + 1], 8);
       expect(body[row1 + 2], 7);
+    });
+
+    test('COLMETADATA fNullable matches BulkColumn.nullable', () async {
+      final nullable = await _captureBulk(
+        [
+          const BulkColumn(
+            'Id',
+            BulkColumnType.bigInt,
+            nullable: true,
+          ),
+        ],
+        const [
+          [1],
+        ],
+      );
+      final notNull = await _captureBulk(
+        [
+          const BulkColumn(
+            'Id',
+            BulkColumnType.bigInt,
+            nullable: false,
+          ),
+        ],
+        const [
+          [1],
+        ],
+      );
+
+      // COLMETADATA: token(1), count(2), userType(4), flags(2).
+      expect(nullable[headerSize + 7], 0x09);
+      expect(notNull[headerSize + 7], 0x08);
     });
   });
 }

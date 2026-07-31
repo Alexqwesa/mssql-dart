@@ -629,9 +629,27 @@ class MssqlConnection {
       }
     }
 
-    final cols = columnTypes ?? BulkLoad.inferColumns(columns, rows);
+    var cols = columnTypes ?? BulkLoad.inferColumns(columns, rows);
     if (cols.length != columns.length) {
       throw ArgumentError('columnTypes length must match columns');
+    }
+
+    if (cols.any((column) => column.nullable == null)) {
+      final metadata = await query(
+        BulkLoad.selectMetadataSql(table, columns),
+        const {},
+        timeout,
+      );
+      if (metadata.columns.length != columns.length) {
+        throw StateError(
+          'Destination metadata returned ${metadata.columns.length} columns, '
+          'expected ${columns.length}',
+        );
+      }
+      cols = [
+        for (var i = 0; i < cols.length; i++)
+          cols[i].withResolvedNullable(metadata.columns[i].nullable),
+      ];
     }
 
     _busy = true;

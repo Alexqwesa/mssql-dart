@@ -20,11 +20,26 @@ class BulkColumn {
   /// Maximum UTF-16 code units for nvarchar (1–4000).
   final int nVarCharLength;
 
+  /// Whether the destination column accepts nulls.
+  ///
+  /// When omitted, [MssqlConnection.bulkInsert] reads the destination metadata
+  /// before starting Bulk Load. Specify this for every column to avoid that
+  /// metadata round trip.
+  final bool? nullable;
+
   const BulkColumn(
     this.name,
     this.type, {
     this.nVarCharLength = 4000,
+    this.nullable,
   });
+
+  BulkColumn withResolvedNullable(bool value) => BulkColumn(
+        name,
+        type,
+        nVarCharLength: nVarCharLength,
+        nullable: nullable ?? value,
+      );
 
   String get sqlDecl {
     switch (type) {
@@ -57,8 +72,6 @@ class BulkColumn {
 /// Protocol: go-mssqldb `bulkcopy.go` / ms-tds Bulk Load BCP (§2.2.6.1.1).
 class BulkLoad {
   static const _collation = [0x09, 0x04, 0xD0, 0x00, 0x34];
-  // fNullable | writeable-ish — matches Tedious nullable bulk columns.
-  static const int _colFlags = 0x09;
 
   /// Infers [BulkColumn]s from [columnNames] + first non-null value per column.
   static List<BulkColumn> inferColumns(
@@ -90,6 +103,15 @@ class BulkLoad {
         .map((c) => '${_quoteIdentifier(c.name)} ${c.sqlDecl}')
         .join(', ');
     return 'INSERT BULK ${_quoteMultipartIdentifier(table)} ($defs)';
+  }
+
+  /// Builds a zero-row query used to read destination column metadata.
+  static String selectMetadataSql(String table, List<String> columns) {
+    if (columns.isEmpty) {
+      throw ArgumentError('columns must not be empty');
+    }
+    final names = columns.map(_quoteIdentifier).join(', ');
+    return 'SELECT TOP (0) $names FROM ${_quoteMultipartIdentifier(table)}';
   }
 
   /// Writes COLMETADATA + ROW* + DONE into an open [packBulkLoadBCP] packet.
@@ -129,7 +151,10 @@ class BulkLoad {
     buf.writeUint16LE(columns.length);
     for (final col in columns) {
       buf.writeUint32LE(0); // userType
-      buf.writeUint16LE(_colFlags);
+      // SQL Server validates fNullable against the destination column during
+      // BCP and reports error 4816 when it does not match.
+      final nullable = col.nullable ?? true;
+      buf.writeUint16LE(0x08 | (nullable ? 0x01 : 0x00));
       writeTypeInfo(buf, col);
       final name = _ucs2(col.name);
       buf.writeByte(name.length >> 1);
@@ -190,9 +215,7 @@ class BulkLoad {
       case BulkColumnType.bigInt:
         final v = value is int
             ? value
-            : (value is num
-                ? value.toInt()
-                : int.parse(value.toString()));
+            : (value is num ? value.toInt() : int.parse(value.toString()));
         buf.writeByte(8);
         buf.writeUint32LE(v & 0xFFFFFFFF);
         buf.writeUint32LE((v >> 32) & 0xFFFFFFFF);
@@ -213,9 +236,7 @@ class BulkLoad {
         ByteData.sublistView(bytes).setFloat64(0, v, Endian.little);
         buf.writeBytes(bytes);
       case BulkColumnType.dateTime2:
-        final dt = value is DateTime
-            ? value
-            : DateTime.parse(value.toString());
+        final dt = value is DateTime ? value : DateTime.parse(value.toString());
         _writeDateTime2(buf, dt);
       case BulkColumnType.nVarChar:
         final s = value is String ? value : value.toString();
