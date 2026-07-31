@@ -99,8 +99,8 @@ SELECT @@ROWCOUNT AS affected;
 
         await conn.execute('''
 CREATE TABLE #tls_bulk_test (
-  id bigint NULL,
-  label nvarchar(4000) NULL
+  id bigint NOT NULL,
+  label nvarchar(4000) NOT NULL
 );
 ''');
 

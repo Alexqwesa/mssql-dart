@@ -597,6 +597,9 @@ class MssqlConnection {
   /// [table] may be `dbo.MyTable`. [table] and [columns] are bracket-quoted.
   /// Returns rows inserted. Empty [rows] is a no-op (returns 0).
   ///
+  /// Destination nullability is read automatically for [BulkColumn] entries
+  /// whose `nullable` value is omitted. Specify it for every entry in
+  /// [columnTypes] to avoid the metadata query.
   ///
   /// ```dart
   /// await conn.bulkInsert(

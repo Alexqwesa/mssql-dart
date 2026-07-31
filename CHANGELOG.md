@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+* Bulk Load: resolve unspecified `BulkColumn.nullable` values
+  from destination metadata so BCP `fNullable` flags match both nullable and
+  `NOT NULL` columns, avoiding SQL Server error 4816.
+
 ## 0.5.0
 
 * **Breaking:** TLS now uses the native OpenSSL transport on Windows, Linux,

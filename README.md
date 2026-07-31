@@ -145,6 +145,20 @@ await conn.bulkInsert('dbo.Items', ['Id', 'Name'], [
   [2, 'b'],
 ]);
 
+// Destination nullability is detected automatically. To skip that metadata
+// query, describe every column explicitly:
+await conn.bulkInsert(
+  'dbo.Items',
+  ['Id', 'Name'],
+  const [
+    [3, 'c'],
+  ],
+  columnTypes: const [
+    BulkColumn('Id', BulkColumnType.bigInt, nullable: false),
+    BulkColumn('Name', BulkColumnType.nVarChar, nullable: true),
+  ],
+);
+
 // Requires: CREATE TYPE dbo.IdList AS TABLE (Id BIGINT);
 await conn.query('SELECT Id FROM @ids', {
   'ids': MssqlTvp(
