@@ -9,6 +9,12 @@
 * Bulk Load: validate nullability, lengths, and value conversions before
   entering SQL Server's BCP protocol phase so local errors leave the
   connection reusable.
+* Bulk Load: add `startBulkInsert` / `MssqlBulkOperation` for explicit,
+  acknowledged cancellation over cleartext and native TLS. Packet emission
+  stops between complete TDS packets and the connection is reusable when
+  `cancel()` completes.
+* Transport: serialize cleartext writes and prioritize queued Attention packets
+  so cancellation cannot overlap `Socket.add` / `flush` during Bulk Load.
 * Pool: replace dead or reset-failed borrowed sessions when callers are already
   queued instead of leaving those waiters to time out.
 * Bulk Load: resolve unspecified `BulkColumn.nullable` values

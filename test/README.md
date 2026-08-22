@@ -45,8 +45,8 @@ endpoint rejects cleartext.
 | SQL types | `types_test.dart`, `legacy_types_test.dart`, `typed_values_live_test.dart`, `tls_types_test.dart` | Numeric boundaries, temporal types, PLP, XML, GUID, money, rowversion, legacy types |
 | Unicode and hostile values | `unicode_parameters_live_test.dart` | Multilingual UTF-16, combining forms, supplementary characters, representative injection strings as parameters |
 | Transactions and session reset | `transaction_live_test.dart`, `transaction_failure_live_test.dart`, `session_db_live_test.dart` | Savepoints, isolation, constraint/syntax failures, XACT_ABORT automatic rollback, open-transaction pool cleanup |
-| Bulk Load | `bulk_live_test.dart`, `bulk_failure_live_test.dart`, `tls_alignment_live_test.dart` | Nullable metadata, 10,000-row TCP/TLS loads, packet boundaries, failures, rollback and reuse |
-| Cancellation and timeouts | `attention_live_test.dart`, `attention_tls_live_test.dart`, `cancel_scenarios_live_test.dart`, `timeout_live_test.dart` | Attention during batch, RPC, streaming, transactions and pooled use |
+| Bulk Load | `bulk_live_test.dart`, `bulk_failure_live_test.dart`, `bulk_cancel_live_test.dart`, `tls_alignment_live_test.dart` | Nullable metadata, 10,000-row TCP/TLS loads, packet boundaries, explicit cancellation, failures, rollback and reuse |
+| Cancellation and timeouts | `attention_live_test.dart`, `attention_tls_live_test.dart`, `bulk_cancel_live_test.dart`, `cancel_scenarios_live_test.dart`, `timeout_live_test.dart` | Attention during batch, RPC, streaming, Bulk Load, transactions and pooled use |
 | TLS | `tls_test.dart`, `tls_certificate_live_test.dart`, `tls_alignment_live_test.dart`, `tls_force_encrypt_stress_test.dart` | Negotiated/forced TLS, CA and hostname validation, multi-packet requests, Bulk Load and Attention |
 | Stored procedures and tokens | `stored_procs_test.dart`, `info_live_test.dart`, `token_sequences_live_test.dart` | Return/output values, INFO/ERROR, DONE, NOCOUNT, triggers, empty and multiple results |
 | Pool behavior and concurrency | `pool_*_live_test.dart`, `race_conditions_test.dart`, `connection_churn_live_test.dart` | Waiter FIFO, reset/validation, killed sessions, close races, 50 concurrent calls, connection churn, forced-TLS concurrency |
@@ -101,8 +101,3 @@ The standard Docker matrix cannot provide these environments:
 
 Their protocol encoders and mock handshakes are tested offline, but release
 claims must distinguish that coverage from a real infrastructure test.
-
-Bulk Load cancellation is also not covered: `bulkInsert` currently exposes a
-single completion future rather than a cancellable operation. Add cancellation
-coverage together with an explicit API/transport contract instead of relying
-on timing races in CI.

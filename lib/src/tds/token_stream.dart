@@ -82,6 +82,9 @@ class TokenStream {
   /// OUTPUT parameter values from `tokenReturnValue` (0xAC), keyed without `@`.
   final Map<String, Object?> lastReturnValues = {};
 
+  /// Whether the most recently parsed response ended with `DONE_ATTN`.
+  bool lastResponseCancelled = false;
+
   TokenStream(
     this._buf, {
     this.onDatabaseChanged,
@@ -91,6 +94,7 @@ class TokenStream {
   void _clearReturnState() {
     lastReturnStatus = null;
     lastReturnValues.clear();
+    lastResponseCancelled = false;
   }
 
   /// Process the server response after LOGIN7. Returns basic session metadata.
@@ -264,7 +268,10 @@ class TokenStream {
           if ((flags & doneFlagCount) != 0) rowsAffected += count;
           if ((flags & doneFlagMore) == 0) {
             final attnAck = (flags & doneFlagAttn) != 0;
-            if (attnAck) _buf.attentionSent = false;
+            if (attnAck) {
+              _buf.attentionSent = false;
+              lastResponseCancelled = true;
+            }
 
             // Flush the last (or only) result set.
             if (columns != null && columns.isNotEmpty) {
@@ -369,7 +376,10 @@ class TokenStream {
           await _buf.readUint64LE(); // rowCount
           if ((flags & doneFlagMore) == 0) {
             final attnAck = (flags & doneFlagAttn) != 0;
-            if (attnAck) _buf.attentionSent = false;
+            if (attnAck) {
+              _buf.attentionSent = false;
+              lastResponseCancelled = true;
+            }
             if (errors.isNotEmpty) throw _buildError(errors);
             if (_buf.attentionSent && !attnAck) {
               await _buf.beginRead();
@@ -431,7 +441,10 @@ class TokenStream {
           await _buf.readUint64LE();
           if ((flags & doneFlagMore) == 0) {
             final attnAck = (flags & doneFlagAttn) != 0;
-            if (attnAck) _buf.attentionSent = false;
+            if (attnAck) {
+              _buf.attentionSent = false;
+              lastResponseCancelled = true;
+            }
             if (_buf.attentionSent && !attnAck) {
               columns = null;
               await _buf.beginRead();

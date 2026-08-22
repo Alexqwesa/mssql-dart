@@ -99,7 +99,10 @@ class TdsBuffer {
   void writeInt32LE(int v) => writeUint32LE(v & 0xFFFFFFFF);
 
   /// Flush the accumulated write buffer as one or more TDS packets.
-  Future<void> finishPacket(int packetType) async {
+  Future<bool> finishPacket(
+    int packetType, {
+    bool Function()? shouldAbort,
+  }) async {
     final payload = _wbuf.toBytes();
     // Body = everything after the 8-byte header placeholder.
     final body = payload.sublist(headerSize);
@@ -113,6 +116,10 @@ class TdsBuffer {
     int offset = 0;
     int seq = 1;
     while (true) {
+      if (shouldAbort?.call() ?? false) {
+        _wbuf.clear();
+        return false;
+      }
       final remaining = body.length - offset;
       final isLast = remaining <= maxBody;
       final chunkLen = isLast ? remaining : maxBody;
@@ -147,6 +154,7 @@ class TdsBuffer {
       if (isLast) break;
     }
     _wbuf.clear();
+    return true;
   }
 
   /// Sends a TDS Attention packet (ms-tds §2.2.1.7) — empty body, type 6.

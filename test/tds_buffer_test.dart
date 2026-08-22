@@ -2,6 +2,7 @@ import 'dart:typed_data';
 
 import 'package:mssql/src/tds/buf.dart';
 import 'package:mssql/src/tds/constants.dart';
+import 'package:mssql/src/tds/transport.dart';
 import 'package:test/test.dart';
 
 import 'helpers/tds_socket.dart';
@@ -15,6 +16,26 @@ import 'helpers/tds_socket.dart';
 ///   straddle TDS packet boundaries (regression cases below)
 /// - Tedious `test/unit/packet-test.ts` — packet header / EOM patterns
 void main() {
+  test('cleartext transport prioritizes urgent queued packets', () async {
+    final pair = await TdsSocketPair.open();
+    addTearDown(pair.close);
+
+    final received = BytesBuilder(copy: false);
+    pair.server.listen(received.add);
+    final transport = SocketTdsTransport(pair.client);
+
+    final first = transport.writePacket(Uint8List.fromList([1]));
+    final ordinary = transport.writePacket(Uint8List.fromList([2]));
+    final urgent = transport.writePacket(
+      Uint8List.fromList([9]),
+      urgent: true,
+    );
+    await Future.wait([first, ordinary, urgent]);
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+
+    expect(received.toBytes(), [1, 9, 2]);
+  });
+
   group('TdsBuffer write framing', () {
     // go-mssqldb: TestWrite / TestWrite_BufferBounds
     test('single packet write matches go-mssqldb TestWrite layout', () async {
@@ -79,6 +100,31 @@ void main() {
           6,
         ]),
       );
+    });
+
+    test('cancel predicate stops before the next complete packet', () async {
+      final pair = await TdsSocketPair.open();
+      addTearDown(pair.close);
+
+      final received = BytesBuilder(copy: false);
+      pair.server.listen(received.add);
+
+      final buf = TdsBuffer(pair.client, packetSize: 11);
+      buf.beginPacket(packBulkLoadBCP);
+      buf.writeBytes([1, 2, 3, 4, 5, 6, 7]);
+      var cancellationChecks = 0;
+      final completed = await buf.finishPacket(
+        packBulkLoadBCP,
+        shouldAbort: () => cancellationChecks++ > 0,
+      );
+
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      final bytes = received.toBytes();
+      expect(completed, isFalse);
+      expect(bytes.length, 11);
+      expect(bytes[0], packBulkLoadBCP);
+      expect(bytes[1] & statusEOM, 0);
+      expect(bytes.sublist(headerSize), [1, 2, 3]);
     });
 
     // go-mssqldb BeginPacket(resetSession) / ms-tds RESETCONNECTION 0x08

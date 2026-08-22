@@ -53,3 +53,9 @@ class MssqlProtocolLimitException extends MssqlException {
           '$context $value exceeds configured maximum $maximum',
         );
 }
+
+/// Thrown when an in-flight operation is cancelled before normal completion.
+class MssqlOperationCancelledException extends MssqlException {
+  const MssqlOperationCancelledException(
+      [super.message = 'Operation cancelled']);
+}

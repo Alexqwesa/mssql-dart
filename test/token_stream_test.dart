@@ -1184,10 +1184,12 @@ void main() {
       final fed = await _openWithBody(body);
       addTearDown(fed.pair.close);
 
-      final result = await TokenStream(fed.buf).processQueryResponse();
+      final stream = TokenStream(fed.buf);
+      final result = await stream.processQueryResponse();
       expect(result.columns, isEmpty);
       expect(result.rows, isEmpty);
       expect(result.rowsAffected, equals(0));
+      expect(stream.lastResponseCancelled, isTrue);
     });
 
     test('streamQueryResponse completes on Attention DONE', () async {

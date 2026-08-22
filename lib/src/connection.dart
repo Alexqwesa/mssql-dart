@@ -24,6 +24,38 @@ import 'tds/sql_browser.dart';
 import 'tds/transport.dart';
 import 'tds/token_stream.dart';
 
+/// A running Bulk Load operation with explicit cancellation ownership.
+///
+/// [cancel] is idempotent and completes only after SQL Server's Attention
+/// acknowledgement has been drained, or after the operation finishes first.
+/// When cancellation wins, [result] throws [MssqlOperationCancelledException].
+final class MssqlBulkOperation {
+  /// Rows inserted when the operation completes normally.
+  final Future<int> result;
+
+  /// Completes with `true` immediately before BCP packet transfer begins.
+  ///
+  /// It completes with `false` if validation, setup, or cancellation ends the
+  /// operation before SQL Server accepts the `INSERT BULK` request.
+  final Future<bool> transferStarted;
+
+  final Future<void> Function() _cancel;
+  Future<void>? _cancellation;
+
+  MssqlBulkOperation._({
+    required this.result,
+    required this.transferStarted,
+    required Future<void> Function() cancel,
+  }) : _cancel = cancel {
+    // A caller may use only cancel(). Keep the separately exposed result error
+    // observable to awaiters without reporting it as an unhandled async error.
+    result.ignore();
+  }
+
+  /// Requests TDS Attention for this operation and waits until it is drained.
+  Future<void> cancel() => _cancellation ??= _cancel();
+}
+
 /// Opens and manages a single connection to SQL Server.
 ///
 /// ```dart
@@ -85,6 +117,7 @@ class MssqlConnection {
   late Socket _socket;
   bool _connected = false;
   bool _busy = false;
+  _BulkCancellation? _activeBulk;
   String _currentDatabase = '';
 
   /// Database set at login (ENVCHANGE) — pool reset target when config.db empty.
@@ -169,8 +202,9 @@ class MssqlConnection {
   /// optional TLS + LOGIN7), not TCP connect alone.
   ///
   /// [queryTimeout] — default deadline for [query] / [queryMultiple] /
-  /// [execute] / [queryStream]. On expiry the driver sends Attention and
-  /// tries to keep the connection usable. Override per call with `timeout:`.
+  /// [execute] / [queryStream] / [bulkInsert]. On expiry the driver sends
+  /// Attention and tries to keep the connection usable. Override per call with
+  /// `timeout:`.
   ///
   /// [protocolLimits] — optional caps for server-controlled token and value
   /// lengths. Defaults to unlimited for compatibility.
@@ -617,64 +651,182 @@ class MssqlConnection {
     List<List<Object?>> rows, {
     List<BulkColumn>? columnTypes,
     Duration? timeout,
-  }) async {
+  }) async =>
+      startBulkInsert(
+        table,
+        columns,
+        rows,
+        columnTypes: columnTypes,
+        timeout: timeout,
+      ).result;
+
+  /// Starts a cancellable Bulk Load operation.
+  ///
+  /// Cancellation is observed between complete TDS packets. The current packet
+  /// may finish, then an urgent Attention packet is sent and no later BCP packet
+  /// is emitted. [MssqlBulkOperation.cancel] completes after the server response
+  /// is drained, so the connection can be reused immediately afterward.
+  MssqlBulkOperation startBulkInsert(
+    String table,
+    List<String> columns,
+    List<List<Object?>> rows, {
+    List<BulkColumn>? columnTypes,
+    Duration? timeout,
+  }) {
     _assertOpen();
     _assertNotBusy();
-    if (columns.isEmpty) {
-      throw ArgumentError('columns must not be empty');
-    }
-    if (rows.isEmpty) return 0;
-    for (final row in rows) {
-      if (row.length != columns.length) {
-        throw ArgumentError(
-          'Each row must have ${columns.length} values (got ${row.length})',
-        );
-      }
-    }
-
-    var cols = columnTypes ?? BulkLoad.inferColumns(columns, rows);
-    if (cols.length != columns.length) {
-      throw ArgumentError('columnTypes length must match columns');
-    }
-
-    if (cols.any((column) => column.nullable == null)) {
-      final metadata = await query(
-        BulkLoad.selectMetadataSql(table, columns),
-        const {},
-        timeout,
-      );
-      if (metadata.columns.length != columns.length) {
-        throw StateError(
-          'Destination metadata returned ${metadata.columns.length} columns, '
-          'expected ${columns.length}',
-        );
-      }
-      cols = [
-        for (var i = 0; i < cols.length; i++)
-          cols[i].withResolvedNullable(metadata.columns[i].nullable),
-      ];
-    }
-
-    BulkLoad.validateRows(cols, rows);
-
+    final cancellation = _BulkCancellation();
     _busy = true;
-    try {
-      final sql = BulkLoad.insertBulkSql(table, cols);
-      await RpcRequest.sendBatch(_buf, sql);
-      await _awaitQuery(
-        _tokenStream().processQueryResponse(),
-        timeout: timeout,
-      );
+    _activeBulk = cancellation;
+    final result = _runBulkInsert(
+      table,
+      columns,
+      rows,
+      columnTypes: columnTypes,
+      timeout: timeout,
+      cancellation: cancellation,
+    );
+    return MssqlBulkOperation._(
+      result: result,
+      transferStarted: cancellation.transferStarted.future,
+      cancel: () => _cancelBulk(cancellation),
+    );
+  }
 
-      await BulkLoad.send(_buf, cols, rows);
+  Future<int> _runBulkInsert(
+    String table,
+    List<String> columns,
+    List<List<Object?>> rows, {
+    required List<BulkColumn>? columnTypes,
+    required Duration? timeout,
+    required _BulkCancellation cancellation,
+  }) async {
+    try {
+      if (columns.isEmpty) {
+        throw ArgumentError('columns must not be empty');
+      }
+      if (rows.isEmpty) return 0;
+      for (final row in rows) {
+        if (row.length != columns.length) {
+          throw ArgumentError(
+            'Each row must have ${columns.length} values (got ${row.length})',
+          );
+        }
+      }
+
+      var cols = columnTypes ?? BulkLoad.inferColumns(columns, rows);
+      if (cols.length != columns.length) {
+        throw ArgumentError('columnTypes length must match columns');
+      }
+
+      if (cols.any((column) => column.nullable == null)) {
+        final metadata = await _runBulkQuery(
+          BulkLoad.selectMetadataSql(table, columns),
+          timeout: timeout,
+          cancellation: cancellation,
+        );
+        _throwIfBulkCancelled(cancellation);
+        if (metadata.columns.length != columns.length) {
+          throw StateError(
+            'Destination metadata returned ${metadata.columns.length} columns, '
+            'expected ${columns.length}',
+          );
+        }
+        cols = [
+          for (var i = 0; i < cols.length; i++)
+            cols[i].withResolvedNullable(metadata.columns[i].nullable),
+        ];
+      }
+
+      BulkLoad.validateRows(cols, rows);
+      _throwIfBulkCancelled(cancellation);
+
+      final sql = BulkLoad.insertBulkSql(table, cols);
+      await _runBulkQuery(
+        sql,
+        timeout: timeout,
+        cancellation: cancellation,
+      );
+      _throwIfBulkCancelled(cancellation);
+
+      final tokenStream = _tokenStream();
+      cancellation.requestInFlight = true;
+      cancellation.transferStarted.complete(true);
+      try {
+        final fullySent = await BulkLoad.send(
+          _buf,
+          cols,
+          rows,
+          shouldAbort: () => cancellation.requested,
+        );
+        final result = await _awaitQuery(
+          tokenStream.processQueryResponse(),
+          timeout: timeout,
+        );
+        if (!fullySent || tokenStream.lastResponseCancelled) {
+          throw const MssqlOperationCancelledException(
+            'Bulk insert was cancelled',
+          );
+        }
+        return result.rowsAffected > 0 ? result.rowsAffected : rows.length;
+      } finally {
+        cancellation.requestInFlight = false;
+      }
+    } finally {
+      if (!cancellation.transferStarted.isCompleted) {
+        cancellation.transferStarted.complete(false);
+      }
+      cancellation.completed = true;
+      if (identical(_activeBulk, cancellation)) {
+        _activeBulk = null;
+      }
+      _busy = false;
+      cancellation.done.complete();
+    }
+  }
+
+  Future<MssqlResult> _runBulkQuery(
+    String sql, {
+    required Duration? timeout,
+    required _BulkCancellation cancellation,
+  }) async {
+    final tokenStream = _tokenStream();
+    cancellation.requestInFlight = true;
+    try {
+      await RpcRequest.sendBatch(_buf, sql);
       final result = await _awaitQuery(
-        _tokenStream().processQueryResponse(),
+        tokenStream.processQueryResponse(),
         timeout: timeout,
       );
-      return result.rowsAffected > 0 ? result.rowsAffected : rows.length;
+      if (tokenStream.lastResponseCancelled) {
+        throw const MssqlOperationCancelledException(
+          'Bulk insert was cancelled',
+        );
+      }
+      return MssqlResult(internal: result);
     } finally {
-      _busy = false;
+      cancellation.requestInFlight = false;
     }
+  }
+
+  void _throwIfBulkCancelled(_BulkCancellation cancellation) {
+    if (cancellation.requested) {
+      throw const MssqlOperationCancelledException(
+        'Bulk insert was cancelled',
+      );
+    }
+  }
+
+  Future<void> _cancelBulk(_BulkCancellation cancellation) async {
+    if (cancellation.completed) return;
+    cancellation.requested = true;
+    if (identical(_activeBulk, cancellation) &&
+        cancellation.requestInFlight &&
+        !cancellation.attentionDispatched) {
+      cancellation.attentionDispatched = true;
+      await _buf.sendAttention();
+    }
+    await cancellation.done.future;
   }
 
   /// Invokes a stored procedure via TDS RPC (not `EXEC` batch).
@@ -716,14 +868,21 @@ class MssqlConnection {
     }
   }
 
-  /// Cancels the query currently in progress by sending a TDS Attention packet.
+  /// Cancels the operation currently in progress by sending TDS Attention.
   ///
   /// No-op when the connection is idle. The in-flight [query] / [queryMultiple]
-  /// / [queryStream] should finish after the server's Attention acknowledgement
-  /// (DONE with `doneAttn`). Does not close the connection.
+  /// / [queryStream] should finish after the server's Attention acknowledgement.
+  /// For Bulk Load, prefer the operation-specific handle returned by
+  /// [startBulkInsert]; this method delegates to that handle and waits until the
+  /// connection is reusable. Does not close the connection.
   Future<void> cancel() async {
     _assertOpen();
     if (!_busy) return;
+    final bulk = _activeBulk;
+    if (bulk != null) {
+      await _cancelBulk(bulk);
+      return;
+    }
     await _buf.sendAttention();
   }
 
@@ -1276,4 +1435,14 @@ class MssqlConnection {
       throw StateError('A query is already in progress on this connection');
     }
   }
+}
+
+final class _BulkCancellation {
+  final Completer<bool> transferStarted = Completer<bool>();
+  final Completer<void> done = Completer<void>();
+
+  bool requested = false;
+  bool requestInFlight = false;
+  bool attentionDispatched = false;
+  bool completed = false;
 }

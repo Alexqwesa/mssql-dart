@@ -136,14 +136,18 @@ class BulkLoad {
     buf.writeUint64LE(0);
   }
 
-  static Future<void> send(
+  static Future<bool> send(
     TdsBuffer buf,
     List<BulkColumn> columns,
-    List<List<Object?>> rows,
-  ) async {
+    List<List<Object?>> rows, {
+    bool Function()? shouldAbort,
+  }) async {
     buf.beginPacket(packBulkLoadBCP);
     writePayload(buf, columns, rows);
-    await buf.finishPacket(packBulkLoadBCP);
+    return buf.finishPacket(
+      packBulkLoadBCP,
+      shouldAbort: shouldAbort,
+    );
   }
 
   /// Validates values before `INSERT BULK` puts the server in BCP mode.

@@ -159,6 +159,24 @@ await conn.bulkInsert(
   ],
 );
 
+// Use an operation handle when Bulk Load must be cancellable. cancel()
+// completes after SQL Server acknowledges Attention and the connection is
+// reusable; result throws MssqlOperationCancelledException if cancellation wins.
+final bulk = conn.startBulkInsert(
+  'dbo.Items',
+  ['Id', 'Name'],
+  List.generate(100000, (i) => [i, 'item-$i']),
+);
+final result = bulk.result;
+if (await bulk.transferStarted) {
+  await bulk.cancel();
+}
+try {
+  await result;
+} on MssqlOperationCancelledException {
+  // The Bulk Load statement was cancelled and its response was drained.
+}
+
 // Requires: CREATE TYPE dbo.IdList AS TABLE (Id BIGINT);
 await conn.query('SELECT Id FROM @ids', {
   'ids': MssqlTvp(
