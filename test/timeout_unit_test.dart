@@ -1,7 +1,10 @@
 import 'dart:io';
 
 import 'package:mssql/mssql.dart';
+import 'package:mssql/src/tds/constants.dart';
 import 'package:test/test.dart';
+
+import 'helpers/tds_socket.dart';
 
 /// Offline login-timeout coverage for LAN SQL use.
 ///
@@ -36,6 +39,62 @@ void main() {
     );
     sw.stop();
     expect(sw.elapsedMilliseconds, lessThan(3000));
+  });
+
+  test('login timeout while TLS handshake receives no server data', () async {
+    final listener = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(listener.close);
+    final sockets = <Socket>[];
+    addTearDown(() {
+      for (final socket in sockets) {
+        socket.destroy();
+      }
+    });
+
+    listener.listen((socket) {
+      sockets.add(socket);
+      var replied = false;
+      socket.listen((_) {
+        if (replied) return;
+        replied = true;
+        socket.add(
+          tdsPacket(
+            type: packReply,
+            body: const [
+              preloginEncryption,
+              0,
+              6,
+              0,
+              1,
+              preloginTerminator,
+              encryptOn,
+            ],
+          ),
+        );
+      }, onError: (_) {}, cancelOnError: true);
+    });
+
+    final stopwatch = Stopwatch()..start();
+    await expectLater(
+      MssqlConnection.connect(
+        host: '127.0.0.1',
+        port: listener.port,
+        user: 'sa',
+        password: 'x',
+        encrypt: true,
+        trustServerCertificate: true,
+        timeout: const Duration(milliseconds: 400),
+      ),
+      throwsA(
+        isA<MssqlException>().having(
+          (error) => error.message,
+          'message',
+          contains('Login timed out'),
+        ),
+      ),
+    );
+    stopwatch.stop();
+    expect(stopwatch.elapsedMilliseconds, lessThan(3000));
   });
 
   test('MssqlPoolConfig carries appName and queryTimeout', () {

@@ -641,8 +641,13 @@ class MssqlPool {
   /// If there are pending callers, the connection is handed directly to the
   /// next waiter. Otherwise it goes to the idle list.
   Future<void> release(MssqlConnection conn) async {
-    if (_closed || !conn.isOpen) {
+    if (_closed) {
       _discard(conn);
+      return;
+    }
+    if (!conn.isOpen) {
+      _discard(conn);
+      await _replaceDiscardedForPending();
       return;
     }
 
@@ -652,6 +657,7 @@ class MssqlPool {
         _resetFailures++;
         _emit(MssqlPoolEventKind.resetFailed);
         _discard(conn);
+        await _replaceDiscardedForPending();
         return;
       }
       // If pool config pins a database and reset left us elsewhere, USE.
@@ -662,6 +668,7 @@ class MssqlPool {
           _resetFailures++;
           _emit(MssqlPoolEventKind.resetFailed);
           _discard(conn);
+          await _replaceDiscardedForPending();
           return;
         }
       }
@@ -918,6 +925,49 @@ class MssqlPool {
   void _discard(MssqlConnection conn) {
     _accountDestroyed();
     if (conn.isOpen) unawaited(conn.close());
+  }
+
+  Future<void> _replaceDiscardedForPending() async {
+    while (!_closed && _pending.isNotEmpty && _total < config.max) {
+      _total++;
+      MssqlConnection replacement;
+      try {
+        replacement = await _openConnection();
+      } catch (error, stackTrace) {
+        _total--;
+        while (_pending.isNotEmpty) {
+          final waiter = _pending.removeAt(0);
+          if (!waiter.isCompleted) {
+            waiter.completeError(error, stackTrace);
+            break;
+          }
+        }
+        continue;
+      }
+
+      if (_closed) {
+        unawaited(replacement.close());
+        _accountDestroyed();
+        return;
+      }
+
+      _created++;
+      _emit(MssqlPoolEventKind.created);
+      Completer<MssqlConnection>? waiter;
+      while (_pending.isNotEmpty) {
+        final candidate = _pending.removeAt(0);
+        if (!candidate.isCompleted) {
+          waiter = candidate;
+          break;
+        }
+      }
+      if (waiter == null) {
+        _idle.add(_IdleEntry(replacement));
+        return;
+      }
+      waiter.complete(replacement);
+      _noteAcquired();
+    }
   }
 
   void _startIdleTimer() {

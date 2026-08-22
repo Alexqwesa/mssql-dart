@@ -188,5 +188,52 @@ void main() {
       expect(nullable[headerSize + 7], 0x09);
       expect(notNull[headerSize + 7], 0x08);
     });
+
+    test('validateRows rejects invalid values before the BCP phase', () {
+      expect(
+        () => BulkLoad.validateRows(
+          const [
+            BulkColumn('id', BulkColumnType.bigInt, nullable: false),
+            BulkColumn(
+              'name',
+              BulkColumnType.nVarChar,
+              nVarCharLength: 3,
+              nullable: false,
+            ),
+          ],
+          const [
+            ['not-an-int', 'ok'],
+          ],
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => BulkLoad.validateRows(
+          const [
+            BulkColumn(
+              'name',
+              BulkColumnType.nVarChar,
+              nVarCharLength: 3,
+              nullable: false,
+            ),
+          ],
+          const [
+            ['four'],
+          ],
+        ),
+        throwsArgumentError,
+      );
+      expect(
+        () => BulkLoad.validateRows(
+          const [
+            BulkColumn('id', BulkColumnType.bigInt, nullable: false),
+          ],
+          const [
+            [null],
+          ],
+        ),
+        throwsArgumentError,
+      );
+    });
   });
 }

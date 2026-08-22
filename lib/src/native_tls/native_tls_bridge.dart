@@ -31,7 +31,11 @@ final class NativeTlsBridge {
         await _drainHandshakeOutput(rawSocket, engine);
         if (result == 3) break;
         if (result < 0) {
-          throw StateError('Native TLS handshake failed with code $result.');
+          final detail = engine.lastError();
+          throw StateError(
+            'Native TLS handshake failed with code $result'
+            '${detail.isEmpty ? '.' : ': $detail'}',
+          );
         }
 
         final header = await rawReader.readChunk(headerSize);

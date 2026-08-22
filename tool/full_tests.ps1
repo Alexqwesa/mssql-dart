@@ -12,7 +12,7 @@ $matrixImages = @(
     @{ Service = 'sqlserver-2022'; Image = 'mssql-dart-live:2022' },
     @{ Service = 'sqlserver-2025'; Image = 'mssql-dart-live:2025' }
 )
-$matrixImageRevision = '2'
+$matrixImageRevision = '3'
 $rebuiltServices = @()
 
 function Wait-SqlServer([string]$Container) {
@@ -81,21 +81,32 @@ try {
     # edition, rather than being invoked here only to report skipped tests.
     $offlineTests = Get-ChildItem (Join-Path $root 'test') -File -Filter '*.dart' |
         ForEach-Object { $_.FullName }
-    & dart test @offlineTests
-    if ($LASTEXITCODE -ne 0) { throw 'Offline Dart tests failed.' }
+    $offlineOutput = & dart test @offlineTests --reporter=expanded 2>&1
+    $offlineExitCode = $LASTEXITCODE
+    $offlineText = $offlineOutput -join "`n"
+    $offlineHasSkippedTests = $offlineText -match '~[1-9][0-9]*'
+    if ($offlineExitCode -ne 0 -or $offlineHasSkippedTests) {
+        $offlineOutput | ForEach-Object { Write-Host $_ }
+    } else {
+        $offlineOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+            Select-Object -Last 1 |
+            ForEach-Object { Write-Host $_ }
+    }
+    if ($offlineExitCode -ne 0) { throw 'Offline Dart tests failed.' }
+    if ($offlineHasSkippedTests) { throw 'Offline Dart tests unexpectedly skipped.' }
 
     Build-MissingMatrixImages
     Remove-StaleMatrixContainers
-    # Do not rebuild or recreate the matrix on each test run. Existing healthy
-    # containers keep their initialized databases and are simply reused.
-    & docker compose -f $compose up -d --no-build --no-recreate
+    # --no-build reuses the versioned images. Compose also reuses unchanged
+    # containers, while recreating a container when its image or config changed.
+    & docker compose -f $compose up -d --no-build
     if ($LASTEXITCODE -ne 0) { throw 'Docker Compose failed to start the SQL Server matrix.' }
 
     $editions = @(
-        @{ Name = 'SQL Server 2017'; NormalPort = '14330'; ForcePort = '14331'; Container = 'mssql-dart-live-2017' },
-        @{ Name = 'SQL Server 2019'; NormalPort = '14334'; ForcePort = '14335'; Container = 'mssql-dart-live-2019' },
-        @{ Name = 'SQL Server 2022'; NormalPort = '14336'; ForcePort = '14337'; Container = 'mssql-dart-live-2022' },
-        @{ Name = 'SQL Server 2025'; NormalPort = '14338'; ForcePort = '14339'; Container = 'mssql-dart-live-2025' }
+        @{ Name = 'SQL Server 2017'; NormalPort = '14170'; ForcePort = '14171'; Container = 'mssql-dart-live-2017' },
+        @{ Name = 'SQL Server 2019'; NormalPort = '14190'; ForcePort = '14191'; Container = 'mssql-dart-live-2019' },
+        @{ Name = 'SQL Server 2022'; NormalPort = '14220'; ForcePort = '14221'; Container = 'mssql-dart-live-2022' },
+        @{ Name = 'SQL Server 2025'; NormalPort = '14250'; ForcePort = '14251'; Container = 'mssql-dart-live-2025' }
     )
     foreach ($edition in $editions) {
         Write-Host "Waiting for $($edition.Name)..."
@@ -109,8 +120,21 @@ try {
         $env:MSSQL_USER = 'sa'
         $env:MSSQL_PASSWORD = $password
         $env:MSSQL_TRUST_SERVER_CERTIFICATE = '1'
-        & dart test test/live --concurrency=1
-        if ($LASTEXITCODE -ne 0) { throw "Live tests failed against $($edition.Name)." }
+        $liveOutput = & dart test test/live --concurrency=1 --reporter=expanded 2>&1
+        $liveExitCode = $LASTEXITCODE
+        $liveText = $liveOutput -join "`n"
+        $hasSkippedTests = $liveText -match '~[1-9][0-9]*'
+        if ($liveExitCode -ne 0 -or $hasSkippedTests) {
+            $liveOutput | ForEach-Object { Write-Host $_ }
+        } else {
+            $liveOutput | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+                Select-Object -Last 1 |
+                ForEach-Object { Write-Host $_ }
+        }
+        if ($liveExitCode -ne 0) { throw "Live tests failed against $($edition.Name)." }
+        if ($hasSkippedTests) {
+            throw "Live tests unexpectedly skipped against $($edition.Name)."
+        }
     }
 } finally {
     Pop-Location

@@ -146,6 +146,51 @@ class BulkLoad {
     await buf.finishPacket(packBulkLoadBCP);
   }
 
+  /// Validates values before `INSERT BULK` puts the server in BCP mode.
+  static void validateRows(
+    List<BulkColumn> columns,
+    List<List<Object?>> rows,
+  ) {
+    for (var rowIndex = 0; rowIndex < rows.length; rowIndex++) {
+      final row = rows[rowIndex];
+      for (var columnIndex = 0; columnIndex < columns.length; columnIndex++) {
+        final column = columns[columnIndex];
+        final value = row[columnIndex];
+        if (value == null) {
+          if (column.nullable == false) {
+            throw ArgumentError(
+              'Row $rowIndex column "${column.name}" is NOT NULL.',
+            );
+          }
+          continue;
+        }
+        try {
+          switch (column.type) {
+            case BulkColumnType.bigInt:
+              _asInt(value);
+            case BulkColumnType.bit:
+              break;
+            case BulkColumnType.float64:
+              _asDouble(value);
+            case BulkColumnType.dateTime2:
+              _asDateTime(value);
+            case BulkColumnType.nVarChar:
+              _stringBytes(column, value);
+          }
+        } on Object catch (error) {
+          if (error is ArgumentError &&
+              error.message.toString().contains('exceeds nvarchar')) {
+            rethrow;
+          }
+          throw ArgumentError(
+            'Invalid value for row $rowIndex column "${column.name}": '
+            '$error',
+          );
+        }
+      }
+    }
+  }
+
   static void _writeColMetadata(TdsBuffer buf, List<BulkColumn> columns) {
     buf.writeByte(tokenColMetadata);
     buf.writeUint16LE(columns.length);
@@ -213,9 +258,7 @@ class BulkLoad {
 
     switch (col.type) {
       case BulkColumnType.bigInt:
-        final v = value is int
-            ? value
-            : (value is num ? value.toInt() : int.parse(value.toString()));
+        final v = _asInt(value);
         buf.writeByte(8);
         buf.writeUint32LE(v & 0xFFFFFFFF);
         buf.writeUint32LE((v >> 32) & 0xFFFFFFFF);
@@ -226,30 +269,43 @@ class BulkLoad {
         buf.writeByte(1);
         buf.writeByte(v ? 1 : 0);
       case BulkColumnType.float64:
-        final v = value is double
-            ? value
-            : (value is num
-                ? value.toDouble()
-                : double.parse(value.toString()));
+        final v = _asDouble(value);
         buf.writeByte(8);
         final bytes = Uint8List(8);
         ByteData.sublistView(bytes).setFloat64(0, v, Endian.little);
         buf.writeBytes(bytes);
       case BulkColumnType.dateTime2:
-        final dt = value is DateTime ? value : DateTime.parse(value.toString());
+        final dt = _asDateTime(value);
         _writeDateTime2(buf, dt);
       case BulkColumnType.nVarChar:
-        final s = value is String ? value : value.toString();
-        final bytes = _ucs2(s);
-        final maxBytes = col.nVarCharLength.clamp(1, 4000) * 2;
-        if (bytes.length > maxBytes) {
-          throw ArgumentError(
-            'String for column "${col.name}" exceeds nvarchar(${col.nVarCharLength})',
-          );
-        }
+        final bytes = _stringBytes(col, value);
         buf.writeUint16LE(bytes.length);
         buf.writeBytes(bytes);
     }
+  }
+
+  static int _asInt(Object value) => value is int
+      ? value
+      : (value is num ? value.toInt() : int.parse(value.toString()));
+
+  static double _asDouble(Object value) => value is double
+      ? value
+      : (value is num ? value.toDouble() : double.parse(value.toString()));
+
+  static DateTime _asDateTime(Object value) =>
+      value is DateTime ? value : DateTime.parse(value.toString());
+
+  static Uint8List _stringBytes(BulkColumn column, Object value) {
+    final string = value is String ? value : value.toString();
+    final bytes = _ucs2(string);
+    final maxBytes = column.nVarCharLength.clamp(1, 4000) * 2;
+    if (bytes.length > maxBytes) {
+      throw ArgumentError(
+        'String for column "${column.name}" exceeds '
+        'nvarchar(${column.nVarCharLength})',
+      );
+    }
+    return bytes;
   }
 
   /// Same encoding as [RpcRequest] DATETIME2 scale 7.

@@ -655,6 +655,8 @@ class MssqlConnection {
       ];
     }
 
+    BulkLoad.validateRows(cols, rows);
+
     _busy = true;
     try {
       final sql = BulkLoad.insertBulkSql(table, cols);
@@ -897,6 +899,11 @@ class MssqlConnection {
     } on SocketException catch (e) {
       unawaited(_forceClose());
       throw MssqlException('TCP connect failed: $e');
+    } on MssqlException {
+      rethrow;
+    } catch (error) {
+      unawaited(_forceClose());
+      throw MssqlException('Login handshake failed: $error');
     }
   }
 

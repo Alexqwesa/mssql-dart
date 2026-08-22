@@ -43,6 +43,7 @@ abstract interface class NativeTlsDriver {
   int retryWrite();
   bool get hasPendingWrite;
   Uint8List peerCertificateDer();
+  String lastError();
   void dispose();
 }
 
@@ -70,6 +71,7 @@ final class NativeTlsEngine implements Finalizable, NativeTlsDriver {
       _readPlaintext;
   late final int Function(Pointer<Void>, Pointer<Uint8>, int, Pointer<IntPtr>)
       _peerCertificateDer;
+  late final Pointer<Utf8> Function(Pointer<Void>) _lastError;
 
   NativeTlsEngine({
     required String serverName,
@@ -122,6 +124,9 @@ final class NativeTlsEngine implements Finalizable, NativeTlsDriver {
           Int32 Function(Pointer<Void>, Pointer<Uint8>, Size, Pointer<IntPtr>),
           int Function(Pointer<Void>, Pointer<Uint8>, int,
               Pointer<IntPtr>)>('mssql_tls_peer_certificate_der');
+      _lastError = _library.lookupFunction<
+          Pointer<Utf8> Function(Pointer<Void>),
+          Pointer<Utf8> Function(Pointer<Void>)>('mssql_tls_last_error');
       _finalizer.attach(this, _handle, detach: this);
     } finally {
       calloc.free(name);
@@ -195,6 +200,12 @@ final class NativeTlsEngine implements Finalizable, NativeTlsDriver {
     } finally {
       calloc.free(required);
     }
+  }
+
+  @override
+  String lastError() {
+    final error = _lastError(_handle);
+    return error == nullptr ? '' : error.toDartString();
   }
 
   NativeTlsRead _read(

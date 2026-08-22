@@ -1,5 +1,9 @@
 # Testing mssql
 
+See [`test/README.md`](test/README.md) for the coverage map organized by test
+category and for the external-infrastructure scenarios outside the Docker
+matrix.
+
 ## Offline tests
 
 ```powershell
@@ -79,11 +83,12 @@ Stop the matrix when finished with:
 docker compose -f .\docker-compose.matrix.yml down
 ```
 
-The eight host ports are 14330/14331 (2017), 14334/14335 (2019),
-14336/14337 (2022), and 14338/14339 (2025). SQL Server 2012 through 2016 have
-no official Linux container images; test those releases against externally
-provisioned Windows instances by setting the normal `MSSQL_*` environment
-variables.
+The eight host ports are 14170/14171 (2017), 14190/14191 (2019),
+14220/14221 (2022), and 14250/14251 (2025). This separate range lets the
+matrix run beside the ordinary 14334/14335 live-test stack. SQL Server 2012
+through 2016 have no official Linux container images; test those releases
+against externally provisioned Windows instances by setting the normal
+`MSSQL_*` environment variables.
 
 ## Live SQL Server tests
 

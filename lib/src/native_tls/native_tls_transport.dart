@@ -75,9 +75,15 @@ final class NativeTlsTransport {
     _runner = _run().whenComplete(() {
       _runner = null;
       // Input can arrive in the tiny gap while the previous runner is still
-      // completing. Schedule it again so a WANT_INPUT write never strands
-      // queued peer ciphertext.
-      if (_incoming.isNotEmpty && !_closed) _schedule();
+      // completing. Writes can be queued in the same gap after their previous
+      // completer fires. Schedule either kind of work so neither is stranded.
+      if (!_closed &&
+          (_incoming.isNotEmpty ||
+              _activeWrite != null ||
+              _urgentWrites.isNotEmpty ||
+              _writes.isNotEmpty)) {
+        _schedule();
+      }
     });
   }
 

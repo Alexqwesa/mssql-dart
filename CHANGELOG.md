@@ -2,9 +2,21 @@
 
 ## Unreleased
 
+* TLS: reschedule writes queued during the native transport runner's
+  completion window, preventing large encrypted Bulk Loads from stalling.
+* TLS: surface native certificate and handshake failures as public
+  `MssqlException` errors with the OpenSSL diagnostic when available.
+* Bulk Load: validate nullability, lengths, and value conversions before
+  entering SQL Server's BCP protocol phase so local errors leave the
+  connection reusable.
+* Pool: replace dead or reset-failed borrowed sessions when callers are already
+  queued instead of leaving those waiters to time out.
 * Bulk Load: resolve unspecified `BulkColumn.nullable` values
   from destination metadata so BCP `fNullable` flags match both nullable and
   `NOT NULL` columns, avoiding SQL Server error 4816.
+* Tests: add a category-based coverage guide plus real certificate validation,
+  connection-failure, transaction-reset, Bulk Load scale/failure, Unicode,
+  token-sequence, connection-churn, and forced-TLS concurrency suites.
 
 ## 0.5.0
 

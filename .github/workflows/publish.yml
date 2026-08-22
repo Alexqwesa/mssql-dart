@@ -168,6 +168,7 @@ jobs:
             test/rpc_encode_test.dart \
             test/mock_full_login_test.dart \
             test/attention_cancel_test.dart \
+            test/native_tls_transport_test.dart \
             test/ntlm_auth_test.dart \
             test/azure_ad_auth_test.dart \
             test/mock_sspi_login_test.dart \
@@ -203,13 +204,16 @@ jobs:
           docker compose --env-file .env.example \
             -f docker-compose.live.yml \
             up -d --build
-      - name: Wait for forceencryption SQL Server
+      - name: Wait for optional and force-encryption SQL Servers
         run: |
           for i in $(seq 1 60); do
-            if docker exec mssql-dart-live-force-tls /opt/mssql-tools18/bin/sqlcmd \
+            if docker exec mssql-dart-live /opt/mssql-tools18/bin/sqlcmd \
+              -S localhost -U sa -P 'Strong_test_password_123!' \
+              -Q 'SELECT 1' -No -C >/dev/null 2>&1 \
+              && docker exec mssql-dart-live-force-tls /opt/mssql-tools18/bin/sqlcmd \
               -S localhost -U sa -P 'Strong_test_password_123!' \
               -Q 'SELECT 1' -No -C >/dev/null 2>&1; then
-              echo "force-TLS SQL Server is ready"
+              echo "both SQL Servers are ready"
               exit 0
             fi
             echo "waiting ($i)..."
@@ -226,9 +230,14 @@ jobs:
           MSSQL_PASSWORD: "Strong_test_password_123!"
           MSSQL_TRUST_SERVER_CERTIFICATE: "1"
         run: |
+          set -o pipefail
           dart test \
+            test/live/tls_certificate_live_test.dart \
             test/live/tls_force_encrypt_stress_test.dart \
-            --concurrency=1 --timeout=120s
+            test/live/connection_churn_live_test.dart \
+            --concurrency=1 --timeout=120s --reporter=expanded \
+            | tee force-tls-test.log
+          ! grep -Eq '~[1-9][0-9]*' force-tls-test.log
       - name: Tear down
         if: always()
         run: |
@@ -271,12 +280,17 @@ jobs:
           MSSQL_USER: "sa"
           MSSQL_PASSWORD: "Strong_test_password_123!"
         run: |
+          set -o pipefail
           # Exclude standalone scripts that don't use package:test
           TEST_FILES=$(find test -name '*_test.dart' \
             ! -name 'debug_test.dart' \
             ! -name 'integration_test.dart' \
+            ! -name 'tls_certificate_live_test.dart' \
+            ! -name 'connection_churn_live_test.dart' \
             | sort | tr '\n' ' ')
-          dart test $TEST_FILES --timeout=90s
+          dart test $TEST_FILES --timeout=90s --reporter=expanded \
+            | tee sql-server-test.log
+          ! grep -Eq '~[1-9][0-9]*' sql-server-test.log
 
   # ════════════════════════════════════════════════════════════════════════════
   # 4 · Publish to pub.dev  (tag pushes only, after tests pass)
