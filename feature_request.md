@@ -20,8 +20,10 @@ remain unchanged:
 
 ```dart
 final socket = await SecureSocket.connect(host, port);
+final limit = socket.maximumTlsFragmentLength;
 
 for (final tdsPacket in packets) {
+  if (tdsPacket.length > limit) throw StateError('TDS packet is too large');
   await socket.writeTlsFragment(tdsPacket);
 }
 ```
@@ -30,6 +32,7 @@ for (final tdsPacket in packets) {
 
 `writeTlsFragment()` should:
 
+- expose the platform capacity through `maximumTlsFragmentLength`;
 - preserve ordering with writes made through the inherited `IOSink`;
 - submit the complete input through one native TLS write operation;
 - complete after its ciphertext has been flushed to the underlying socket;
@@ -40,16 +43,35 @@ The guarantee concerns the plaintext operation passed to the native TLS
 implementation. It need not promise a one-to-one TLS-record mapping if the TLS
 implementation performs its own fragmentation procedure.
 
-An additional option could preserve existing behavior by default:
+The intended usage is to choose one write mode for a protocol phase. Switching
+between ordinary `IOSink` writes and explicit fragments is valid but requires a
+full write drain and may reduce throughput. The prototype rejects overlapping
+modes with `StateError` and intentionally does not implement an automatic
+mode-merging scheduler; such a scheduler is outside the proposed contract.
 
-```dart
-coalesceWrappedTlsWrites: true // Default: false.
-```
+## Side note: Prototype Capacity
 
-That option is useful, but narrower. It can join two physical regions already
-present in the circular buffer; it cannot reconstruct an application boundary
-after a large `Socket.add()` has been accepted and processed in separate
-chunks.
+The current prototype reports `8191`. Dart's plaintext ring is 8192 bytes and
+reserves one byte so equal cursors unambiguously mean "empty". After the write
+side is fully drained and the native filter is idle, the prototype rebases the
+empty ring to `start = end = 0`. This provides one contiguous 8191-byte range
+without a scratch buffer or changes to the native C++ filter.
+
+The value is an implementation capacity, not a TLS protocol limit. TLS 1.2 and
+TLS 1.3 permit plaintext records of **up to** 2^14 (16384) bytes; they do not
+require implementations to emit 16 KiB records. An 8191-byte maximum is
+standards-compliant. The capability getter allows a later SDK to support 16384
+without changing this API.
+
+Supporting the full 16384 bytes in the current implementation would require a
+plaintext ring with at least 16385 physical bytes. The current 10 KiB encrypted
+ring and internal BIO would also need either enlargement or explicit validation
+of their `WANT_WRITE` drain/retry behavior for a full-sized record. That is a
+reasonable follow-up optimization, but it is not required for the API or this
+TDS use case.
+
+- [TLS 1.2 record fragmentation, RFC 5246 section 6.2.1](https://www.rfc-editor.org/rfc/rfc5246#section-6.2.1)
+- [TLS 1.3 record layer, RFC 8446 section 5.1](https://www.rfc-editor.org/rfc/rfc8446#section-5.1)
 
 ## Reproduction And Validation
 
@@ -57,20 +79,28 @@ Tested from Dart SDK `main` revision
 `de2ff206bc5019a090f6d607cb0d159d35f317b6` on Windows x64 against SQL
 Server 2022, with the driver's historical TLS-alignment workaround removed:
 
+The attached `secure_socket_tls_fragment.patch` contains the empty-ring
+prototype and its standalone SDK regression test. 
+
 | SDK behavior | TLS alignment tests |
 | --- | --- |
 | Unmodified SDK | 0/4 passed |
 | Attached wrapped-ring copy patch | 2/4 passed |
-| Prototype `writeTlsFragment()` plus wrapped-ring copy | 3/4 passed |
+| Prototype `writeTlsFragment()` with empty-ring rebasing | 3/4 passed |
 | Prototype plus corrected BCP nullability metadata | 4/4 passed |
 
 The explicit API made the multi-packet trace consistently use 4096-byte native
 writes and passed all 120 test iterations. The Attention cancellation test also
 passed. Bulk Load initially still returned SQL Server error 4816 after write
-boundaries were preserved. 
+boundaries were preserved.
 
 The attached `dart-secure-socket-wrapped-plaintext.patch` therefore fixes a
-real lower-level split, but is not sufficient as the complete API solution.
+real lower-level split, but is not sufficient as the complete API solution. The
+latest explicit-fragment prototype does not need that wrapped-ring copy.
+
+The current driver validation adds a fifth packet-capacity regression. With the
+empty-ring prototype and the independent BCP fix, all 5 alignment tests and all
+415 encrypted live tests pass with no skips.
 
 ## TDS Context
 

@@ -1,0 +1,343 @@
+Index: sdk/lib/_internal/vm/bin/secure_socket_patch.dart
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/sdk/lib/_internal/vm/bin/secure_socket_patch.dart b/sdk/lib/_internal/vm/bin/secure_socket_patch.dart
+--- a/sdk/lib/_internal/vm/bin/secure_socket_patch.dart	(revision 3f75a6dcb764bd345802d9093ea41a36e6cb740b)
++++ b/sdk/lib/_internal/vm/bin/secure_socket_patch.dart	(revision 91431ad5984664a9911f048037132c2c203479c3)
+@@ -26,6 +26,9 @@
+
+ class _SecureSocket extends _Socket implements SecureSocket {
+   _RawSecureSocket? get _raw => super._raw as _RawSecureSocket?;
++  Future<void>? _fragmentWriteChain;
++  int _pendingTlsFragmentWrites = 0;
++  bool _tlsFragmentClosePending = false;
+
+   _SecureSocket(RawSecureSocket raw) : super(raw);
+
+@@ -48,6 +51,97 @@
+     }
+     return _raw!.selectedProtocol;
+   }
++
++  int get maximumTlsFragmentLength {
++    final raw = _raw;
++    if (raw == null) throw const SocketException.closed();
++    return raw._maximumTlsFragmentLength;
++  }
++
++  void _rejectWriteDuringTlsFragment() {
++    if (_pendingTlsFragmentWrites != 0 || _tlsFragmentClosePending) {
++      throw StateError(
++        'Cannot write through IOSink while a TLS fragment write or close is '
++        'pending',
++      );
++    }
++  }
++
++  void write(Object? object) {
++    _rejectWriteDuringTlsFragment();
++    super.write(object);
++  }
++
++  void writeln([Object? object = '']) {
++    _rejectWriteDuringTlsFragment();
++    super.writeln(object);
++  }
++
++  void writeCharCode(int charCode) {
++    _rejectWriteDuringTlsFragment();
++    super.writeCharCode(charCode);
++  }
++
++  void writeAll(Iterable<Object?> objects, [String separator = '']) {
++    _rejectWriteDuringTlsFragment();
++    super.writeAll(objects, separator);
++  }
++
++  void add(List<int> data) {
++    _rejectWriteDuringTlsFragment();
++    super.add(data);
++  }
++
++  Future<void> addStream(Stream<List<int>> stream) {
++    _rejectWriteDuringTlsFragment();
++    return super.addStream(stream);
++  }
++
++  Future<void> close() {
++    _tlsFragmentClosePending = true;
++    final fragmentWriteChain = _fragmentWriteChain;
++    if (_pendingTlsFragmentWrites == 0 || fragmentWriteChain == null) {
++      return super.close();
++    }
++    // A graceful send close is ordered after accepted fragment writes. destroy()
++    // remains available when the caller needs to abort them immediately.
++    return fragmentWriteChain.then((_) => super.close());
++  }
++
++  Future<void> writeTlsFragment(List<int> data) {
++    if (_tlsFragmentClosePending) {
++      return Future<void>.error(const SocketException.closed());
++    }
++    // Capture mutable input synchronously because this operation may wait for
++    // an earlier fragment before it reaches the native TLS filter.
++    final bytes = Uint8List.fromList(data);
++    // Mark the operation pending synchronously, before its chain callback can
++    // yield, so a following IOSink call cannot cross the fragment boundary.
++    _pendingTlsFragmentWrites++;
++
++    Future<void> writeFragment() async {
++      // Data accepted by IOSink before writeTlsFragment() remains ordered
++      // before the fragment. Use super.flush() to bypass the overlap guard.
++      await super.flush();
++      final raw = _raw;
++      if (raw == null) {
++        throw const SocketException.closed();
++      }
++      await raw._writeTlsFragment(bytes);
++    }
++
++    final previous = _fragmentWriteChain;
++    final operation = previous == null
++        ? writeFragment()
++        : previous.then((_) => writeFragment());
++    final tracked = operation.whenComplete(() {
++      _pendingTlsFragmentWrites--;
++    });
++    // Keep later fragment writes ordered even when this operation fails. The
++    // original error is still reported through the returned tracked future.
++    _fragmentWriteChain = tracked.then<void>((_) {}, onError: (_, __) {});
++    return tracked;
++  }
+ }
+
+ /**
+Index: sdk/lib/io/secure_socket.dart
+IDEA additional info:
+Subsystem: com.intellij.openapi.diff.impl.patch.CharsetEP
+<+>UTF-8
+===================================================================
+diff --git a/sdk/lib/io/secure_socket.dart b/sdk/lib/io/secure_socket.dart
+--- a/sdk/lib/io/secure_socket.dart	(revision 3f75a6dcb764bd345802d9093ea41a36e6cb740b)
++++ b/sdk/lib/io/secure_socket.dart	(revision 91431ad5984664a9911f048037132c2c203479c3)
+@@ -232,6 +232,24 @@
+   /// protocol between client and server.
+   String? get selectedProtocol;
+
++  /// The largest plaintext fragment accepted by [writeTlsFragment].
++  ///
++  /// This value is determined by the TLS transport's plaintext buffer and may
++  /// differ between platforms or SDK versions.
++  int get maximumTlsFragmentLength;
++
++  /// Writes [data] through one successful native TLS write operation.
++  ///
++  /// Non-empty data is passed to one native TLS write. Empty data acts as a
++  /// write-drain barrier and does not produce a TLS record. This operation
++  /// rejects data larger than [maximumTlsFragmentLength].
++  ///
++  /// Use either this API or the inherited [IOSink] API for a protocol phase.
++  /// Switching modes drains all pending TLS output and can reduce throughput.
++  /// While this operation or another fragment write is pending, attempts to
++  /// add data through [IOSink] throw a [StateError].
++  Future<void> writeTlsFragment(List<int> data);
++
+   /// Does nothing.
+   ///
+   /// The original intent was to allow TLS renegotiation of existing secure
+@@ -588,6 +606,11 @@
+   bool _connectPending = true;
+   bool _filterPending = false;
+   bool _filterActive = false;
++  // Gives writeTlsFragment exclusive ownership of an empty plaintext ring.
++  // The filter may keep draining toward the boundary, but cannot start a new
++  // native pass once the write side is quiescent.
++  bool _tlsFragmentBoundaryPending = false;
++  List<Completer<void>>? _writeDrainWaiters;
+
+   _SecureFilter? _secureFilter = _SecureFilter._();
+   String? _selectedProtocol;
+@@ -781,6 +804,7 @@
+   }
+
+   void _close() {
++    _failWriteDrainWaiters(const SocketException.closed());
+     _closedWrite = true;
+     _closedRead = true;
+     _socket.close().then(_completeCloseCompleter);
+@@ -890,6 +914,113 @@
+     return written;
+   }
+
++  Future<void> _writeTlsFragment(List<int> data) async {
++    _ensureTlsFragmentWritable();
++    final maximumLength = _maximumTlsFragmentLength;
++    if (data.length > maximumLength) {
++      throw ArgumentError.value(
++        data.length,
++        'data',
++        'TLS fragment exceeds the $maximumLength-byte plaintext limit',
++      );
++    }
++
++    // Claim the next quiescent write boundary before awaiting it. Once reached,
++    // _tryFilter pauses so no native filter call can race the cursor rebase.
++    _tlsFragmentBoundaryPending = true;
++    try {
++      // Establish the leading fragment boundary. This drains both plaintext
++      // waiting for SSL_write() and ciphertext waiting for RawSocket.write().
++      await _waitForWriteDrain();
++      _ensureTlsFragmentWritable();
++
++      final buffer = _secureFilter!.buffers![writePlaintextId];
++      // Empty-ring cursor positions carry no data. Rebasing them to zero makes
++      // all maximumTlsFragmentLength bytes one physical range, so one native
++      // SSL_write() is sufficient without allocating a scratch buffer.
++      buffer.rebaseEmpty();
++      if (data.isNotEmpty) {
++        final written = buffer.write(data, 0, data.length);
++        if (written != data.length) {
++          throw StateError('TLS plaintext buffer was not empty after draining');
++        }
++        _filterStatus.writeEmpty = false;
++        await _scheduleFilter();
++        await _waitForWriteDrain();
++      }
++    } finally {
++      _tlsFragmentBoundaryPending = false;
++      // A paused filter may still have inbound TLS work or socket events to
++      // process after fragment ownership is released.
++      _scheduleFilter();
++    }
++  }
++
++  int get _maximumTlsFragmentLength {
++    final buffers = _secureFilter?.buffers;
++    if (buffers == null) throw const SocketException.closed();
++    // A circular buffer with coincident start/end cursors needs one sentinel
++    // byte to distinguish an empty ring from a full ring.
++    return buffers[writePlaintextId].size - 1;
++  }
++
++  void _ensureTlsFragmentWritable() {
++    if (_status != connectedStatus ||
++        _closedWrite ||
++        _socketClosedWrite ||
++        _secureFilter == null) {
++      throw const SocketException.closed();
++    }
++  }
++
++  bool get _isWriteDrained {
++    final buffers = _secureFilter?.buffers;
++    return _status == connectedStatus &&
++        !_filterActive &&
++        _filterStatus.writeEmpty &&
++        buffers != null &&
++        buffers[writePlaintextId].isEmpty &&
++        buffers[writeEncryptedId].isEmpty;
++  }
++
++  Future<void> _waitForWriteDrain() {
++    if (_isWriteDrained) {
++      return Future<void>.value();
++    }
++    if (_status == closedStatus || _secureFilter == null) {
++      return Future<void>.error(const SocketException.closed());
++    }
++
++    final completer = Completer<void>();
++    (_writeDrainWaiters ??= <Completer<void>>[]).add(completer);
++    _scheduleFilter();
++    return completer.future;
++  }
++
++  void _completeWriteDrainWaiters() {
++    final waiters = _writeDrainWaiters;
++    // Keep the ordinary TLS path to one null check. The list is allocated only
++    // immediately before its first waiter is added, so non-null means non-empty.
++    if (waiters == null || !_isWriteDrained) return;
++    // Detach this batch before completing it. A continuation may register a
++    // waiter for a later drain cycle, which must receive a different list.
++    _writeDrainWaiters = null;
++    for (final waiter in waiters) {
++      waiter.complete();
++    }
++  }
++
++  void _failWriteDrainWaiters(Object error, [StackTrace? stackTrace]) {
++    final waiters = _writeDrainWaiters;
++    if (waiters == null) return;
++    // Detaching first prevents double completion and keeps a waiter registered
++    // by an error continuation out of this failed batch.
++    _writeDrainWaiters = null;
++    for (final waiter in waiters) {
++      waiter.completeError(error, stackTrace);
++    }
++  }
++
+   int sendMessage(
+     List<SocketControlMessage> controlMessages,
+     List<int> data, [
+@@ -961,6 +1092,7 @@
+     } else {
+       _controller.addError(e, stackTrace);
+     }
++    _failWriteDrainWaiters(e, stackTrace);
+     _close();
+   }
+
+@@ -1072,6 +1204,9 @@
+         if (_status == closedStatus) {
+           return;
+         }
++        if (_tlsFragmentBoundaryPending && _isWriteDrained) {
++          return;
++        }
+         if (!_filterPending || _filterActive) {
+           return;
+         }
+@@ -1080,6 +1215,7 @@
+
+         _filterStatus = await _pushAllFilterStages();
+         _filterActive = false;
++        _completeWriteDrainWaiters();
+         if (_status == closedStatus) {
+           _secureFilter!.destroy();
+           _secureFilter = null;
+@@ -1223,10 +1359,9 @@
+       args[2 * i + 3] = bufs[i].end;
+     }
+
+-    var response = (await _IOService._dispatch(
+-      _IOService.sslProcessFilter,
+-      args,
+-    )) as List<Object?>;
++    var response =
++        (await _IOService._dispatch(_IOService.sslProcessFilter, args))
++            as List<Object?>;
+     if (response.length == 2) {
+       if (wasInHandshake) {
+         // If we're in handshake, throw a handshake error.
+@@ -1338,6 +1473,19 @@
+
+   bool get isEmpty => end == start;
+
++  /// Moves an empty ring to its canonical cursor position.
++  ///
++  /// No bytes are relocated: an empty ring has no live range. Starting at zero
++  /// exposes [size] - 1 contiguous bytes while preserving the sentinel byte
++  /// that distinguishes a full ring from an empty one.
++  void rebaseEmpty() {
++    if (!isEmpty) {
++      throw StateError('Cannot rebase a non-empty circular buffer');
++    }
++    start = 0;
++    end = 0;
++  }
++
+   int get length => start > end ? size + end - start : end - start;
+
+   int get linearLength => start > end ? size - start : end - start;
