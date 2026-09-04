@@ -1,0 +1,11 @@
+name: tls_fragment_secure_socket
+description: A SecureSocket wrapper for explicit native TLS write boundaries.
+version: 0.1.0-dev
+publish_to: none
+
+environment:
+  sdk: '>=3.14.0-165.0.dev <3.14.0-166.0.dev'
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.31.0

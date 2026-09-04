@@ -1,0 +1,335 @@
+diff --git a/sdk/lib/io/secure_socket.dart b/sdk/lib/io/secure_socket.dart
+index 2a753d0ce48..50333d60720 100644
+--- a/sdk/lib/io/secure_socket.dart
++++ b/sdk/lib/io/secure_socket.dart
+@@ -494,6 +494,28 @@ abstract interface class RawSecureSocket implements RawSocket {
+   /// specify a list of supported ALPN protocols or there was no common
+   /// protocol between client and server.
+   String? get selectedProtocol;
++
++  /// The largest plaintext fragment accepted by [writeTlsFragment].
++  ///
++  /// The value is determined by the TLS transport's plaintext ring and may
++  /// differ between platforms or SDK versions.
++  int get maximumTlsFragmentLength;
++
++  /// Writes [data] with one successful native TLS write operation.
++  ///
++  /// This is a low-level protocol primitive. It first drains earlier writes,
++  /// then submits all non-empty [data] to one native TLS write and waits until
++  /// the resulting ciphertext has drained. Empty data is a drain barrier and
++  /// does not produce a TLS record. Data larger than
++  /// [maximumTlsFragmentLength] is rejected.
++  ///
++  /// Callers must keep [data] unchanged until the returned future completes.
++  /// Calls to this method must not overlap another [writeTlsFragment] call or
++  /// [write]. Await the returned future before starting either operation. A
++  /// higher-level API can copy mutable input and serialize these operations
++  /// while preserving ordinary [RawSecureSocket] behavior for applications
++  /// that do not use explicit TLS fragments.
++  Future<void> writeTlsFragment(List<int> data);
+ }
+ 
+ /// X509Certificate represents an SSL certificate, with accessors to
+@@ -588,6 +610,8 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
+   bool _connectPending = true;
+   bool _filterPending = false;
+   bool _filterActive = false;
++  // Allocated only when the low-level fragment API is used.
++  _TlsFragmentWriter? _tlsFragmentWriter;
+ 
+   _SecureFilter? _secureFilter = _SecureFilter._();
+   String? _selectedProtocol;
+@@ -781,6 +805,7 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
+   }
+ 
+   void _close() {
++    _tlsFragmentWriter?.fail(const SocketException.closed());
+     _closedWrite = true;
+     _closedRead = true;
+     _socket.close().then(_completeCloseCompleter);
+@@ -890,6 +915,13 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
+     return written;
+   }
+ 
++  @override
++  Future<void> writeTlsFragment(List<int> data) =>
++      (_tlsFragmentWriter ??= _TlsFragmentWriter(this)).write(data);
++
++  @override
++  int get maximumTlsFragmentLength => _TlsFragmentWriter.maximumLength(this);
++
+   int sendMessage(
+     List<SocketControlMessage> controlMessages,
+     List<int> data, [
+@@ -961,6 +993,7 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
+     } else {
+       _controller.addError(e, stackTrace);
+     }
++    _tlsFragmentWriter?.fail(e, stackTrace);
+     _close();
+   }
+ 
+@@ -1072,6 +1105,9 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
+         if (_status == closedStatus) {
+           return;
+         }
++        if (_tlsFragmentWriter?.shouldPauseFilter ?? false) {
++          return;
++        }
+         if (!_filterPending || _filterActive) {
+           return;
+         }
+@@ -1080,6 +1116,7 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
+ 
+         _filterStatus = await _pushAllFilterStages();
+         _filterActive = false;
++        _tlsFragmentWriter?.afterFilterPass();
+         if (_status == closedStatus) {
+           _secureFilter!.destroy();
+           _secureFilter = null;
+@@ -1298,6 +1335,128 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
+   }
+ }
+ 
++/// Coordinates explicit plaintext fragments with the secure socket filter.
++///
++/// Keeping this state outside [_RawSecureSocket] leaves the ordinary TLS path
++/// with one nullable helper field and short-circuited integration hooks. The
++/// helper is created only when [RawSecureSocket.writeTlsFragment] is used.
++final class _TlsFragmentWriter {
++  final _RawSecureSocket _socket;
++  bool _boundaryPending = false;
++  List<Completer<void>>? _drainWaiters;
++
++  _TlsFragmentWriter(this._socket);
++
++  static int maximumLength(_RawSecureSocket socket) {
++    final buffers = socket._secureFilter?.buffers;
++    if (buffers == null) throw const SocketException.closed();
++    // A circular buffer with coincident start/end cursors needs one sentinel
++    // byte to distinguish an empty ring from a full ring.
++    return buffers[_RawSecureSocket.writePlaintextId].size - 1;
++  }
++
++  Future<void> write(List<int> data) async {
++    _ensureWritable();
++    final limit = maximumLength(_socket);
++    if (data.length > limit) {
++      throw ArgumentError.value(
++        data.length,
++        'data',
++        'TLS fragment exceeds the $limit-byte plaintext limit',
++      );
++    }
++
++    // Claim the next quiescent write boundary before awaiting it. Once reached,
++    // _RawSecureSocket._tryFilter pauses so no native filter call can race the
++    // cursor rebase.
++    _boundaryPending = true;
++    try {
++      // Establish the leading fragment boundary. This drains both plaintext
++      // waiting for SSL_write() and ciphertext waiting for RawSocket.write().
++      await _waitForDrain();
++      _ensureWritable();
++
++      final buffer =
++          _socket._secureFilter!.buffers![_RawSecureSocket.writePlaintextId];
++      // Empty-ring cursor positions carry no data. Rebasing them to zero makes
++      // every usable byte one physical range, so one native SSL_write() is
++      // sufficient without allocating a scratch buffer.
++      buffer.rebaseEmpty();
++      if (data.isNotEmpty) {
++        final written = buffer.write(data, 0, data.length);
++        if (written != data.length) {
++          throw StateError('TLS plaintext buffer was not empty after draining');
++        }
++        _socket._filterStatus.writeEmpty = false;
++        await _socket._scheduleFilter();
++        await _waitForDrain();
++      }
++    } finally {
++      _boundaryPending = false;
++      // A paused filter may still have inbound TLS work or socket events to
++      // process after fragment ownership is released.
++      _socket._scheduleFilter();
++    }
++  }
++
++  bool get shouldPauseFilter => _boundaryPending && _isWriteDrained;
++
++  void afterFilterPass() => _completeDrainWaiters();
++
++  void fail(Object error, [StackTrace? stackTrace]) {
++    final waiters = _drainWaiters;
++    if (waiters == null) return;
++    _drainWaiters = null;
++    for (final waiter in waiters) {
++      waiter.completeError(error, stackTrace);
++    }
++  }
++
++  void _ensureWritable() {
++    if (_socket._status != _RawSecureSocket.connectedStatus ||
++        _socket._closedWrite ||
++        _socket._socketClosedWrite ||
++        _socket._secureFilter == null) {
++      throw const SocketException.closed();
++    }
++  }
++
++  bool get _isWriteDrained {
++    final buffers = _socket._secureFilter?.buffers;
++    return _socket._status == _RawSecureSocket.connectedStatus &&
++        !_socket._filterActive &&
++        _socket._filterStatus.writeEmpty &&
++        buffers != null &&
++        buffers[_RawSecureSocket.writePlaintextId].isEmpty &&
++        buffers[_RawSecureSocket.writeEncryptedId].isEmpty;
++  }
++
++  Future<void> _waitForDrain() {
++    if (_isWriteDrained) return Future<void>.value();
++    if (_socket._status == _RawSecureSocket.closedStatus ||
++        _socket._secureFilter == null) {
++      return Future<void>.error(const SocketException.closed());
++    }
++
++    final completer = Completer<void>();
++    (_drainWaiters ??= <Completer<void>>[]).add(completer);
++    _socket._scheduleFilter();
++    return completer.future;
++  }
++
++  void _completeDrainWaiters() {
++    final waiters = _drainWaiters;
++    // The list is allocated only immediately before adding its first waiter.
++    if (waiters == null || !_isWriteDrained) return;
++    // Detach this batch before completing it because a continuation can add a
++    // waiter for a later drain cycle.
++    _drainWaiters = null;
++    for (final waiter in waiters) {
++      waiter.complete();
++    }
++  }
++}
++
+ /// A circular buffer backed by an external byte array.  Accessed from
+ /// both C++ and Dart code in an unsynchronized way, with one reading
+ /// and one writing.  All updates to start and end are done by Dart code.
+@@ -1338,6 +1497,19 @@ class _ExternalBuffer {
+ 
+   bool get isEmpty => end == start;
+ 
++  /// Moves an empty ring to its canonical cursor position.
++  ///
++  /// No bytes are relocated: an empty ring has no live range. Starting at zero
++  /// exposes [size] - 1 contiguous bytes while preserving the sentinel byte
++  /// that distinguishes a full ring from an empty one.
++  void rebaseEmpty() {
++    if (!isEmpty) {
++      throw StateError('Cannot rebase a non-empty circular buffer');
++    }
++    start = 0;
++    end = 0;
++  }
++
+   int get length => start > end ? size + end - start : end - start;
+ 
+   int get linearLength => start > end ? size - start : end - start;
+diff --git a/tests/standalone/io/raw_secure_socket_tls_fragment_test.dart b/tests/standalone/io/raw_secure_socket_tls_fragment_test.dart
+new file mode 100644
+index 00000000000..2656bea395e
+--- /dev/null
++++ b/tests/standalone/io/raw_secure_socket_tls_fragment_test.dart
+@@ -0,0 +1,90 @@
++// Copyright (c) 2026, the Dart project authors. Please see the AUTHORS file
++// for details. All rights reserved. Use of this source code is governed by a
++// BSD-style license that can be found in the LICENSE file.
++//
++// OtherResources=certificates/server_chain.pem
++// OtherResources=certificates/server_key.pem
++// OtherResources=certificates/trusted_certs.pem
++
++import "dart:async";
++import "dart:io";
++
++import "package:expect/async_helper.dart";
++import "package:expect/expect.dart";
++
++String localFile(String path) => Platform.script.resolve(path).toFilePath();
++
++final SecurityContext serverContext = SecurityContext()
++  ..useCertificateChain(localFile('certificates/server_chain.pem'))
++  ..usePrivateKey(
++    localFile('certificates/server_key.pem'),
++    password: 'dartdart',
++  );
++
++final SecurityContext clientContext = SecurityContext()
++  ..setTrustedCertificates(localFile('certificates/trusted_certs.pem'));
++
++Future<void> main() => asyncTest(() async {
++  final host = (await InternetAddress.lookup('localhost')).first;
++  final server = await RawSecureServerSocket.bind(host, 0, serverContext);
++  final received = <int>[];
++  final accepted = Completer<RawSecureSocket>();
++  final allDataReceived = Completer<void>();
++  int? expectedLength;
++
++  server.listen((socket) {
++    accepted.complete(socket);
++    socket.listen((event) {
++      if (event == RawSocketEvent.read) {
++        final data = socket.read();
++        if (data != null) received.addAll(data);
++        if (expectedLength != null &&
++            received.length == expectedLength &&
++            !allDataReceived.isCompleted) {
++          allDataReceived.complete();
++        }
++      }
++    });
++  });
++
++  final client = await RawSecureSocket.connect(
++    host,
++    server.port,
++    context: clientContext,
++  );
++  final maximumLength = client.maximumTlsFragmentLength;
++  Expect.equals(8191, maximumLength);
++
++  await asyncExpectThrows<ArgumentError>(
++    client.writeTlsFragment(List<int>.filled(maximumLength + 1, 0)),
++  );
++
++  final expected = <int>[];
++  await client.writeTlsFragment(<int>[0x10]);
++  expected.add(0x10);
++
++  // Move the empty ring's cursors to its final physical byte with an ordinary
++  // write. A maximum fragment would wrap without the empty-ring rebase.
++  final prefix = List<int>.filled(maximumLength - 1, 0x20);
++  Expect.equals(prefix.length, client.write(prefix));
++  await client.writeTlsFragment(const <int>[]);
++  expected.addAll(prefix);
++
++  final maximumFragment = List<int>.filled(maximumLength, 0x30);
++  await client.writeTlsFragment(maximumFragment);
++  expected.addAll(maximumFragment);
++
++  await client.writeTlsFragment(<int>[0x40, 0x41]);
++  expected.addAll(<int>[0x40, 0x41]);
++  expectedLength = expected.length;
++  if (received.length == expectedLength && !allDataReceived.isCompleted) {
++    allDataReceived.complete();
++  }
++
++  await allDataReceived.future.timeout(const Duration(seconds: 10));
++  Expect.listEquals(expected, received);
++
++  await client.close();
++  await (await accepted.future).close();
++  await server.close();
++});

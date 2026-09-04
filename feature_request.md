@@ -15,11 +15,15 @@ SSL_write(8191 bytes)
 SSL_write(1 byte)
 ```
 
-I am requesting an explicit, opt-in API. Existing `Socket.add()` behavior would
-remain unchanged:
+I am requesting two explicit, opt-in primitives on `RawSecureSocket`. The
+existing `SecureSocket` API and write behavior would remain unchanged. A
+separate package can build a high-level `SecureSocket` implementation on those
+raw primitives:
 
 ```dart
-final socket = await SecureSocket.connect(host, port);
+import 'package:tls_fragment_secure_socket/tls_fragment_secure_socket.dart';
+
+final socket = await TlsFragmentSecureSocket.connect(host, port);
 final limit = socket.maximumTlsFragmentLength;
 
 for (final tdsPacket in packets) {
@@ -30,24 +34,48 @@ for (final tdsPacket in packets) {
 
 ## Proposed Contract
 
-`writeTlsFragment()` should:
+```dart
+abstract interface class RawSecureSocket implements RawSocket {
+  int get maximumTlsFragmentLength;
+  Future<void> writeTlsFragment(List<int> data);
+}
+```
+
+The SDK primitives should:
 
 - expose the platform capacity through `maximumTlsFragmentLength`;
-- preserve ordering with writes made through the inherited `IOSink`;
-- submit the complete input through one native TLS write operation;
-- complete after its ciphertext has been flushed to the underlying socket;
-- retain the input across TLS retry states;
-- reject input larger than the supported plaintext fragment size.
+- make `RawSecureSocket.writeTlsFragment()` submit its complete input through
+  one native TLS write operation;
+- complete an explicit fragment call after its ciphertext has been flushed to
+  the underlying socket;
+- retain a submitted fragment across TLS retry states;
+- reject explicit fragment input larger than the supported plaintext size;
+- leave synchronization with `RawSecureSocket.write()` to the raw API caller.
+
+The companion package demonstrates the high-level policy separately. Its
+`TlsFragmentSecureSocket`:
+
+- implements `SecureSocket` without adding a subtype to `dart:io`;
+- mirrors `connect`, `startConnect`, `secure`, and `secureServer`, using
+  `RawSocket` for the two upgrade factories;
+- routes inherited `IOSink` writes and explicit fragments through one queue;
+- splits oversized ordinary writes automatically while rejecting oversized
+  explicit fragments;
+- preserves ordering and captures mutable fragment input at call time.
 
 The guarantee concerns the plaintext operation passed to the native TLS
 implementation. It need not promise a one-to-one TLS-record mapping if the TLS
 implementation performs its own fragmentation procedure.
 
-The intended usage is to choose one write mode for a protocol phase. Switching
-between ordinary `IOSink` writes and explicit fragments is valid but requires a
-full write drain and may reduce throughput. The prototype rejects overlapping
-modes with `StateError` and intentionally does not implement an automatic
-mode-merging scheduler; such a scheduler is outside the proposed contract.
+The package wrapper may reduce write throughput because ordinary `IOSink` input
+also passes through its serialized fragment queue. That cost is isolated to
+package users. Ordinary `SecureSocket` and `RawSecureSocket` instances keep
+their existing implementation and allocation behavior.
+
+The SDK prototype isolates all fragment state in a lazily allocated private
+helper. `_RawSecureSocket` retains only one nullable field plus short-circuited
+filter, error, and close hooks, so connections that never use the primitive do
+not allocate fragment queues or completers.
 
 ## Side note: Prototype Capacity
 
@@ -75,18 +103,19 @@ TDS use case.
 
 ## Reproduction And Validation
 
-Tested from Dart SDK `main` revision
-`de2ff206bc5019a090f6d607cb0d159d35f317b6` on Windows x64 against SQL
-Server 2022, with the driver's historical TLS-alignment workaround removed:
+Tested from Dart SDK tag `3.14.0-165.0.dev` on Windows x64 against SQL Server
+2022, with the driver's historical TLS-alignment workaround removed:
 
-The attached `secure_socket_tls_fragment.patch` contains the empty-ring
-prototype and its standalone SDK regression test. 
+The attached `secure_socket_tls_fragment.patch` contains only the
+`RawSecureSocket` primitives, empty-ring implementation, and standalone SDK
+regression test. The high-level implementation is in
+`packages/tls_fragment_secure_socket`.
 
 | SDK behavior | TLS alignment tests |
 | --- | --- |
 | Unmodified SDK | 0/4 passed |
 | Attached wrapped-ring copy patch | 2/4 passed |
-| Prototype `writeTlsFragment()` with empty-ring rebasing | 3/4 passed |
+| Raw primitive + package wrapper with empty-ring rebasing | 3/4 passed |
 | Prototype plus corrected BCP nullability metadata | 4/4 passed |
 
 The explicit API made the multi-packet trace consistently use 4096-byte native
@@ -99,8 +128,9 @@ real lower-level split, but is not sufficient as the complete API solution. The
 latest explicit-fragment prototype does not need that wrapped-ring copy.
 
 The current driver validation adds a fifth packet-capacity regression. With the
-empty-ring prototype and the independent BCP fix, all 5 alignment tests and all
-415 encrypted live tests pass with no skips.
+raw primitive, package wrapper, and independent BCP fix, all 5 alignment tests
+and all 415 encrypted live tests pass with no skips. The package's direct,
+`startConnect`, client-upgrade, and server-upgrade tests also pass.
 
 ## TDS Context
 
