@@ -1,4 +1,4 @@
-## 0.1.0-dev
+## 0.1.0-dev.0
 
 - Add `TlsFragmentSecureSocket` with direct, cancellable, client-upgrade, and
   server-upgrade factories.

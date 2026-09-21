@@ -1,6 +1,14 @@
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $compose = Join-Path $root 'docker-compose.matrix.yml'
+$dart = $env:MSSQL_PATCHED_DART
+if ([string]::IsNullOrWhiteSpace($dart)) {
+    $dartCommand = Get-Command dart -ErrorAction SilentlyContinue
+    if ($null -eq $dartCommand) {
+        throw 'Set MSSQL_PATCHED_DART to the patched Dart executable.'
+    }
+    $dart = $dartCommand.Source
+}
 $password = $env:MSSQL_SA_PASSWORD
 if ([string]::IsNullOrWhiteSpace($password)) {
     $password = 'Strong_test_password_123!'
@@ -76,12 +84,20 @@ function Remove-StaleMatrixContainers {
 
 try {
     Push-Location $root
-    & (Join-Path $PSScriptRoot 'build_native.ps1')
+    & $dart pub get
+    if ($LASTEXITCODE -ne 0) { throw 'Dart dependency resolution failed.' }
+    Push-Location (Join-Path $root 'packages\tls_fragment_secure_socket')
+    try {
+        & $dart test
+        if ($LASTEXITCODE -ne 0) { throw 'TLS fragment socket tests failed.' }
+    } finally {
+        Pop-Location
+    }
     # Keep the offline phase honest: test/live is run below once per SQL Server
     # edition, rather than being invoked here only to report skipped tests.
     $offlineTests = Get-ChildItem (Join-Path $root 'test') -File -Filter '*.dart' |
         ForEach-Object { $_.FullName }
-    $offlineOutput = & dart test @offlineTests --reporter=expanded 2>&1
+    $offlineOutput = & $dart test @offlineTests --reporter=expanded 2>&1
     $offlineExitCode = $LASTEXITCODE
     $offlineText = $offlineOutput -join "`n"
     $offlineHasSkippedTests = $offlineText -match '~[1-9][0-9]*'
@@ -120,7 +136,7 @@ try {
         $env:MSSQL_USER = 'sa'
         $env:MSSQL_PASSWORD = $password
         $env:MSSQL_TRUST_SERVER_CERTIFICATE = '1'
-        $liveOutput = & dart test test/live --concurrency=1 --reporter=expanded 2>&1
+        $liveOutput = & $dart test test/live --concurrency=1 --reporter=expanded 2>&1
         $liveExitCode = $LASTEXITCODE
         $liveText = $liveOutput -join "`n"
         $hasSkippedTests = $liveText -match '~[1-9][0-9]*'

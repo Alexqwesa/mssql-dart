@@ -40,10 +40,10 @@ class TdsBuffer {
     _transport = SocketTdsTransport(socket);
   }
 
-  /// The current raw reader, retained across the native TLS handshake.
+  /// The current raw reader, retained across the PRELOGIN TLS handshake.
   ChunkedStreamReader<int> get rawReader => _reader;
 
-  /// Replaces packet I/O after the native TLS handshake.
+  /// Replaces packet I/O after the PRELOGIN TLS handshake.
   void replaceTransport(TdsTransport transport) {
     _transport = transport;
     _reader = ChunkedStreamReader(transport.incoming);

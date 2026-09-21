@@ -49,11 +49,31 @@ SELECT @@ROWCOUNT AS affected;
         addTearDown(conn.close);
 
         final payload = _repeat('z', 6000);
-        final result =
-            await conn.query("SELECT LEN(N'$payload') AS payload_length");
+        final result = await conn.query(
+          "SELECT LEN(N'$payload') AS payload_length",
+        );
         expect(result.first['payload_length'], payload.length);
         final health = await conn.query('SELECT 1 AS ok');
         expect(health.first['ok'], 1);
+      },
+      skip: skipReason,
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
+
+    test(
+      'negotiated TDS packets are capped to the TLS fragment capacity',
+      () async {
+        // Deliberately request more than the patched SDK's plaintext ring can
+        // accept in one fragment. The driver must advertise the runtime limit
+        // in LOGIN7 rather than changing packet framing after login.
+        final conn = await _connect(packetSize: 16 * 1024);
+        addTearDown(conn.close);
+
+        final payload = _repeat('f', 40 * 1024);
+        final result = await conn.query(
+          "SELECT LEN(N'$payload') AS payload_length",
+        );
+        expect(result.first['payload_length'], payload.length);
       },
       skip: skipReason,
       timeout: const Timeout(Duration(minutes: 2)),
@@ -82,7 +102,8 @@ SELECT @@ROWCOUNT AS affected;
           expect(
             health.first['ok'],
             1,
-            reason: 'Connection was desynchronized after Attention at '
+            reason:
+                'Connection was desynchronized after Attention at '
                 'iteration $i.',
           );
         }
@@ -121,7 +142,7 @@ CREATE TABLE #tls_bulk_test (
   });
 }
 
-Future<MssqlConnection> _connect() {
+Future<MssqlConnection> _connect({int packetSize = 4096}) {
   final env = Platform.environment;
   return MssqlConnection.connect(
     host: env['MSSQL_HOST'] ?? '127.0.0.1',
@@ -132,6 +153,7 @@ Future<MssqlConnection> _connect() {
     encrypt: true,
     trustServerCertificate: true,
     timeout: const Duration(seconds: 15),
+    packetSize: packetSize,
   );
 }
 

@@ -1,10 +1,6 @@
 include: package:lints/recommended.yaml
 
 analyzer:
-  exclude:
-    # This opt-in package targets the companion patched Dart SDK and is
-    # analyzed independently with that SDK.
-    - packages/tls_fragment_secure_socket/**
   errors:
     missing_return: error
     dead_code: warning

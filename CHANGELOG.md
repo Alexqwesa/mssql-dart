@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.6.0-dev.0
+
+* **Breaking:** require the companion patched Dart SDK
+  `3.14.0-165.0.dev` and use the `tls_fragment_secure_socket` subpackage for
+  encrypted connections.
+* TLS: replace the package-owned OpenSSL/FFI helper with Dart
+  `RawSecureSocket` fragment-write primitives while preserving TDS PRELOGIN
+  handshake framing, certificate validation, NTLM channel binding, complete
+  TDS packet writes, and urgent Attention ordering.
+* TLS: negotiate the encrypted LOGIN7 packet size from the runtime's
+  `maximumTlsFragmentLength` instead of a native-helper constant.
+* Build: remove the C++ helper, native binaries, OpenSSL notice, and native
+  build scripts. Cleartext and encrypted connections now contain only Dart
+  package code; the required VM primitives remain supplied by the SDK patch.
+* Tests: restore deterministic PRELOGIN bridge coverage and run the fragment
+  socket subpackage suite as part of the full test script.
+
 ## 0.5.1
 
 * TLS: reschedule writes queued during the native transport runner's

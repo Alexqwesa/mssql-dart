@@ -13,67 +13,37 @@ dart test
 `test/live/**` is gated: without `MSSQL_LIVE_TESTS=1` those files skip rather
 than fail.
 
-## Native TLS C++ tests
+## Patched Dart SDK and TLS subpackage
 
-The native OpenSSL ABI has an in-memory client/server CTest that covers the
-handshake, certificate extraction, and encrypted request/response flow.
+The TLS path requires the SDK patch in
+`packages/tls_fragment_secure_socket/secure_socket_tls_fragment.patch`, based
+on Dart `3.14.0-165.0.dev`. Build the SDK as described in the
+[subpackage README](packages/tls_fragment_secure_socket/README.md), then use
+that SDK's `dart` executable for dependency resolution, analysis, and tests.
 
-GitHub Actions builds and tests self-contained Windows x64 and Linux x64
-helpers on every pull request. It also cross-builds Android `arm64-v8a`,
-`armeabi-v7a`, and `x86_64` helpers, statically linking OpenSSL into each
-`libmssql_tls.so`. Tagged builds attach platform ZIPs, with `SHA256SUMS`, to
-the GitHub release.
-
-On Windows, with Visual Studio 2022, CMake, Ninja, and OpenSSL installed:
+Run the high-level fragment socket tests separately:
 
 ```powershell
-.\tool\build_native.ps1
+Push-Location packages/tls_fragment_secure_socket
+C:\path\to\patched-dart-sdk\bin\dart.exe test
+Pop-Location
 ```
 
-On Linux, with a C++ compiler, CMake, Ninja, and OpenSSL development headers:
-
-```bash
-cmake -S native -B build/native -G Ninja -DBUILD_TESTING=ON
-cmake --build build/native
-ctest --test-dir build/native --output-on-failure
-```
-
-## Android native TLS helper
-
-Android encrypted connections load `libmssql_tls.so` through the platform
-linker. Package the ABI-specific helpers from the `mssql-tls-android` release
-asset in the consuming Flutter/Android app under:
-
-```text
-android/app/src/main/jniLibs/arm64-v8a/libmssql_tls.so
-android/app/src/main/jniLibs/armeabi-v7a/libmssql_tls.so
-android/app/src/main/jniLibs/x86_64/libmssql_tls.so
-```
-
-Build them locally with Android NDK r27 (or a compatible NDK), CMake, Ninja,
-Perl, Make, and curl. The helper statically links both OpenSSL and the C++
-runtime. The script downloads pinned OpenSSL 3.5.7 and verifies its SHA-256
-before compiling:
-
-```bash
-export ANDROID_NDK_HOME=/path/to/android-ndk
-bash tool/build_android_native.sh
-```
-
-The resulting files are written to `dist/android/<abi>/`. Android has no
-OpenSSL integration with its Java trust store; for certificate validation,
-provide `trustedCertificateFile` or `trustedCertificateDirectory` with PEM
-roots accessible to the app. `trustServerCertificate: true` remains suitable
-only for local development and controlled test environments.
+The suite covers direct and upgraded TLS connections, serialized inherited
+`IOSink` writes, explicit fragment completion, maximum-size enforcement, and
+copy-at-submit behavior. Root tests add deterministic TDS PRELOGIN bridge and
+opaque-ciphertext passthrough coverage.
 
 ## Full SQL Server matrix
 
-`tool/full_tests.ps1` builds the native helper, runs offline Dart tests, then
-starts normal and force-encryption containers for SQL Server 2017, 2019, 2022,
-and 2025. It runs `test/live` once per edition and leaves the matrix running
-for reuse on later runs.
+`tool/full_tests.ps1` runs the TLS subpackage and offline Dart tests, then starts
+normal and force-encryption containers for SQL Server 2017, 2019, 2022, and
+2025. It runs `test/live` once per edition and leaves the matrix running for
+reuse on later runs. Point it at the patched SDK when that SDK is not first on
+`PATH`:
 
 ```powershell
+$env:MSSQL_PATCHED_DART = 'C:\path\to\patched-dart-sdk\bin\dart.exe'
 .\tool\full_tests.ps1
 ```
 
@@ -128,8 +98,7 @@ docker compose --env-file .env -f docker-compose.live.yml up -d --build
 ```
 
 Any compatible SQL Server Linux image can be supplied. It must support the
-standard `/var/opt/mssql` layout, run SQL Server as the `mssql` user, and be
-able to install OpenSSL while building the live-test image.
+standard `/var/opt/mssql` layout and run SQL Server as the `mssql` user.
 
 `MSSQL_PASSWORD` is required whenever `MSSQL_LIVE_TESTS=1`. Compose has no
 persistent volume; `docker compose down` wipes both containers. Do not use

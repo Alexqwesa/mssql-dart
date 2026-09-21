@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:tls_fragment_secure_socket/tls_fragment_secure_socket.dart';
+
 import 'auth/azure_ad_auth.dart';
 import 'auth/ntlm_auth.dart';
 import 'auth/sql_auth.dart';
@@ -8,7 +10,6 @@ import 'connection_string.dart';
 import 'exception.dart';
 import 'info_message.dart';
 import 'isolation.dart';
-import 'native_tls/native_tls_bridge.dart';
 import 'params.dart';
 import 'protocol_limits.dart';
 import 'result.dart';
@@ -21,6 +22,7 @@ import 'tds/login7.dart';
 import 'tds/prelogin.dart';
 import 'tds/rpc.dart';
 import 'tds/sql_browser.dart';
+import 'tds/tls_bridge.dart';
 import 'tds/transport.dart';
 import 'tds/token_stream.dart';
 
@@ -115,6 +117,7 @@ class MssqlConnection {
 
   late TdsBuffer _buf;
   late Socket _socket;
+  Socket? _rawTcpSocket;
   bool _connected = false;
   bool _busy = false;
   _BulkCancellation? _activeBulk;
@@ -153,31 +156,31 @@ class MssqlConnection {
     bool multiSubnetFailover = false,
     Duration keepAlive = const Duration(seconds: 30),
     String? sessionInitSql,
-  })  : _host = host,
-        _resolvedAddress = null,
-        _port = port,
-        _instanceName = instanceName,
-        _resolveNamedInstancePort = resolveNamedInstancePort,
-        _database = database,
-        _appName = appName,
-        _packetSize = packetSize,
-        _sqlAuth = sqlAuth,
-        _azureAdAuth = azureAdAuth,
-        _ntlmAuth = ntlmAuth,
-        _encrypt = encrypt,
-        _trustServerCertificate = trustServerCertificate,
-        _trustedCertificateFile = trustedCertificateFile,
-        _trustedCertificateDirectory = trustedCertificateDirectory,
-        _hostNameInCertificate = hostNameInCertificate,
-        _timeout = timeout,
-        _queryTimeout = queryTimeout,
-        _protocolLimits = protocolLimits,
-        _readOnlyIntent = readOnlyIntent,
-        _failoverPartner = failoverPartner,
-        _failoverPort = failoverPort,
-        _multiSubnetFailover = multiSubnetFailover,
-        _keepAlive = keepAlive,
-        _sessionInitSql = sessionInitSql;
+  }) : _host = host,
+       _resolvedAddress = null,
+       _port = port,
+       _instanceName = instanceName,
+       _resolveNamedInstancePort = resolveNamedInstancePort,
+       _database = database,
+       _appName = appName,
+       _packetSize = packetSize,
+       _sqlAuth = sqlAuth,
+       _azureAdAuth = azureAdAuth,
+       _ntlmAuth = ntlmAuth,
+       _encrypt = encrypt,
+       _trustServerCertificate = trustServerCertificate,
+       _trustedCertificateFile = trustedCertificateFile,
+       _trustedCertificateDirectory = trustedCertificateDirectory,
+       _hostNameInCertificate = hostNameInCertificate,
+       _timeout = timeout,
+       _queryTimeout = queryTimeout,
+       _protocolLimits = protocolLimits,
+       _readOnlyIntent = readOnlyIntent,
+       _failoverPartner = failoverPartner,
+       _failoverPort = failoverPort,
+       _multiSubnetFailover = multiSubnetFailover,
+       _keepAlive = keepAlive,
+       _sessionInitSql = sessionInitSql;
 
   // ── Factory constructors ───────────────────────────────────────────────────
 
@@ -191,7 +194,7 @@ class MssqlConnection {
   /// [encrypt] is `false`.
   ///
   /// [trustedCertificateFile] / [trustedCertificateDirectory] — optional PEM
-  /// trust roots for native OpenSSL certificate validation. Ignored when
+  /// trust roots for Dart TLS certificate validation. Ignored when
   /// [trustServerCertificate] is `true`.
   ///
   /// [hostNameInCertificate] — hostname used for SNI / certificate validation
@@ -262,8 +265,11 @@ class MssqlConnection {
       readOnlyIntent: readOnlyIntent,
       failoverPartner: failoverPartner,
     );
-    final ep =
-        ServerEndpoint.parse(host, port: port, instanceName: instanceName);
+    final ep = ServerEndpoint.parse(
+      host,
+      port: port,
+      instanceName: instanceName,
+    );
     return MssqlTransient.retry(
       () => MssqlConnection._(
         host: ep.host,
@@ -392,8 +398,11 @@ class MssqlConnection {
       readOnlyIntent: readOnlyIntent,
       failoverPartner: failoverPartner,
     );
-    final ep =
-        ServerEndpoint.parse(host, port: port, instanceName: instanceName);
+    final ep = ServerEndpoint.parse(
+      host,
+      port: port,
+      instanceName: instanceName,
+    );
     return MssqlTransient.retry(
       () => MssqlConnection._(
         host: ep.host,
@@ -460,8 +469,11 @@ class MssqlConnection {
       readOnlyIntent: readOnlyIntent,
       failoverPartner: failoverPartner,
     );
-    final ep =
-        ServerEndpoint.parse(host, port: port, instanceName: instanceName);
+    final ep = ServerEndpoint.parse(
+      host,
+      port: port,
+      instanceName: instanceName,
+    );
     return MssqlTransient.retry(
       () => MssqlConnection._(
         host: ep.host,
@@ -605,7 +617,7 @@ class MssqlConnection {
         // Kill the connection to prevent protocol desync and pool poisoning.
         // Prefer [cancel] instead of breaking when reuse is required.
         _connected = false;
-        unawaited(_socket.close().catchError((_) {}));
+        unawaited(_closeSockets());
       }
       _busy = false;
     }
@@ -651,14 +663,13 @@ class MssqlConnection {
     List<List<Object?>> rows, {
     List<BulkColumn>? columnTypes,
     Duration? timeout,
-  }) async =>
-      startBulkInsert(
-        table,
-        columns,
-        rows,
-        columnTypes: columnTypes,
-        timeout: timeout,
-      ).result;
+  }) async => startBulkInsert(
+    table,
+    columns,
+    rows,
+    columnTypes: columnTypes,
+    timeout: timeout,
+  ).result;
 
   /// Starts a cancellable Bulk Load operation.
   ///
@@ -742,11 +753,7 @@ class MssqlConnection {
       _throwIfBulkCancelled(cancellation);
 
       final sql = BulkLoad.insertBulkSql(table, cols);
-      await _runBulkQuery(
-        sql,
-        timeout: timeout,
-        cancellation: cancellation,
-      );
+      await _runBulkQuery(sql, timeout: timeout, cancellation: cancellation);
       _throwIfBulkCancelled(cancellation);
 
       final tokenStream = _tokenStream();
@@ -811,9 +818,7 @@ class MssqlConnection {
 
   void _throwIfBulkCancelled(_BulkCancellation cancellation) {
     if (cancellation.requested) {
-      throw const MssqlOperationCancelledException(
-        'Bulk insert was cancelled',
-      );
+      throw const MssqlOperationCancelledException('Bulk insert was cancelled');
     }
   }
 
@@ -859,8 +864,9 @@ class MssqlConnection {
       );
       return MssqlProcedureResult(
         returnStatus: ts.lastReturnStatus,
-        output:
-            Map.unmodifiable(Map<String, Object?>.from(ts.lastReturnValues)),
+        output: Map.unmodifiable(
+          Map<String, Object?>.from(ts.lastReturnValues),
+        ),
         resultSets: [for (final s in sets) MssqlResult.fromInternal(s)],
       );
     } finally {
@@ -908,8 +914,9 @@ class MssqlConnection {
   /// [database] defaults to [initialDatabase]. No-op when already on target
   /// (case-insensitive). Returns `false` and closes the connection on failure.
   Future<bool> resetDatabase([String? database]) async {
-    final target =
-        (database == null || database.isEmpty) ? _initialDatabase : database;
+    final target = (database == null || database.isEmpty)
+        ? _initialDatabase
+        : database;
     if (target.isEmpty) return true;
     if (!_connected) return false;
     if (_busy) {
@@ -971,9 +978,7 @@ class MssqlConnection {
   ///
   /// Returns `false` and closes the connection on failure. Used by
   /// [MssqlPool] when [MssqlPoolConfig.validateOnAcquire] is enabled.
-  Future<bool> validate({
-    Duration timeout = const Duration(seconds: 3),
-  }) async {
+  Future<bool> validate({Duration timeout = const Duration(seconds: 3)}) async {
     if (!_connected) return false;
     if (_busy) return true; // in use — assume still valid
     try {
@@ -989,9 +994,7 @@ class MssqlConnection {
   ///
   Future<void> close() async {
     _connected = false;
-    try {
-      await _socket.close();
-    } catch (_) {}
+    await _closeSockets();
   }
 
   // ── Transaction helpers ────────────────────────────────────────────────────
@@ -1002,9 +1005,7 @@ class MssqlConnection {
   /// (session-scoped until changed again).
   Future<void> beginTransaction({MssqlIsolationLevel? isolation}) async {
     if (isolation != null) {
-      await execute(
-        'SET TRANSACTION ISOLATION LEVEL ${isolation.sqlName}',
-      );
+      await execute('SET TRANSACTION ISOLATION LEVEL ${isolation.sqlName}');
     }
     await execute('BEGIN TRANSACTION');
   }
@@ -1147,19 +1148,16 @@ class MssqlConnection {
     // 1. TCP
     _socket = await _dialTcp(_resolvedAddress ?? _host, _port);
     _watchSocket(_socket);
-    _buf = TdsBuffer(
-      _socket,
-      packetSize: _packetSize,
-      limits: _protocolLimits,
-    );
+    _buf = TdsBuffer(_socket, packetSize: _packetSize, limits: _protocolLimits);
 
     // 2. PRELOGIN
     // encryptNotSupported (0x02) = client will not do TLS (cleartext / LAN).
     // encryptOn (0x01) = request TLS for the whole session.
     // Do not advertise encryptOff and then upgrade. If the server requires
     // encryption, fail with a clear error instead.
-    final wantEncrypt =
-        (_encrypt || _azureAdAuth != null) ? encryptOn : encryptNotSupported;
+    final wantEncrypt = (_encrypt || _azureAdAuth != null)
+        ? encryptOn
+        : encryptNotSupported;
 
     await Prelogin.send(
       _buf,
@@ -1187,6 +1185,12 @@ class MssqlConnection {
     }
 
     // 4. LOGIN7
+    if (_socket case final TlsFragmentSecureSocket secureSocket) {
+      // LOGIN7 advertises this size to SQL Server. Cap it before login so both
+      // peers use TDS packets that fit in one explicit TLS plaintext fragment.
+      final maximum = secureSocket.maximumTlsFragmentLength;
+      if (_buf.packetSize > maximum) _buf.packetSize = maximum;
+    }
     await _sendLogin7();
 
     // 5. Login response (may include SSPI challenge for NTLM)
@@ -1199,12 +1203,13 @@ class MssqlConnection {
             },
     );
     _currentDatabase = loginResult.database;
-    _initialDatabase =
-        loginResult.database.isNotEmpty ? loginResult.database : _database;
+    _initialDatabase = loginResult.database.isNotEmpty
+        ? loginResult.database
+        : _database;
     _buf.packetSize = loginResult.packetSize;
-    // Encrypted TDS: keep packets within one TLS plaintext fragment (≤16 383).
-    if ((_encrypt || _azureAdAuth != null) && _buf.packetSize > 16383) {
-      _buf.packetSize = 16383;
+    if (_socket case final TlsFragmentSecureSocket secureSocket) {
+      final maximum = secureSocket.maximumTlsFragmentLength;
+      if (_buf.packetSize > maximum) _buf.packetSize = maximum;
     }
     // Routing: stay unconnected until caller reconnects to the alternate.
     if (loginResult.routing == null) {
@@ -1240,20 +1245,23 @@ class MssqlConnection {
     Object? lastError;
     for (final addr in unique) {
       unawaited(
-        Socket.connect(addr, port, timeout: _timeout).then((sock) {
-          if (completer.isCompleted) {
-            sock.destroy();
-          } else {
-            applyMssqlTcpOptions(sock, keepAlive: _keepAlive);
-            completer.complete(sock);
-          }
-        }, onError: (Object e) {
-          lastError = e;
-          failures++;
-          if (failures >= unique.length && !completer.isCompleted) {
-            completer.completeError(lastError!);
-          }
-        }),
+        Socket.connect(addr, port, timeout: _timeout).then(
+          (sock) {
+            if (completer.isCompleted) {
+              sock.destroy();
+            } else {
+              applyMssqlTcpOptions(sock, keepAlive: _keepAlive);
+              completer.complete(sock);
+            }
+          },
+          onError: (Object e) {
+            lastError = e;
+            failures++;
+            if (failures >= unique.length && !completer.isCompleted) {
+              completer.completeError(lastError!);
+            }
+          },
+        ),
       );
     }
     return completer.future;
@@ -1283,12 +1291,12 @@ class MssqlConnection {
   }
 
   TokenStream _tokenStream() => TokenStream(
-        _buf,
-        onDatabaseChanged: (db) {
-          _currentDatabase = db;
-        },
-        onInfoMessage: onInfoMessage,
-      );
+    _buf,
+    onDatabaseChanged: (db) {
+      _currentDatabase = db;
+    },
+    onInfoMessage: onInfoMessage,
+  );
 
   static bool _dbEquals(String a, String b) =>
       a.toLowerCase() == b.toLowerCase();
@@ -1298,37 +1306,45 @@ class MssqlConnection {
 
   /// Marks the connection dead when the peer closes or errors.
   void _watchSocket(Socket sock) {
-    sock.done.then((_) {
-      _connected = false;
-    }, onError: (_) {
-      _connected = false;
-    });
+    sock.done.then(
+      (_) {
+        _connected = false;
+      },
+      onError: (_) {
+        _connected = false;
+      },
+    );
   }
 
   /// Performs the TDS-wrapped TLS handshake (ms-tds §2.1.1 PRELOGIN encryption).
   ///
-  /// TLS handshake records are carried in PRELOGIN packets; afterwards the
-  /// native transport owns the encrypted TCP byte stream.
+  /// TLS handshake records are carried in PRELOGIN packets; afterwards Dart's
+  /// fragment socket owns TLS while the bridge forwards opaque ciphertext.
   Future<void> _upgradeTls() async {
     final rawSocket = _socket;
-    final nativeTransport = await NativeTlsBridge.upgrade(
+    final upgrade = await TdsTlsBridge.upgrade(
       rawSocket: rawSocket,
       rawReader: _buf.rawReader,
       host: _hostNameInCertificate ?? _host,
       trustServerCertificate: _trustServerCertificate,
       trustedCertificateFile: _trustedCertificateFile,
       trustedCertificateDirectory: _trustedCertificateDirectory,
+      onBridgeDied: () {
+        _connected = false;
+      },
     );
     final ntlm = _ntlmAuth;
-    if (ntlm != null) {
-      final certificate = nativeTransport.peerCertificateDer();
-      if (certificate.isNotEmpty) {
-        ntlm.channelBindings =
-            NtlmAuth.channelBindingTokenFromCertificate(certificate);
-      }
+    final certificate = upgrade.socket.peerCertificate;
+    if (ntlm != null && certificate != null) {
+      ntlm.channelBindings = NtlmAuth.channelBindingTokenFromCertificate(
+        certificate.der,
+      );
     }
-    nativeTransport.start();
-    _buf.replaceTransport(NativeTlsTdsTransport(nativeTransport));
+
+    _socket = upgrade.socket;
+    _rawTcpSocket = upgrade.rawTcpSocket;
+    _watchSocket(upgrade.socket);
+    _buf.replaceTransport(TlsFragmentTdsTransport(upgrade.socket));
   }
 
   Future<void> _sendLogin7() async {
@@ -1338,11 +1354,6 @@ class MssqlConnection {
         : _host;
 
     final ntlm = _ntlmAuth;
-    // Negotiate TDS packets that fit in one native TLS plaintext fragment.
-    // This is sent in LOGIN7, so SQL Server agrees to the larger size rather
-    // than the client changing its packet boundary after login.
-    final loginPacketSize =
-        _encrypt || _azureAdAuth != null ? 16383 : _packetSize;
     if (ntlm != null) {
       await Login7.send(
         _buf,
@@ -1353,7 +1364,7 @@ class MssqlConnection {
           appName: _appName,
           serverName: serverName,
           database: _database,
-          packetSize: loginPacketSize,
+          packetSize: _buf.packetSize,
           sspi: ntlm.negotiateMessage(),
           readOnlyIntent: _readOnlyIntent,
         ),
@@ -1371,7 +1382,7 @@ class MssqlConnection {
         appName: _appName,
         serverName: serverName,
         database: _database,
-        packetSize: loginPacketSize,
+        packetSize: _buf.packetSize,
         fedAuthToken: _azureAdAuth?.bearerToken,
         readOnlyIntent: _readOnlyIntent,
       ),
@@ -1391,10 +1402,7 @@ class MssqlConnection {
   /// Awaits a query response, applying [timeout] or the connection default.
   ///
   /// On timeout: send Attention, drain the in-flight response, then throw.
-  Future<T> _awaitQuery<T>(
-    Future<T> response, {
-    Duration? timeout,
-  }) async {
+  Future<T> _awaitQuery<T>(Future<T> response, {Duration? timeout}) async {
     final effective = timeout ?? _queryTimeout;
     try {
       if (effective == null) return await response;
@@ -1421,9 +1429,20 @@ class MssqlConnection {
 
   Future<void> _forceClose() async {
     _connected = false;
+    await _closeSockets();
+  }
+
+  Future<void> _closeSockets() async {
     try {
       await _socket.close();
     } catch (_) {}
+    final raw = _rawTcpSocket;
+    _rawTcpSocket = null;
+    if (raw != null && !identical(raw, _socket)) {
+      try {
+        await raw.close();
+      } catch (_) {}
+    }
   }
 
   void _assertOpen() {

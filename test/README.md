@@ -5,8 +5,8 @@ file. Tests fall into three execution tiers:
 
 | Tier | Location | Requires |
 | --- | --- | --- |
-| Dart protocol and API tests | `test/*_test.dart` | Dart SDK only |
-| Native TLS ABI tests | `native/test/` | CMake, C++ compiler, OpenSSL |
+| Dart protocol and API tests | `test/*_test.dart` | Patched Dart SDK |
+| TLS fragment socket tests | `packages/tls_fragment_secure_socket/test/` | Patched Dart SDK |
 | Live SQL Server tests | `test/live/` | A configured SQL Server |
 
 ## Dart protocol and API tests
@@ -30,7 +30,7 @@ The offline tests cover these categories:
 | Authentication | `ntlm_auth_test.dart`, `mock_sspi_login_test.dart`, `azure_ad_auth_test.dart`, `mock_fedauth_login_test.dart` | NTLMv2, channel binding, SSPI exchange, FedAuth tokens |
 | Connection options | `connection_string_test.dart`, `named_instance_test.dart`, `timeout_unit_test.dart` | ADO/URL parsing, SQL Browser, PRELOGIN and TLS handshake deadlines |
 | Pool and retry logic | `pool_stats_test.dart`, `transient_test.dart`, `pool_*_config_test.dart` | Counters, configuration, transient classification, retry behavior |
-| Native transport state | `native_tls_transport_test.dart`, `native_tls_engine_test.dart`, `native_tls_loader_test.dart` | Serialized queued-write scheduling, engine smoke tests, and loader/platform behavior |
+| TLS bridge and fragment output | `tls_bridge_test.dart`, `packages/tls_fragment_secure_socket/test/` | PRELOGIN unwrap/passthrough, raw TLS upgrades, fragment serialization, oversized writes, and inherited IOSink ordering |
 
 ## Live SQL Server categories
 
@@ -69,7 +69,7 @@ Bulk scale tests use 10,000 rows by default. Set
 `MSSQL_BULK_STRESS_ROWS=100000` for the heavier TCP and TLS run without adding
 permanently skipped stress tests.
 
-Run native, offline, and live tests against SQL Server 2017, 2019, 2022, and
+Run fragment-socket, offline, and live tests against SQL Server 2017, 2019, 2022, and
 2025 with:
 
 ```powershell
@@ -82,7 +82,7 @@ Run native, offline, and live tests against SQL Server 2017, 2019, 2022, and
 certificate for `localhost`. The private server key is intentionally committed
 for deterministic local and CI testing. It must never be used outside the
 Docker test servers. `tls_certificate_live_test.dart` verifies both a PEM file
-and an OpenSSL hashed certificate directory.
+and a PEM certificate directory.
 
 Changing the certificate or Docker image setup requires incrementing
 `MSSQL_LIVE_REVISION` in `docker/live/Dockerfile` and the matching

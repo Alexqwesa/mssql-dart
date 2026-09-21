@@ -27,7 +27,7 @@ class MssqlPoolConfig {
   final bool encrypt;
   final bool trustServerCertificate;
 
-  /// Optional PEM trust roots for native TLS certificate validation.
+  /// Optional PEM trust roots for Dart TLS certificate validation.
   final String? trustedCertificateFile;
   final String? trustedCertificateDirectory;
 

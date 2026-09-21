@@ -1,26 +1,36 @@
 # mssql
 
-A Dart-first driver for Microsoft SQL Server, built on the TDS 7.4 wire
-protocol, with the long-term goal of becoming a fully pure-Dart implementation.
-TDS encoding, decoding, connection pooling, authentication, and query handling
-are implemented in Dart. Encrypted connections currently use a native OpenSSL
-TLS helper.
+A Dart driver for Microsoft SQL Server built on the TDS 7.4 wire protocol.
+TDS encoding, decoding, connection pooling, authentication, query handling,
+and encrypted transport are implemented in Dart, with no package-owned native
+extension or FFI library.
 
-The native helper is currently required for TLS (support Windows, Linux, and
-Android). This is the compatibility trade-off for reliable encrypted multi-packet requests, Bulk
-Load, and Attention cancellation. Version `0.4.1` used only Dart `SecureSocket`,
-but had to reject those encrypted workflows because of its plaintext-ring
-limitation. Unencrypted connections continue to use only Dart and TCP.
+**Prefer [0.5.1](https://pub.dev/packages/mssql/versions/0.5.1)** on a normal
+Dart / Flutter SDK:
 
-The native TLS helper can be removed once Dart exposes a supported
-`SecureSocket` write API that guarantees caller-controlled TLS plaintext record
-boundaries, or fixes the current implementation so fragmented TDS messages are
-reliably preserved across its internal plaintext buffer. That is the Dart SDK
-feature this package needs; until then, the C++ helper is the contained
-workaround for encrypted connections.
+```yaml
+dependencies:
+  mssql: 0.5.1
+```
+
+This repo’s current line (`0.6.0`) needs a **patched** Dart SDK for encrypted
+connections. Use `0.5.1` unless you intentionally build that SDK.
+
+### Which version?
+
+| Version | TLS stack                                                                         | Use when |
+| --- |-----------------------------------------------------------------------------------| --- |
+| **0.5.1** | Native OpenSSL helper (Windows, Linux, Android); cleartext is pure Dart           | Default choice — stock SDK, full encrypted Bulk Load / multi-packet / Attention |
+| **0.4.1** | Dart `SecureSocket` only                                                          | Legacy; encrypted multi-packet batches, Bulk Load, and related flows are rejected because of the SecureSocket plaintext-ring split |
+| **0.6.0** (this tree) | Pure Dart + `tls_fragment_secure_socket`, requires SDK patch (`3.14.0-165.0.dev`) | Only if you apply the companion patch; see [feature_request.md](feature_request.md) and [packages/tls_fragment_secure_socket/README.md](packages/tls_fragment_secure_socket/README.md) |
+
+`0.5.1` keeps encrypted TDS reliable via the bundled native helper. `0.4.1`
+stayed on Dart `SecureSocket` and had to refuse those encrypted workflows.
+`0.6.0` drops the native helper once the VM exposes opt-in fragment-write
+primitives; until that lands upstream, treat `0.6.0` as SDK-patch-only.
 
 ```
-dart pub add mssql
+dart pub add mssql:0.5.1
 ```
 
 ## Quick start
@@ -625,11 +635,12 @@ Named parameters use `@name` placeholders. Supported Dart → SQL type mappings:
 
 ## TLS / Encryption
 
-TDS 7.x wraps the TLS handshake in PRELOGIN packets, then switches to raw TLS
-for the rest of the session. On Windows, Linux, and Android, encrypted connections use
-the bundled native OpenSSL transport. It serializes TLS reads and writes so
-multi-packet requests, Bulk Load, and Attention cancellation remain reliable.
-Cleartext connections continue to use Dart and TCP only.
+On **0.5.1**, encrypted sessions use the native OpenSSL helper. On **0.6.0**
+(this tree), TDS 7.x wraps the TLS handshake in PRELOGIN packets, then switches
+to raw TLS for the rest of the session through `TlsFragmentSecureSocket`,
+serializing complete TDS packets and urgent Attention writes so multi-packet
+requests, Bulk Load, and cancellation remain reliable. Cleartext connections
+continue to use ordinary Dart TCP sockets.
 
 ```dart
 // Production (Azure SQL, SQL Server with TLS)
@@ -675,7 +686,7 @@ exist on `MssqlPoolConfig` / `MssqlPoolConfig.fromConnectionString`.
 
 ## Requirements
 
-- Dart SDK >= 3.10
+- Patched Dart SDK `3.14.0-165.0.dev` (see the subpackage README)
 - SQL Server 2008 R2 or later (TDS 7.4 / protocol 0x04000074)
 - Azure SQL Database / Azure SQL Edge
 - Port 1433 (or custom) reachable from the Dart process
@@ -684,7 +695,7 @@ exist on `MssqlPoolConfig` / `MssqlPoolConfig.fromConnectionString`.
 
 ## Testing
 
-See [README_TESTS.md](README_TESTS.md) for offline, native TLS, Docker matrix,
+See [README_TESTS.md](README_TESTS.md) for patched-SDK, offline, Docker matrix,
 and opt-in live SQL Server testing instructions.
 
 ## Limitations
@@ -692,8 +703,7 @@ and opt-in live SQL Server testing instructions.
 - Tested with SQL Server 2017, 2019, 2022, and 2025. Earlier versions from SQL
   Server 2012 onward should be protocol-compatible through TDS 7.4 but are not
   currently tested.
-- TLS on Windows, Linux, and Android requires the native OpenSSL helper. A pure-Dart TLS
-  fallback is not provided in 0.5.0; use 0.4.1 only when its encrypted
-  multi-packet and Bulk Load limitations are acceptable.
+- TLS requires the companion Dart SDK patch until the raw fragment-write API is
+  available upstream. An unpatched SDK cannot compile the TLS subpackage.
 - Azure AD authentication requires a bearer token supplied by the caller (e.g. obtained via `azure_identity`); the driver does not fetch tokens itself.
 - Prepared statement handles (`sp_prepare` / `sp_execute`) are not supported. All parameterized queries use `sp_executesql`, which SQL Server plan-caches by query hash, so repeated-query performance is similar in practice.
