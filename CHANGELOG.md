@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.5.1
 
 * TLS: reschedule writes queued during the native transport runner's
   completion window, preventing large encrypted Bulk Loads from stalling.
