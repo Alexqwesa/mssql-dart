@@ -1,5 +1,5 @@
 diff --git a/sdk/lib/io/secure_socket.dart b/sdk/lib/io/secure_socket.dart
-index 2a753d0ce48..259354bf9f1 100644
+index 2a753d0ce48..8431c034035 100644
 --- a/sdk/lib/io/secure_socket.dart
 +++ b/sdk/lib/io/secure_socket.dart
 @@ -494,6 +494,32 @@ abstract interface class RawSecureSocket implements RawSocket {
@@ -83,7 +83,18 @@ index 2a753d0ce48..259354bf9f1 100644
    int sendMessage(
      List<SocketControlMessage> controlMessages,
      List<int> data, [
-@@ -961,6 +1007,7 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
+@@ -941,6 +987,10 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
+ 
+   void _writeHandler() {
+     _writeSocket();
++    // A short socket write can empty the ciphertext buffer here, outside a
++    // filter pass. The fragment waiter has to observe that transition even
++    // when the filter is no longer active.
++    _tlsFragmentWriter?.checkDrain();
+     _scheduleFilter();
+   }
+ 
+@@ -961,6 +1011,7 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
      } else {
        _controller.addError(e, stackTrace);
      }
@@ -91,25 +102,36 @@ index 2a753d0ce48..259354bf9f1 100644
      _close();
    }
  
-@@ -1072,6 +1119,9 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
+@@ -1072,6 +1123,12 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
          if (_status == closedStatus) {
            return;
          }
-+        if (_tlsFragmentWriter?.shouldPauseFilter ?? false) {
++        // Reaching the fragment boundary means the write buffers are already
++        // drained. Complete any waiter before returning, or a short socket
++        // write that finished outside the filter pass leaves it pending.
++        if (_tlsFragmentWriter?.pauseFilterIfBoundaryReached() ?? false) {
 +          return;
 +        }
          if (!_filterPending || _filterActive) {
            return;
          }
-@@ -1080,6 +1130,7 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
+@@ -1080,6 +1137,7 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
  
          _filterStatus = await _pushAllFilterStages();
          _filterActive = false;
-+        _tlsFragmentWriter?.afterFilterPass();
++        _tlsFragmentWriter?.checkDrain();
          if (_status == closedStatus) {
            _secureFilter!.destroy();
            _secureFilter = null;
-@@ -1298,6 +1349,147 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
+@@ -1113,6 +1171,7 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
+           _filterPending = true;
+           if (_filterStatus.writeEncryptedNoLongerEmpty) {
+             _writeSocket();
++            _tlsFragmentWriter?.checkDrain();
+           }
+           if (_filterStatus.writePlaintextNoLongerFull) {
+             _sendWriteEvent();
+@@ -1298,6 +1357,158 @@ class _RawSecureSocket extends Stream<RawSocketEvent>
    }
  }
  
@@ -192,9 +214,20 @@ index 2a753d0ce48..259354bf9f1 100644
 +
 +  bool get isActive => _boundaryPending;
 +
-+  bool get shouldPauseFilter => _boundaryPending && _isWriteDrained;
++  /// Completes a pending fragment drain when its ciphertext has left the
++  /// filter. Socket writes can finish that drain without another filter pass.
++  void checkDrain() => _completeDrainWaiters();
 +
-+  void afterFilterPass() => _completeDrainWaiters();
++  /// Pauses the filter once an explicit fragment owns a drained write boundary.
++  ///
++  /// Pausing and notifying the waiter are one transition. Returning early
++  /// without completing the waiter strands [RawSecureSocket.writeTlsFragment]
++  /// after a partial socket write empties the ciphertext buffer.
++  bool pauseFilterIfBoundaryReached() {
++    if (!_boundaryPending || !_isWriteDrained) return false;
++    _completeDrainWaiters();
++    return true;
++  }
 +
 +  void fail(Object error, [StackTrace? stackTrace]) {
 +    final waiters = _drainWaiters;
@@ -234,7 +267,7 @@ index 2a753d0ce48..259354bf9f1 100644
 +    // There is deliberately no transport-level timeout here: backpressure can
 +    // legitimately keep a raw socket pending, and the SDK cannot choose an
 +    // application deadline. Callers that accept untrusted peers should apply a
-+    // timeout to writeTlsFragment() and close the socket when it expires.
++    // timeout to [writeTlsFragment]() and close the socket when it expires.
 +    final completer = Completer<void>();
 +    (_drainWaiters ??= <Completer<void>>[]).add(completer);
 +    _socket._scheduleFilter();
@@ -257,7 +290,7 @@ index 2a753d0ce48..259354bf9f1 100644
  /// A circular buffer backed by an external byte array.  Accessed from
  /// both C++ and Dart code in an unsynchronized way, with one reading
  /// and one writing.  All updates to start and end are done by Dart code.
-@@ -1338,6 +1530,19 @@ class _ExternalBuffer {
+@@ -1338,6 +1549,19 @@ class _ExternalBuffer {
  
    bool get isEmpty => end == start;
  
@@ -279,16 +312,18 @@ index 2a753d0ce48..259354bf9f1 100644
    int get linearLength => start > end ? size - start : end - start;
 diff --git a/tests/standalone/io/raw_secure_socket_tls_fragment_test.dart b/tests/standalone/io/raw_secure_socket_tls_fragment_test.dart
 new file mode 100644
-index 00000000000..49731812c92
+index 00000000000..9fd27f605fd
 --- /dev/null
 +++ b/tests/standalone/io/raw_secure_socket_tls_fragment_test.dart
-@@ -0,0 +1,357 @@
+@@ -0,0 +1,407 @@
 +// Copyright (c) 2026, the Dart project authors. Please see the AUTHORS file
 +// for details. All rights reserved. Use of this source code is governed by a
 +// BSD-style license that can be found in the LICENSE file.
 +//
 +// VMOptions=
 +// VMOptions=--short_socket_read
++// VMOptions=--short_socket_write
++// VMOptions=--short_socket_read --short_socket_write
 +// OtherResources=certificates/server_chain.pem
 +// OtherResources=certificates/server_key.pem
 +// OtherResources=certificates/trusted_certs.pem
@@ -313,11 +348,53 @@ index 00000000000..49731812c92
 +  ..setTrustedCertificates(localFile('certificates/trusted_certs.pem'));
 +
 +Future<void> main() => asyncTest(() async {
++  await testShortSocketWriteDrain();
 +  await testExplicitFragmentContract();
 +  await testBackpressureRetries();
 +  await testCloseWhileDrainPending();
 +  await testErrorWhileDrainPending();
 +});
++
++/// One maximum fragment, with the peer reading normally.
++///
++/// Under --short_socket_write the ciphertext leaves through repeated partial
++/// RawSocket writes. The fragment future must still finish once those writes
++/// have drained, instead of pausing the filter with the waiter outstanding.
++Future<void> testShortSocketWriteDrain() async {
++  final host = (await InternetAddress.lookup('localhost')).first;
++  final server = await RawSecureServerSocket.bind(host, 0, serverContext);
++  final accepted = Completer<RawSecureSocket>();
++  server.listen(accepted.complete);
++
++  final client = await RawSecureSocket.connect(
++    host,
++    server.port,
++    context: clientContext,
++  );
++  final peer = await accepted.future;
++  final received = <int>[];
++  peer.listen((event) {
++    if (event == RawSocketEvent.read) {
++      final data = peer.read();
++      if (data != null) received.addAll(data);
++    }
++  });
++
++  final data = List<int>.filled(client.maximumTlsFragmentLength, 0x42);
++  await client.writeTlsFragment(data).timeout(const Duration(seconds: 5));
++  final deadline = DateTime.now().add(const Duration(seconds: 5));
++  while (received.length < data.length) {
++    if (DateTime.now().isAfter(deadline)) {
++      Expect.fail('peer received ${received.length} of ${data.length}');
++    }
++    await Future<void>.delayed(const Duration(milliseconds: 10));
++  }
++  Expect.listEquals(data, received);
++
++  await client.close();
++  await peer.close();
++  await server.close();
++}
 +
 +Future<void> testExplicitFragmentContract() async {
 +  final host = (await InternetAddress.lookup('localhost')).first;
@@ -407,9 +484,11 @@ index 00000000000..49731812c92
 +///
 +/// An unrestricted localhost socket accepts ciphertext immediately, so the
 +/// waiter never has to retry a WANT_WRITE and never has to interleave a
-+/// WANT_READ. Pausing the peer and shrinking both socket buffers holds the
-+/// ciphertext until the peer reads. While that call is still pending, the
-+/// peer writes a record the client must read.
++/// WANT_READ. Disabling the peer's read events and shrinking both socket
++/// buffers holds the ciphertext until the peer reads. Write events stay
++/// enabled: a paused subscription would also swallow the write events that
++/// finish a partial socket write. While that call is still pending, the peer
++/// writes a record the client must read.
 +Future<void> testBackpressureRetries() async {
 +  final connection = await _openStalledConnection();
 +  try {
@@ -555,7 +634,10 @@ index 00000000000..49731812c92
 +  _shrinkSocketBuffers(client);
 +  _shrinkSocketBuffers(peer);
 +  final subscription = peer.listen((_) {});
-+  subscription.pause();
++  // Stop pulling TCP data without pausing the subscription. Pausing would
++  // also drop the write events a partial RawSocket.write needs in order to
++  // finish.
++  peer.readEventsEnabled = false;
 +  final blocked = await _blockUntilDrainWaits(client);
 +  return _Connection(server, client, peer, subscription, blocked);
 +}
@@ -605,6 +687,7 @@ index 00000000000..49731812c92
 +  connection.subscription.onData((event) {
 +    if (event == RawSocketEvent.read) take();
 +  });
++  connection.peer.readEventsEnabled = true;
 +  connection.subscription.resume();
 +  take();
 +  await _waitUntil(() => received.length >= count);
