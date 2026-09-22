@@ -282,17 +282,20 @@ new file mode 100644
 index 00000000000..49731812c92
 --- /dev/null
 +++ b/tests/standalone/io/raw_secure_socket_tls_fragment_test.dart
-@@ -0,0 +1,110 @@
+@@ -0,0 +1,357 @@
 +// Copyright (c) 2026, the Dart project authors. Please see the AUTHORS file
 +// for details. All rights reserved. Use of this source code is governed by a
 +// BSD-style license that can be found in the LICENSE file.
 +//
++// VMOptions=
++// VMOptions=--short_socket_read
 +// OtherResources=certificates/server_chain.pem
 +// OtherResources=certificates/server_key.pem
 +// OtherResources=certificates/trusted_certs.pem
 +
 +import "dart:async";
 +import "dart:io";
++import "dart:typed_data";
 +
 +import "package:expect/async_helper.dart";
 +import "package:expect/expect.dart";
@@ -310,6 +313,13 @@ index 00000000000..49731812c92
 +  ..setTrustedCertificates(localFile('certificates/trusted_certs.pem'));
 +
 +Future<void> main() => asyncTest(() async {
++  await testExplicitFragmentContract();
++  await testBackpressureRetries();
++  await testCloseWhileDrainPending();
++  await testErrorWhileDrainPending();
++});
++
++Future<void> testExplicitFragmentContract() async {
 +  final host = (await InternetAddress.lookup('localhost')).first;
 +  final server = await RawSecureServerSocket.bind(host, 0, serverContext);
 +  final received = <int>[];
@@ -351,9 +361,7 @@ index 00000000000..49731812c92
 +  // Fragment operations claim ownership synchronously, before their first
 +  // await, so both overlap guards are deterministic.
 +  final guardedFragment = client.writeTlsFragment(<int>[0x11]);
-+  await asyncExpectThrows<StateError>(
-+    client.writeTlsFragment(<int>[0x12]),
-+  );
++  await asyncExpectThrows<StateError>(client.writeTlsFragment(<int>[0x12]));
 +  Expect.throws(
 +    () => client.write(<int>[0x13]),
 +    (error) => error is StateError,
@@ -392,4 +400,243 @@ index 00000000000..49731812c92
 +  await client.close();
 +  await (await accepted.future).close();
 +  await server.close();
-+});
++}
++
++/// Keeps a maximum fragment in [RawSecureSocket.writeTlsFragment]'s drain
++/// waiter, then delivers it after the filter has also consumed a peer record.
++///
++/// An unrestricted localhost socket accepts ciphertext immediately, so the
++/// waiter never has to retry a WANT_WRITE and never has to interleave a
++/// WANT_READ. Pausing the peer and shrinking both socket buffers holds the
++/// ciphertext until the peer reads. While that call is still pending, the
++/// peer writes a record the client must read.
++Future<void> testBackpressureRetries() async {
++  final connection = await _openStalledConnection();
++  try {
++    final fromPeer = <int>[];
++    final clientSubscription = connection.client.listen((event) {
++      if (event != RawSocketEvent.read) return;
++      final data = connection.client.read();
++      if (data != null) fromPeer.addAll(data);
++    });
++    // Inbound application data while the fragment is still undrained. The
++    // filter has to consume that record without abandoning the pending write.
++    await connection.peer.writeTlsFragment(<int>[0x91, 0x92, 0x93, 0x94]);
++    await _waitUntil(() => fromPeer.length == 4);
++    Expect.listEquals(<int>[0x91, 0x92, 0x93, 0x94], fromPeer);
++    Expect.isFalse(connection.blocked.settled);
++
++    final received = await _collectPeerBytes(
++      connection,
++      connection.blocked.expected.length,
++    );
++    await connection.blocked.pending.timeout(const Duration(seconds: 10));
++    _expectSameBytes(connection.blocked.expected, received);
++    await clientSubscription.cancel();
++  } finally {
++    await connection.close();
++  }
++}
++
++/// [RawSecureSocket.close] must not complete a fragment that is still waiting
++/// for its ciphertext to leave. The waiter finishes only after the peer reads.
++Future<void> testCloseWhileDrainPending() async {
++  final connection = await _openStalledConnection();
++  try {
++    var closeSettled = false;
++    final closeFuture = connection.client.close();
++    unawaited(
++      closeFuture.then(
++        (_) => closeSettled = true,
++        onError: (_) => closeSettled = true,
++      ),
++    );
++    await Future<void>.delayed(const Duration(milliseconds: 200));
++    Expect.isFalse(connection.blocked.settled);
++    Expect.isFalse(closeSettled);
++
++    final received = await _collectPeerBytes(
++      connection,
++      connection.blocked.expected.length,
++    );
++    await connection.blocked.pending.timeout(const Duration(seconds: 10));
++    await closeFuture.timeout(const Duration(seconds: 10));
++    _expectSameBytes(connection.blocked.expected, received);
++  } finally {
++    await connection.close();
++  }
++}
++
++/// Aborting the peer while a fragment is waiting for a drain fails that call
++/// and leaves the socket closed for a later fragment.
++Future<void> testErrorWhileDrainPending() async {
++  final connection = await _openStalledConnection();
++  try {
++    final streamError = Completer<Object>();
++    connection.client.listen(
++      (_) {},
++      onError: (Object error) {
++        if (!streamError.isCompleted) streamError.complete(error);
++      },
++    );
++    await connection.peer.close();
++    final fragmentError = await asyncExpectThrows<SocketException>(
++      connection.blocked.pending,
++    );
++    Expect.isNotNull(fragmentError.osError);
++    final reported = await streamError.future.timeout(
++      const Duration(seconds: 5),
++    );
++    Expect.isTrue(reported is SocketException);
++    final followUp = await asyncExpectThrows<SocketException>(
++      connection.client.writeTlsFragment(<int>[1]),
++    );
++    Expect.contains('closed', followUp.message);
++  } finally {
++    await connection.close();
++  }
++}
++
++final class _BlockedWrite {
++  _BlockedWrite(this.pending, this.expected);
++  final Future<void> pending;
++  final List<int> expected;
++  bool settled = false;
++}
++
++final class _Connection {
++  _Connection(
++    this.server,
++    this.client,
++    this.peer,
++    this.subscription,
++    this.blocked,
++  );
++  final RawSecureServerSocket server;
++  final RawSecureSocket client;
++  final RawSecureSocket peer;
++  final StreamSubscription<RawSocketEvent> subscription;
++  final _BlockedWrite blocked;
++
++  Future<void> close() async {
++    try {
++      await subscription.cancel();
++    } catch (_) {}
++    for (final action in <Future<void> Function()>[
++      () => client.close(),
++      () => peer.close(),
++      server.close,
++    ]) {
++      try {
++        await action().timeout(const Duration(seconds: 2));
++      } catch (_) {}
++    }
++  }
++}
++
++Future<_Connection> _openStalledConnection() async {
++  final host = (await InternetAddress.lookup('localhost')).first;
++  final server = await RawSecureServerSocket.bind(host, 0, serverContext);
++  final accepted = Completer<RawSecureSocket>();
++  server.listen(
++    (socket) {
++      if (!accepted.isCompleted) accepted.complete(socket);
++    },
++    onError: (Object error, StackTrace stack) {
++      if (!accepted.isCompleted) accepted.completeError(error, stack);
++    },
++  );
++  final client = await RawSecureSocket.connect(
++    host,
++    server.port,
++    context: clientContext,
++  );
++  final peer = await accepted.future;
++  _shrinkSocketBuffers(client);
++  _shrinkSocketBuffers(peer);
++  final subscription = peer.listen((_) {});
++  subscription.pause();
++  final blocked = await _blockUntilDrainWaits(client);
++  return _Connection(server, client, peer, subscription, blocked);
++}
++
++/// Writes maximum fragments until one is still pending, which means the
++/// ciphertext has not drained. Fast writes return as soon as they finish;
++/// only a blocked call observes the full timeout.
++Future<_BlockedWrite> _blockUntilDrainWaits(RawSecureSocket client) async {
++  final length = client.maximumTlsFragmentLength;
++  final expected = <int>[];
++  for (var index = 0; index < 128; index++) {
++    final chunk = Uint8List(length);
++    for (var i = 0; i < length; i++) {
++      chunk[i] = (index + i) & 0xff;
++    }
++    final blocked = _BlockedWrite(client.writeTlsFragment(chunk), expected);
++    unawaited(
++      blocked.pending.then(
++        (_) => blocked.settled = true,
++        onError: (_) => blocked.settled = true,
++      ),
++    );
++    final timedOut = await Future.any<bool>(<Future<bool>>[
++      blocked.pending.then((_) => false, onError: (_) => false),
++      Future<bool>.delayed(const Duration(milliseconds: 200), () => true),
++    ]);
++    expected.addAll(chunk);
++    if (timedOut && !blocked.settled) return blocked;
++  }
++  Expect.fail(
++    'writeTlsFragment never waited for a drain; '
++    'localhost accepted every fragment',
++  );
++  throw StateError('unreachable');
++}
++
++Future<List<int>> _collectPeerBytes(_Connection connection, int count) async {
++  final received = <int>[];
++  void take() {
++    while (received.length < count) {
++      final data = connection.peer.read();
++      if (data == null) return;
++      received.addAll(data);
++    }
++  }
++
++  connection.subscription.onData((event) {
++    if (event == RawSocketEvent.read) take();
++  });
++  connection.subscription.resume();
++  take();
++  await _waitUntil(() => received.length >= count);
++  return received;
++}
++
++Future<void> _waitUntil(bool Function() ready) async {
++  final deadline = DateTime.now().add(const Duration(seconds: 10));
++  while (!ready()) {
++    if (DateTime.now().isAfter(deadline)) {
++      Expect.fail('timed out waiting for TLS bytes');
++    }
++    await Future<void>.delayed(const Duration(milliseconds: 10));
++  }
++}
++
++void _expectSameBytes(List<int> expected, List<int> actual) {
++  Expect.equals(expected.length, actual.length, 'plaintext length');
++  for (var i = 0; i < actual.length; i++) {
++    if (actual[i] != expected[i]) {
++      Expect.fail('plaintext mismatch at $i');
++    }
++  }
++}
++
++void _shrinkSocketBuffers(RawSecureSocket socket) {
++  // SO_SNDBUF / SO_RCVBUF. Linux and Android use the POSIX numbers. Windows
++  // and the BSDs, including macOS, use the Winsock / BSD values.
++  final posix = Platform.isLinux || Platform.isAndroid;
++  final sendBuffer = posix ? 7 : 0x1001;
++  final receiveBuffer = posix ? 8 : 0x1002;
++  final level = RawSocketOption.levelSocket;
++  socket.setRawOption(RawSocketOption.fromInt(level, sendBuffer, 1024));
++  socket.setRawOption(RawSocketOption.fromInt(level, receiveBuffer, 1024));
++}
