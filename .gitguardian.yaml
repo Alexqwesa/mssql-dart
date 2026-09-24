@@ -1,0 +1,10 @@
+version: 2
+
+secret:
+  # Local test fixtures flagged by GitGuardian Security Checks.
+  ignored_paths:
+    - test/tvp_live_test.dart
+    - test/live/tvp_live_test.dart
+    - test/pool_ntlm_config_test.dart
+    - packages/tls_fragment_secure_socket/test/certificates/**
+    - docker/live/certs/**

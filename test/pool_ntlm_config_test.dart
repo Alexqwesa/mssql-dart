@@ -11,7 +11,7 @@ void main() {
       const c = MssqlPoolConfig(
         host: 'localhost',
         user: 'sa',
-        password: 'P@ssw0rd',
+        password: 'P@ssw0rd', // ggignore
       );
       expect(c.ntlmDomain, isNull);
       expect(c.ntlmWorkstation, isNull);
@@ -23,7 +23,7 @@ void main() {
         port: 1433,
         domain: 'CORP',
         user: 'alice',
-        password: 'SecREt01',
+        password: 'SecREt01', // ggignore
         workstation: 'DEVBOX',
         database: 'appdb',
         encrypt: false,
@@ -39,7 +39,7 @@ void main() {
       expect(c.ntlmDomain, 'CORP');
       expect(c.ntlmWorkstation, 'DEVBOX');
       expect(c.user, 'alice');
-      expect(c.password, 'SecREt01');
+      expect(c.password, 'SecREt01'); // ggignore
       expect(c.database, 'appdb');
       expect(c.encrypt, isFalse);
       expect(c.trustServerCertificate, isTrue);
@@ -67,7 +67,7 @@ void main() {
         host: 'localhost',
         domain: 'CORP',
         user: 'alice',
-        password: 'secret',
+        password: 'secret', // ggignore
       ));
       expect(pool.config.ntlmDomain, 'CORP');
       expect(pool, isA<MssqlPool>());

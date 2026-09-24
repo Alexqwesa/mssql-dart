@@ -20,6 +20,9 @@ dependency_overrides:
 
 false_secrets:
   - /docker/live/certs/server.key
+  - /test/tvp_live_test.dart
+  - /test/live/tvp_live_test.dart
+  - /test/pool_ntlm_config_test.dart
 
 dev_dependencies:
   lints: ^6.0.0
