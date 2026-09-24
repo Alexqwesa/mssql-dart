@@ -13,7 +13,7 @@ services:
       MSSQL_PID: Developer
       MSSQL_SA_PASSWORD: "${MSSQL_SA_PASSWORD:-Strong_test_password_123!}"
     ports:
-      # 14334 — avoid clashing with local 1433 / CI 14333
+      # Optional TLS / cleartext live endpoint
       - "14334:1433"
 
   # Full-session TLS (forceencryption=1) — tls_force_encrypt_stress_test only.
