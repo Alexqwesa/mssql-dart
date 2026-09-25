@@ -16,6 +16,12 @@
   package code; the required VM primitives remain supplied by the SDK patch.
 * Tests: restore deterministic PRELOGIN bridge coverage and run the fragment
   socket subpackage suite as part of the full test script.
+* CI: gate the existing SQL Server compatibility matrix (2017–2025 × normal +
+  force-TLS from `docker-compose.matrix.yml` / `full_tests.ps1`) instead of
+  treating the matrix as missing work.
+* Tests: add session-isolation coverage for pooled borrowers after `COMMIT`
+  and a killed `COMMIT`, and seeded protocol fuzzing for fragmentation,
+  truncation, hostile lengths, and adversarial token sequences.
 
 ## 0.5.1
 

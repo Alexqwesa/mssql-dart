@@ -1,0 +1,253 @@
+name: CI / Publish
+
+on:
+#  push:
+#    branches: [main]
+#    tags: ['v[0-9]*']
+#  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  patched-dart:
+    name: Build patched Dart SDK
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: mssql
+      - name: Fetch Dart SDK source
+        run: |
+          git clone --depth=1 https://chromium.googlesource.com/chromium/tools/depot_tools.git
+          mkdir dart-source
+          cd dart-source
+          PATH="$PWD/../depot_tools:$PATH" fetch dart
+          cd sdk
+          git checkout 3.14.0-165.0.dev
+          PATH="$PWD/../../depot_tools:$PATH" gclient sync
+      - name: Apply fragment patch and build
+        run: |
+          cd dart-source/sdk
+          git apply ../../mssql/packages/tls_fragment_secure_socket/secure_socket_tls_fragment.patch
+          python3 tools/build.py --mode release --arch x64 create_sdk
+          tar -C out/ReleaseX64 -czf ../../patched-dart-sdk.tar.gz dart-sdk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: patched-dart-sdk
+          path: patched-dart-sdk.tar.gz
+          retention-days: 3
+
+  analyze:
+    name: Analyze and unit tests
+    needs: patched-dart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - &download-sdk
+        uses: actions/download-artifact@v4
+        with:
+          name: patched-dart-sdk
+      - &install-sdk
+        name: Install patched SDK
+        run: |
+          mkdir .patched-dart
+          tar -C .patched-dart -xzf patched-dart-sdk.tar.gz
+          chmod +x .patched-dart/dart-sdk/bin/dart
+          echo "$PWD/.patched-dart/dart-sdk/bin" >> "$GITHUB_PATH"
+      - run: dart pub get
+      - run: dart analyze --fatal-warnings
+      - name: Run driver tests
+        run: |
+          TEST_FILES=$(find test -maxdepth 1 -name '*_test.dart' | sort | tr '\n' ' ')
+          dart test $TEST_FILES --timeout=60s
+      - name: Run fragment socket tests
+        working-directory: packages/tls_fragment_secure_socket
+        run: dart test
+
+  test-tls:
+    name: Forced TLS regressions
+    needs: [patched-dart, analyze]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - *download-sdk
+      - *install-sdk
+      - run: dart pub get
+      - name: Start SQL Servers
+        run: docker compose --env-file .env.example -f docker-compose.live.yml up -d --build
+      - name: Wait for SQL Servers
+        run: |
+          for i in $(seq 1 60); do
+            if docker exec mssql-dart-live /opt/mssql-tools18/bin/sqlcmd \
+              -S localhost -U sa -P 'Strong_test_password_123!' -Q 'SELECT 1' -No -C >/dev/null 2>&1 \
+              && docker exec mssql-dart-live-force-tls /opt/mssql-tools18/bin/sqlcmd \
+              -S localhost -U sa -P 'Strong_test_password_123!' -Q 'SELECT 1' -No -C >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 5
+          done
+          docker compose -f docker-compose.live.yml logs
+          exit 1
+      - name: Run TLS regressions
+        env:
+          MSSQL_LIVE_TESTS: '1'
+          MSSQL_HOST: 127.0.0.1
+          MSSQL_USER: sa
+          MSSQL_PASSWORD: Strong_test_password_123!
+          MSSQL_TRUST_SERVER_CERTIFICATE: '1'
+        run: |
+          dart test \
+            test/live/attention_tls_live_test.dart \
+            test/live/tls_alignment_live_test.dart \
+            test/live/tls_certificate_live_test.dart \
+            test/live/tls_force_encrypt_stress_test.dart \
+            test/live/connection_churn_live_test.dart \
+            --concurrency=1 --timeout=120s
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.live.yml down -v
+
+  test:
+    name: SQL Server 2022 live suite
+    needs: [patched-dart, analyze]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - *download-sdk
+      - *install-sdk
+      - run: dart pub get
+      - name: Start SQL Servers
+        # Both live endpoints: optional TLS on 14334 (CA-signed fixtures) and
+        # forceencryption on 14335. The stock GH Actions service image lacks
+        # those certs and the forced-TLS sibling.
+        run: docker compose --env-file .env.example -f docker-compose.live.yml up -d --build
+      - name: Wait for SQL Servers
+        run: |
+          for i in $(seq 1 60); do
+            if docker exec mssql-dart-live /opt/mssql-tools18/bin/sqlcmd \
+              -S localhost -U sa -P 'Strong_test_password_123!' -Q 'SELECT 1' -No -C >/dev/null 2>&1 \
+              && docker exec mssql-dart-live-force-tls /opt/mssql-tools18/bin/sqlcmd \
+              -S localhost -U sa -P 'Strong_test_password_123!' -Q 'SELECT 1' -No -C >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 5
+          done
+          docker compose -f docker-compose.live.yml logs
+          exit 1
+      - name: Run live suite
+        env:
+          MSSQL_LIVE_TESTS: '1'
+          MSSQL_HOST: 127.0.0.1
+          MSSQL_PORT: '14334'
+          MSSQL_FORCE_TLS_PORT: '14335'
+          MSSQL_USER: sa
+          MSSQL_PASSWORD: Strong_test_password_123!
+          MSSQL_ENCRYPT: '0'
+          MSSQL_TRUST_SERVER_CERTIFICATE: '1'
+        run: dart test test/live --concurrency=1 --timeout=120s
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.live.yml down -v
+
+  # Compatibility matrix already exists locally (`tool/full_tests.ps1` +
+  # `docker-compose.matrix.yml`: 2017/2019/2022/2025 × normal + force-TLS).
+  # This job CI-gates that matrix one edition at a time (two containers each)
+  # so runners are not asked to host all eight SQL Servers simultaneously.
+  test-matrix:
+    name: Compatibility matrix (${{ matrix.edition }})
+    needs: [patched-dart, analyze]
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - edition: '2017'
+            normal_port: '14170'
+            force_port: '14171'
+            container: mssql-dart-live-2017
+            services: sqlserver-2017 sqlserver-2017-force-tls
+          - edition: '2019'
+            normal_port: '14190'
+            force_port: '14191'
+            container: mssql-dart-live-2019
+            services: sqlserver-2019 sqlserver-2019-force-tls
+          - edition: '2022'
+            normal_port: '14220'
+            force_port: '14221'
+            container: mssql-dart-live-2022
+            services: sqlserver-2022 sqlserver-2022-force-tls
+          - edition: '2025'
+            normal_port: '14250'
+            force_port: '14251'
+            container: mssql-dart-live-2025
+            services: sqlserver-2025 sqlserver-2025-force-tls
+    steps:
+      - uses: actions/checkout@v4
+      - *download-sdk
+      - *install-sdk
+      - run: dart pub get
+      - name: Start ${{ matrix.edition }} normal + force-TLS
+        run: |
+          docker compose --env-file .env.example -f docker-compose.matrix.yml \
+            up -d --build ${{ matrix.services }}
+      - name: Wait for SQL Server ${{ matrix.edition }}
+        run: |
+          for i in $(seq 1 90); do
+            if docker exec ${{ matrix.container }} bash -lc '
+              if test -x /opt/mssql-tools18/bin/sqlcmd; then S=/opt/mssql-tools18/bin/sqlcmd;
+              else S=/opt/mssql-tools/bin/sqlcmd; fi
+              "$S" -S localhost -U sa -P "Strong_test_password_123!" -C -Q "SELECT 1"
+            ' >/dev/null 2>&1 \
+              && docker exec ${{ matrix.container }}-force-tls bash -lc '
+              if test -x /opt/mssql-tools18/bin/sqlcmd; then S=/opt/mssql-tools18/bin/sqlcmd;
+              else S=/opt/mssql-tools/bin/sqlcmd; fi
+              "$S" -S localhost -U sa -P "Strong_test_password_123!" -C -Q "SELECT 1"
+            ' >/dev/null 2>&1; then
+              exit 0
+            fi
+            sleep 5
+          done
+          docker compose -f docker-compose.matrix.yml logs ${{ matrix.services }}
+          exit 1
+      - name: Run live suite against ${{ matrix.edition }}
+        env:
+          MSSQL_LIVE_TESTS: '1'
+          MSSQL_HOST: 127.0.0.1
+          MSSQL_PORT: ${{ matrix.normal_port }}
+          MSSQL_FORCE_TLS_PORT: ${{ matrix.force_port }}
+          MSSQL_USER: sa
+          MSSQL_PASSWORD: Strong_test_password_123!
+          MSSQL_ENCRYPT: '0'
+          MSSQL_TRUST_SERVER_CERTIFICATE: '1'
+        run: dart test test/live --concurrency=1 --timeout=120s
+      - name: Tear down
+        if: always()
+        run: |
+          docker compose -f docker-compose.matrix.yml \
+            rm -sf ${{ matrix.services }}
+
+  publish:
+    name: Publish to pub.dev
+    needs: [test, test-tls, test-matrix]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    environment: pub.dev
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - *download-sdk
+      - *install-sdk
+      - run: dart pub get
+      - name: Validate TLS fragment package
+        working-directory: packages/tls_fragment_secure_socket
+        run: dart pub publish --dry-run
+      - name: Publish TLS fragment package
+        working-directory: packages/tls_fragment_secure_socket
+        run: dart pub publish --force
+      - run: dart pub publish --dry-run
+      - run: dart pub publish --force

@@ -695,14 +695,16 @@ exist on `MssqlPoolConfig` / `MssqlPoolConfig.fromConnectionString`.
 
 ## Testing
 
-See [README_TESTS.md](README_TESTS.md) for patched-SDK, offline, Docker matrix,
-and opt-in live SQL Server testing instructions.
+See [README_TESTS.md](README_TESTS.md) for patched-SDK, offline, Docker live,
+and compatibility-matrix instructions. Locally, `tool/full_tests.ps1` already
+exercises SQL Server 2017–2025 (normal + force-TLS). CI gates that same matrix.
 
 ## Limitations
 
-- Tested with SQL Server 2017, 2019, 2022, and 2025. Earlier versions from SQL
-  Server 2012 onward should be protocol-compatible through TDS 7.4 but are not
-  currently tested.
+- SQL Server **2017, 2019, 2022, and 2025** are covered by the Docker
+  compatibility matrix (`full_tests.ps1` / CI). Earlier releases from SQL Server
+  2012 onward should be protocol-compatible through TDS 7.4 but are not in that
+  matrix (no official Linux images for 2012–2016).
 - TLS requires the companion Dart SDK patch until the raw fragment-write API is
   available upstream. An unpatched SDK cannot compile the TLS subpackage.
 - Azure AD authentication requires a bearer token supplied by the caller (e.g. obtained via `azure_identity`); the driver does not fetch tokens itself.

@@ -69,12 +69,20 @@ Bulk scale tests use 10,000 rows by default. Set
 `MSSQL_BULK_STRESS_ROWS=100000` for the heavier TCP and TLS run without adding
 permanently skipped stress tests.
 
-Run fragment-socket, offline, and live tests against SQL Server 2017, 2019, 2022, and
-2025 with:
+`MSSQL_SOAK=1` runs the mixed pooled load in
+`sustained_load_live_test.dart` for `MSSQL_SOAK_MINUTES` (default 60). Without
+that variable the same file runs a short bounded mix as part of the live suite.
+
+Run fragment-socket, offline, and live tests against the existing SQL Server
+compatibility matrix (2017 / 2019 / 2022 / 2025 × normal + force-TLS) with:
 
 ```powershell
 .\tool\full_tests.ps1
 ```
+
+CI gates that matrix in `.github/workflows/publish.yml` (`Compatibility matrix`
+jobs). The gap that remained was CI coverage of this matrix, not inventing the
+matrix itself.
 
 ## Certificate fixtures
 

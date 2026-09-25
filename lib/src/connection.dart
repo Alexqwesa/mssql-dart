@@ -534,6 +534,9 @@ class MssqlConnection {
         timeout: timeout,
       );
       return MssqlResult(internal: internal);
+    } catch (error) {
+      _closeIfTransportDead(error);
+      rethrow;
     } finally {
       _busy = false;
     }
@@ -779,6 +782,9 @@ class MssqlConnection {
       } finally {
         cancellation.requestInFlight = false;
       }
+    } catch (error) {
+      _closeIfTransportDead(error);
+      rethrow;
     } finally {
       if (!cancellation.transferStarted.isCompleted) {
         cancellation.transferStarted.complete(false);
@@ -1412,19 +1418,45 @@ class MssqlConnection {
       rethrow;
     } on TimeoutException {
       final timedOutAfter = effective!;
+      var acknowledged = false;
       try {
         await _buf.sendAttention();
-      } catch (_) {}
-      try {
-        await response.timeout(const Duration(seconds: 10));
-      } on MssqlProtocolLimitException {
-        await _forceClose();
-        rethrow;
-      } catch (_) {}
+        try {
+          await response.timeout(const Duration(seconds: 10));
+          acknowledged = true;
+        } on MssqlProtocolLimitException {
+          await _forceClose();
+          rethrow;
+        } on TimeoutException {
+          acknowledged = false;
+        } catch (error) {
+          // A parsed server token finished the response. A dead socket did not.
+          acknowledged = error is! StateError && error is! SocketException;
+        }
+      } catch (error) {
+        if (error is MssqlProtocolLimitException) rethrow;
+        acknowledged = false;
+      }
+      if (!acknowledged) await _forceClose();
       throw MssqlException(
         'Query timed out after ${timedOutAfter.inMilliseconds}ms',
       );
     }
+  }
+
+  void _closeIfTransportDead(Object error) {
+    if (error is StateError || error is SocketException || _sessionIsDead(error)) {
+      _connected = false;
+      unawaited(_closeSockets());
+    }
+  }
+
+  /// Severity 20+ ends the SQL Server session. Error 596 is the kill state.
+  bool _sessionIsDead(Object error) {
+    if (error is! MssqlException) return false;
+    final severity = error.severity;
+    if (severity != null && severity >= 20) return true;
+    return error.errorCode == 596;
   }
 
   Future<void> _forceClose() async {

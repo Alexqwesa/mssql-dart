@@ -36,11 +36,15 @@ opaque-ciphertext passthrough coverage.
 
 ## Full SQL Server matrix
 
-`tool/full_tests.ps1` runs the TLS subpackage and offline Dart tests, then starts
-normal and force-encryption containers for SQL Server 2017, 2019, 2022, and
-2025. It runs `test/live` once per edition and leaves the matrix running for
-reuse on later runs. Point it at the patched SDK when that SDK is not first on
-`PATH`:
+The compatibility matrix:
+`tool/full_tests.ps1` + `docker-compose.matrix.yml` run SQL Server **2017,
+2019, 2022, and 2025**, each with a normal endpoint and a force-TLS sibling.
+CI gates that same matrix (one edition per job) in the
+`Compatibility matrix (*)` workflow jobs — should reuse it.
+
+`tool/full_tests.ps1` also runs the TLS subpackage and offline Dart tests, then
+leaves the eight containers up for reuse. Point it at the patched SDK when that
+SDK is not first on `PATH`:
 
 ```powershell
 $env:MSSQL_PATCHED_DART = 'C:\path\to\patched-dart-sdk\bin\dart.exe'
