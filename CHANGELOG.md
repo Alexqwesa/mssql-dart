@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.6.1-dev.0
+
+* CI: gate the existing SQL Server compatibility matrix (2017–2025 × normal +
+  force-TLS from `docker-compose.matrix.yml` / `full_tests.ps1`) instead of
+  treating the matrix as missing work.
+* Pool: restore the transaction isolation level during session reset. SQL
+  Server leaves it untouched across RESETCONNECTION, so a borrower that
+  selected `SERIALIZABLE` used to hand that level to the next borrower.
+* Connection: destroy sockets after closing them. `close()` only shuts down the
+  write half and leaves the handle registered with the event loop, so a program
+  that closed every connection still would not exit.
+* Tests: add session-isolation coverage for pooled borrowers after `COMMIT`
+  and a killed `COMMIT`, and seeded protocol fuzzing for fragmentation,
+  truncation, hostile lengths, and adversarial token sequences.
+* Tests: extend pooled session isolation to lock release after a killed
+  `COMMIT`, `ROWCOUNT` / `TEXTSIZE`, the whole `@@OPTIONS` bitmap, stacked
+  `EXECUTE AS`, session application locks, cursors and prepared handles,
+  `DEADLOCK_PRIORITY` / `LANGUAGE`, concurrent borrowers, and tempdb object
+  accounting.
+* Tests: extend protocol fuzzing to hostile packet headers, multi-packet
+  splits, column / result-set / value / PLP allocation limits, a full
+  COLMETADATA type-byte sweep, variable-length token bodies, NBCROW bitmaps,
+  resident-memory bounds, a failing-seed corpus, and the same classes of
+  hostile input driven through a real connection.
+
 ## 0.6.0-dev.0
 
 * **Breaking:** require the companion patched Dart SDK
@@ -16,12 +41,7 @@
   package code; the required VM primitives remain supplied by the SDK patch.
 * Tests: restore deterministic PRELOGIN bridge coverage and run the fragment
   socket subpackage suite as part of the full test script.
-* CI: gate the existing SQL Server compatibility matrix (2017–2025 × normal +
-  force-TLS from `docker-compose.matrix.yml` / `full_tests.ps1`) instead of
-  treating the matrix as missing work.
-* Tests: add session-isolation coverage for pooled borrowers after `COMMIT`
-  and a killed `COMMIT`, and seeded protocol fuzzing for fragmentation,
-  truncation, hostile lengths, and adversarial token sequences.
+
 
 ## 0.5.1
 

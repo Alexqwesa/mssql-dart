@@ -169,8 +169,10 @@ COMMIT TRANSACTION;
         pending,
         throwsA(anyOf(isA<MssqlException>(), isA<StateError>(), isA<SocketException>())),
       );
-      final cancelDone = conn.cancel().then<void>((_) {}, onError: (_) {});
+      // KILL first so the outcome cannot depend on whether the Attention ack
+      // wins the race; the cancel then runs against a session already dying.
       await killer.execute('KILL ${session.spid}');
+      final cancelDone = conn.cancel().then<void>((_) {}, onError: (_) {});
       await failed;
       await cancelDone;
       expect(conn.isOpen, isFalse);

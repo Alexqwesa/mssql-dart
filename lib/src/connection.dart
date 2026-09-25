@@ -954,6 +954,11 @@ class MssqlConnection {
   /// Clears temp tables and most session settings; restores the login
   /// database (ENVCHANGE). Returns `false` and closes on failure. Used by
   /// [MssqlPool] when [MssqlPoolConfig.resetOnRelease] is enabled.
+  ///
+  /// SQL Server leaves the transaction isolation level untouched across
+  /// RESETCONNECTION, so it is restored explicitly in the same round trip.
+  /// [MssqlPoolConfig.sessionInitSql] runs afterwards and can select a
+  /// different level for the pool.
   Future<bool> resetSession() async {
     if (!_connected) return false;
     if (_busy) {
@@ -961,7 +966,9 @@ class MssqlConnection {
     }
     try {
       requestSessionReset();
-      final r = await query('SELECT 1 AS ok');
+      final r = await query(
+        'SET TRANSACTION ISOLATION LEVEL READ COMMITTED; SELECT 1 AS ok',
+      );
       if (r.isEmpty || r[0]['ok'] != 1) {
         await close();
         return false;
@@ -1466,15 +1473,34 @@ class MssqlConnection {
 
   Future<void> _closeSockets() async {
     try {
-      await _socket.close();
+      await _buf.cancelReader();
     } catch (_) {}
+    Socket? socket;
+    try {
+      socket = _socket;
+    } catch (_) {
+      // A handshake can fail before _socket is assigned.
+    }
+    if (socket != null) await _releaseSocket(socket);
     final raw = _rawTcpSocket;
     _rawTcpSocket = null;
-    if (raw != null && !identical(raw, _socket)) {
-      try {
-        await raw.close();
-      } catch (_) {}
+    if (raw != null && !identical(raw, socket)) {
+      await _releaseSocket(raw);
     }
+  }
+
+  /// Closes [socket], then destroys it.
+  ///
+  /// `close()` only shuts down the write half, and the handle stays registered
+  /// with the event loop afterwards, so a process that closed every connection
+  /// would still not exit.
+  static Future<void> _releaseSocket(Socket socket) async {
+    try {
+      await socket.close();
+    } catch (_) {}
+    try {
+      socket.destroy();
+    } catch (_) {}
   }
 
   void _assertOpen() {

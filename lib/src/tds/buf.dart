@@ -43,6 +43,16 @@ class TdsBuffer {
   /// The current raw reader, retained across the PRELOGIN TLS handshake.
   ChunkedStreamReader<int> get rawReader => _reader;
 
+  /// Cancels the read subscription held on the incoming stream.
+  ///
+  /// `Socket.close()` only closes the write half, so a live reader keeps the
+  /// isolate alive after the connection is closed.
+  Future<void> cancelReader() async {
+    try {
+      await _reader.cancel();
+    } catch (_) {}
+  }
+
   /// Replaces packet I/O after the PRELOGIN TLS handshake.
   void replaceTransport(TdsTransport transport) {
     _transport = transport;

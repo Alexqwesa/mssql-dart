@@ -91,7 +91,9 @@ void main() {
         {'name': appName},
       );
       expect(sessions[0]['n'], lessThanOrEqualTo(4));
-      expect(ProcessInfo.maxRss, lessThan(started + 256 * 1024 * 1024));
+      // maxRss is a process-wide high-water mark that other suites inflate, so
+      // this compares the resident set before and after the load.
+      expect(ProcessInfo.currentRss, lessThan(started + 256 * 1024 * 1024));
     },
     timeout: Timeout(Duration(minutes: soak ? minutes + 5 : 3)),
   );

@@ -27,10 +27,18 @@ enum ScriptedFault {
 /// Used by offline fault injection. It is not a SQL Server: SQL batches other
 /// than the faulted one are answered with an empty DONE token.
 class ScriptedTdsServer {
-  ScriptedTdsServer._(this.listener, this.fault);
+  ScriptedTdsServer._(this.listener, this.fault, this.replyBuilder);
 
   final ServerSocket listener;
   final ScriptedFault fault;
+
+  /// Builds the reply to every post-login SQL batch, replacing the empty DONE.
+  ///
+  /// Used by connection-level fuzzing to feed hostile bytes through the whole
+  /// driver rather than through [TokenStream] alone.
+  final List<int> Function(int callIndex)? replyBuilder;
+
+  int _replies = 0;
 
   final List<String> sqlTexts = <String>[];
   final List<Socket> _sockets = <Socket>[];
@@ -42,9 +50,12 @@ class ScriptedTdsServer {
 
   late final Future<void> _session = _serve();
 
-  static Future<ScriptedTdsServer> bind(ScriptedFault fault) async {
+  static Future<ScriptedTdsServer> bind(
+    ScriptedFault fault, {
+    List<int> Function(int callIndex)? replyBuilder,
+  }) async {
     final listener = await ServerSocket.bind(InternetAddress.loopbackIPv4, 0);
-    final server = ScriptedTdsServer._(listener, fault);
+    final server = ScriptedTdsServer._(listener, fault, replyBuilder);
     unawaited(server._session);
     return server;
   }
@@ -122,7 +133,11 @@ class ScriptedTdsServer {
           if (fault == ScriptedFault.afterFirstRowDrop) client.destroy();
           return;
         }
-        client.add(tdsPacket(type: packReply, body: _doneToken()));
+        final builder = replyBuilder;
+        client.add(tdsPacket(
+          type: packReply,
+          body: builder == null ? _doneToken() : builder(_replies++),
+        ));
         await client.flush();
       }
     } catch (_) {

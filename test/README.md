@@ -31,6 +31,12 @@ The offline tests cover these categories:
 | Connection options | `connection_string_test.dart`, `named_instance_test.dart`, `timeout_unit_test.dart` | ADO/URL parsing, SQL Browser, PRELOGIN and TLS handshake deadlines |
 | Pool and retry logic | `pool_stats_test.dart`, `transient_test.dart`, `pool_*_config_test.dart` | Counters, configuration, transient classification, retry behavior |
 | TLS bridge and fragment output | `tls_bridge_test.dart`, `packages/tls_fragment_secure_socket/test/` | PRELOGIN unwrap/passthrough, raw TLS upgrades, fragment serialization, oversized writes, and inherited IOSink ordering |
+| Network fault injection | `fault_injection_test.dart`, `helpers/scripted_tds_server.dart` | Drop or stall during login, row streaming, Bulk Load, Attention, and COMMIT; bounded failure, closed connection, no replay |
+| Protocol fuzzing | `protocol_fuzz_test.dart`, `connection_fuzz_test.dart` | Seeded fragmentation, hostile packet headers, truncation, allocation limits, PLP chunking, a full type-byte sweep, adversarial token bodies, and the same classes of input through a real connection |
+
+Both fuzz files use the seed `0x4D535351`. Set `MSSQL_FUZZ_SEED` to replay a
+different one; seeds that expose a defect belong in the corpus list inside
+`protocol_fuzz_test.dart`.
 
 ## Live SQL Server categories
 
@@ -45,6 +51,8 @@ endpoint rejects cleartext.
 | SQL types | `types_test.dart`, `legacy_types_test.dart`, `typed_values_live_test.dart`, `tls_types_test.dart` | Numeric boundaries, temporal types, PLP, XML, GUID, money, rowversion, legacy types |
 | Unicode and hostile values | `unicode_parameters_live_test.dart` | Multilingual UTF-16, combining forms, supplementary characters, representative injection strings as parameters |
 | Transactions and session reset | `transaction_live_test.dart`, `transaction_failure_live_test.dart`, `session_db_live_test.dart` | Savepoints, isolation, constraint/syntax failures, XACT_ABORT automatic rollback, open-transaction pool cleanup |
+| Pooled session isolation | `session_isolation_live_test.dart` | Lock release after a killed COMMIT, `ROWCOUNT` / `TEXTSIZE`, the whole `@@OPTIONS` bitmap, stacked `EXECUTE AS`, session application locks, cursors and prepared handles, `DEADLOCK_PRIORITY` / `LANGUAGE`, four concurrent borrowers, and tempdb object accounting |
+| Network faults under load | `fault_injection_live_test.dart`, `sustained_load_live_test.dart` | Killed COMMIT, streaming, Bulk Load, and cancellation; pool discard and session identity; bounded mixed traffic |
 | Bulk Load | `bulk_live_test.dart`, `bulk_failure_live_test.dart`, `bulk_cancel_live_test.dart`, `tls_alignment_live_test.dart` | Nullable metadata, 10,000-row TCP/TLS loads, packet boundaries, explicit cancellation, failures, rollback and reuse |
 | Cancellation and timeouts | `attention_live_test.dart`, `attention_tls_live_test.dart`, `bulk_cancel_live_test.dart`, `cancel_scenarios_live_test.dart`, `timeout_live_test.dart` | Attention during batch, RPC, streaming, Bulk Load, transactions and pooled use |
 | TLS | `tls_test.dart`, `tls_certificate_live_test.dart`, `tls_alignment_live_test.dart`, `tls_force_encrypt_stress_test.dart` | Negotiated/forced TLS, CA and hostname validation, multi-packet requests, Bulk Load and Attention |
