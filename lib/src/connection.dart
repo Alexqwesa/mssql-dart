@@ -522,6 +522,9 @@ class MssqlConnection {
         timeout: timeout,
       );
       return MssqlResult(internal: internal);
+    } catch (error) {
+      _closeIfTransportDead(error);
+      rethrow;
     } finally {
       _busy = false;
     }
@@ -772,6 +775,9 @@ class MssqlConnection {
       } finally {
         cancellation.requestInFlight = false;
       }
+    } catch (error) {
+      _closeIfTransportDead(error);
+      rethrow;
     } finally {
       if (!cancellation.transferStarted.isCompleted) {
         cancellation.transferStarted.complete(false);
@@ -941,6 +947,11 @@ class MssqlConnection {
   /// Clears temp tables and most session settings; restores the login
   /// database (ENVCHANGE). Returns `false` and closes on failure. Used by
   /// [MssqlPool] when [MssqlPoolConfig.resetOnRelease] is enabled.
+  ///
+  /// SQL Server leaves the transaction isolation level untouched across
+  /// RESETCONNECTION, so it is restored explicitly in the same round trip.
+  /// [MssqlPoolConfig.sessionInitSql] runs afterwards and can select a
+  /// different level for the pool.
   Future<bool> resetSession() async {
     if (!_connected) return false;
     if (_busy) {
@@ -948,7 +959,9 @@ class MssqlConnection {
     }
     try {
       requestSessionReset();
-      final r = await query('SELECT 1 AS ok');
+      final r = await query(
+        'SET TRANSACTION ISOLATION LEVEL READ COMMITTED; SELECT 1 AS ok',
+      );
       if (r.isEmpty || r[0]['ok'] != 1) {
         await close();
         return false;
@@ -991,6 +1004,9 @@ class MssqlConnection {
     _connected = false;
     try {
       await _socket.close();
+    } catch (_) {}
+    try {
+      _socket.destroy();
     } catch (_) {}
   }
 
@@ -1391,6 +1407,8 @@ class MssqlConnection {
   /// Awaits a query response, applying [timeout] or the connection default.
   ///
   /// On timeout: send Attention, drain the in-flight response, then throw.
+  /// If Attention is not acknowledged, the connection is closed — it is no
+  /// longer safe to reuse.
   Future<T> _awaitQuery<T>(
     Future<T> response, {
     Duration? timeout,
@@ -1404,25 +1422,56 @@ class MssqlConnection {
       rethrow;
     } on TimeoutException {
       final timedOutAfter = effective!;
+      var acknowledged = false;
       try {
         await _buf.sendAttention();
-      } catch (_) {}
-      try {
-        await response.timeout(const Duration(seconds: 10));
-      } on MssqlProtocolLimitException {
-        await _forceClose();
-        rethrow;
-      } catch (_) {}
+        try {
+          await response.timeout(const Duration(seconds: 10));
+          acknowledged = true;
+        } on MssqlProtocolLimitException {
+          await _forceClose();
+          rethrow;
+        } on TimeoutException {
+          acknowledged = false;
+        } catch (error) {
+          // A parsed server token finished the response. A dead socket did not.
+          acknowledged = error is! StateError && error is! SocketException;
+        }
+      } catch (error) {
+        acknowledged = false;
+        if (error is MssqlProtocolLimitException) rethrow;
+      }
+      if (!acknowledged) await _forceClose();
       throw MssqlException(
         'Query timed out after ${timedOutAfter.inMilliseconds}ms',
       );
     }
   }
 
+  void _closeIfTransportDead(Object error) {
+    if (error is StateError ||
+        error is SocketException ||
+        _sessionIsDead(error)) {
+      _connected = false;
+      unawaited(_forceClose());
+    }
+  }
+
+  /// Severity 20+ ends the SQL Server session. Error 596 is the kill state.
+  bool _sessionIsDead(Object error) {
+    if (error is! MssqlException) return false;
+    final severity = error.severity;
+    if (severity != null && severity >= 20) return true;
+    return error.errorCode == 596;
+  }
+
   Future<void> _forceClose() async {
     _connected = false;
     try {
       await _socket.close();
+    } catch (_) {}
+    try {
+      _socket.destroy();
     } catch (_) {}
   }
 

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.2
+
+* Connection: close the session when a query or Bulk Load hits a dead
+  transport (`StateError` / `SocketException`), a severity-20+ error, or
+  error 596 (kill state). Unacknowledged Attention after a query timeout
+  also force-closes, matching the reliability tests brought from `main`.
+* Connection: destroy sockets after closing them so a process that closed
+  every connection can exit.
+* Pool: restore the transaction isolation level during session reset. SQL
+  Server leaves it untouched across RESETCONNECTION, so a borrower that
+  selected `SERIALIZABLE` used to hand that level to the next borrower.
+* Tests: port offline fault injection, protocol/connection fuzzing, live
+  fault injection, pooled session isolation, and sustained load coverage
+  from `main`, plus three pooled isolation cases in `session_db_live_test`.
+
 ## 0.5.1
 
 * TLS: reschedule writes queued during the native transport runner's
