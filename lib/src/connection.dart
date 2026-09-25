@@ -7,6 +7,7 @@ import 'auth/azure_ad_auth.dart';
 import 'auth/ntlm_auth.dart';
 import 'auth/sql_auth.dart';
 import 'connection_string.dart';
+import 'debug.dart';
 import 'exception.dart';
 import 'info_message.dart';
 import 'isolation.dart';
@@ -116,7 +117,13 @@ class MssqlConnection {
   final String? _sessionInitSql;
 
   late TdsBuffer _buf;
-  late Socket _socket;
+
+  // Null until the TCP connect succeeds: a handshake can fail before then, and
+  // teardown still has to run.
+  Socket? _socketOrNull;
+  Socket get _socket => _socketOrNull!;
+  set _socket(Socket socket) => _socketOrNull = socket;
+
   Socket? _rawTcpSocket;
   bool _connected = false;
   bool _busy = false;
@@ -932,7 +939,8 @@ class MssqlConnection {
     try {
       await query('USE ${_bracketIdent(target)}');
       return _connected && _dbEquals(_currentDatabase, target);
-    } catch (_) {
+    } catch (e) {
+      mssqlDebug('resetDatabase to $target failed, closing', e);
       await close();
       return false;
     }
@@ -981,7 +989,8 @@ class MssqlConnection {
       // Re-apply session defaults wiped by RESETCONNECTION (go-mssqldb).
       await _runSessionInitSql();
       return true;
-    } catch (_) {
+    } catch (e) {
+      mssqlDebug('resetSession failed, closing', e);
       await close();
       return false;
     }
@@ -997,7 +1006,8 @@ class MssqlConnection {
     try {
       final r = await query('SELECT 1 AS ok', const {}, timeout);
       return !r.isEmpty && r[0]['ok'] == 1;
-    } catch (_) {
+    } catch (e) {
+      mssqlDebug('validate failed, closing', e);
       await close();
       return false;
     }
@@ -1059,7 +1069,9 @@ class MssqlConnection {
     } catch (_) {
       try {
         await rollbackTransaction();
-      } catch (_) {}
+      } catch (e) {
+        mssqlDebug('rollback after a failed transaction body failed', e);
+      }
       rethrow;
     }
   }
@@ -1474,18 +1486,15 @@ class MssqlConnection {
   Future<void> _closeSockets() async {
     try {
       await _buf.cancelReader();
-    } catch (_) {}
-    Socket? socket;
-    try {
-      socket = _socket;
-    } catch (_) {
-      // A handshake can fail before _socket is assigned.
+    } catch (e) {
+      mssqlDebug('cancelling the packet reader failed', e);
     }
-    if (socket != null) await _releaseSocket(socket);
+    final socket = _socketOrNull;
+    if (socket != null) await _releaseSocket(socket, 'socket');
     final raw = _rawTcpSocket;
     _rawTcpSocket = null;
     if (raw != null && !identical(raw, socket)) {
-      await _releaseSocket(raw);
+      await _releaseSocket(raw, 'raw TCP socket');
     }
   }
 
@@ -1494,13 +1503,20 @@ class MssqlConnection {
   /// `close()` only shuts down the write half, and the handle stays registered
   /// with the event loop afterwards, so a process that closed every connection
   /// would still not exit.
-  static Future<void> _releaseSocket(Socket socket) async {
+  ///
+  /// A broken connection routinely fails to close, so [label] identifies the
+  /// socket in diagnostics rather than raising.
+  static Future<void> _releaseSocket(Socket socket, String label) async {
     try {
       await socket.close();
-    } catch (_) {}
+    } catch (e) {
+      mssqlDebug('closing the $label failed', e);
+    }
     try {
       socket.destroy();
-    } catch (_) {}
+    } catch (e) {
+      mssqlDebug('destroying the $label failed', e);
+    }
   }
 
   void _assertOpen() {

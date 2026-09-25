@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:async/async.dart';
 import 'package:tls_fragment_secure_socket/tls_fragment_secure_socket.dart';
 
+import '../debug.dart';
 import 'constants.dart';
 
 /// Result of a TDS 7.x PRELOGIN-wrapped TLS upgrade.
@@ -97,7 +98,8 @@ final class TdsTlsBridge {
               rawSocket.add(bytes);
             }
             await rawSocket.flush();
-          } catch (_) {
+          } catch (e) {
+            mssqlDebug('writing TLS bytes to the server failed', e);
             markDead();
             rawSocket.destroy();
           }
@@ -198,12 +200,15 @@ final class TdsTlsBridge {
           );
         }
       }
-    } catch (_) {
+    } catch (e) {
+      mssqlDebug('the TLS bridge read loop ended abnormally', e);
       abnormal = true;
     } finally {
       try {
         await bridgeSide.close();
-      } catch (_) {}
+      } catch (e) {
+        mssqlDebug('closing the TLS bridge side failed', e);
+      }
       if (abnormal) onAbnormal();
     }
   }

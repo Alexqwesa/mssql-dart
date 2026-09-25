@@ -11,6 +11,11 @@
 * Connection: destroy sockets after closing them. `close()` only shuts down the
   write half and leaves the handle registered with the event loop, so a program
   that closed every connection still would not exit.
+* Diagnostics: report failures on paths that must swallow them — socket
+  teardown, `resetDatabase` / `resetSession` / `validate` closing the
+  connection, a rollback that fails while another error is in flight, and TLS
+  bridge write and read errors. Lines are prefixed `dart_mssql:` and go to
+  stderr only when `MSSQL_DEBUG=1`.
 * Tests: add session-isolation coverage for pooled borrowers after `COMMIT`
   and a killed `COMMIT`, and seeded protocol fuzzing for fragmentation,
   truncation, hostile lengths, and adversarial token sequences.

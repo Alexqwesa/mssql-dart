@@ -3,6 +3,7 @@ import 'dart:typed_data';
 
 import 'package:async/async.dart';
 
+import '../debug.dart';
 import '../protocol_limits.dart';
 import 'constants.dart';
 import 'transport.dart';
@@ -50,7 +51,9 @@ class TdsBuffer {
   Future<void> cancelReader() async {
     try {
       await _reader.cancel();
-    } catch (_) {}
+    } catch (e) {
+      mssqlDebug('cancelling the incoming stream failed', e);
+    }
   }
 
   /// Replaces packet I/O after the PRELOGIN TLS handshake.
