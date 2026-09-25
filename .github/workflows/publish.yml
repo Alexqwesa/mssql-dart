@@ -2,7 +2,7 @@ name: CI / Publish
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'v0.5+']
     tags:
       - 'v[0-9]*'
   pull_request:
@@ -299,24 +299,25 @@ jobs:
   #   pub.dev → package → Settings → "Automated publishing"
   #   → add this repo + environment name "pub.dev"
   # ════════════════════════════════════════════════════════════════════════════
-  publish:
-    name: Publish to pub.dev
-    needs: [test, test-tls-force]
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/')
-    environment: pub.dev
-    permissions:
-      id-token: write
-      contents: read
+#  publish:
 
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dart-lang/setup-dart@v1
-        with: { sdk: stable }
-      - run: dart pub get
-
-      - name: Dry-run
-        run: dart pub publish --dry-run
-
-      - name: Publish
-        run: dart pub publish --force
+#    name: Publish to pub.dev
+#    needs: [test, test-tls-force]
+#    runs-on: ubuntu-latest
+#    if: startsWith(github.ref, 'refs/tags/')
+#    environment: pub.dev
+#    permissions:
+#      id-token: write
+#      contents: read
+#
+#    steps:
+#      - uses: actions/checkout@v4
+#      - uses: dart-lang/setup-dart@v1
+#        with: { sdk: stable }
+#      - run: dart pub get
+#
+#      - name: Dry-run
+#        run: dart pub publish --dry-run
+#
+#      - name: Publish
+#        run: dart pub publish --force

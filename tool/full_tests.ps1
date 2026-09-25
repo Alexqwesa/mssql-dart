@@ -76,9 +76,11 @@ function Remove-StaleMatrixContainers {
 
 try {
     Push-Location $root
+    Write-Host 'Building native TLS library and running C++ tests...'
     & (Join-Path $PSScriptRoot 'build_native.ps1')
     # Keep the offline phase honest: test/live is run below once per SQL Server
     # edition, rather than being invoked here only to report skipped tests.
+    Write-Host 'Running offline Dart tests...'
     $offlineTests = Get-ChildItem (Join-Path $root 'test') -File -Filter '*.dart' |
         ForEach-Object { $_.FullName }
     $offlineOutput = & dart test @offlineTests --reporter=expanded 2>&1
@@ -95,10 +97,12 @@ try {
     if ($offlineExitCode -ne 0) { throw 'Offline Dart tests failed.' }
     if ($offlineHasSkippedTests) { throw 'Offline Dart tests unexpectedly skipped.' }
 
+    Write-Host 'Preparing SQL Server matrix images...'
     Build-MissingMatrixImages
     Remove-StaleMatrixContainers
     # --no-build reuses the versioned images. Compose also reuses unchanged
     # containers, while recreating a container when its image or config changed.
+    Write-Host 'Starting SQL Server matrix containers...'
     & docker compose -f $compose up -d --no-build
     if ($LASTEXITCODE -ne 0) { throw 'Docker Compose failed to start the SQL Server matrix.' }
 

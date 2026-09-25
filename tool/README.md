@@ -1,8 +1,40 @@
 # Development tools
 
-This directory contains developer-only utilities for profiling and diagnosing the `mssql` driver. These programs are not part of the public package API and are not intended to be imported by applications.
+This directory contains developer-only utilities for the `mssql` driver. These
+programs are not part of the public package API and are not intended to be
+imported by applications.
 
-Run commands from the repository root so package imports and relative paths resolve correctly.
+Run commands from the repository root so package imports and relative paths
+resolve correctly.
+
+## `build_native.ps1`
+
+Builds the Windows native TLS helper (`mssql_tls.dll`), runs its C++ tests, and
+installs the DLL under `native/bin/windows-x64/`.
+
+### Dependencies
+
+- Visual Studio 2022 with the **Desktop development with C++** workload
+  (`C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat`)
+- CMake ≥ 3.24 on `PATH`
+- Ninja on `PATH`
+- OpenSSL development install (static libs preferred). Typical Chocolatey
+  install: `choco install openssl`. If CMake cannot find it:
+
+  ```powershell
+  $env:OPENSSL_ROOT_DIR = 'C:\Program Files\OpenSSL-Win64'
+  ```
+
+### Run
+
+```powershell
+.\tool\build_native.ps1
+# optional: .\tool\build_native.ps1 -Configuration Debug
+```
+
+For Android ABIs use `tool/build_android_native.sh` (needs `ANDROID_NDK_HOME`).
+Prebuilt Windows / Linux / Android libraries are also produced by GitHub
+Actions on `main` and `v0.5+` — see the README *Native TLS helper* section.
 
 ## `profile_bench.dart`
 

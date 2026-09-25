@@ -23,6 +23,47 @@ workaround for encrypted connections.
 dart pub add mssql
 ```
 
+### From git (`v0.5+`)
+
+Published pub.dev builds may lag this branch. Pin the branch in
+`pubspec.yaml`:
+
+```yaml
+dependencies:
+  mssql:
+    git:
+      url: https://github.com/Alexqwesa/mssql-dart.git
+      ref: v0.5+
+```
+
+```powershell
+dart pub get
+```
+
+Cleartext (`encrypt: false`) needs nothing else. For TLS (`encrypt: true`):
+
+1. Open the latest **CI / Publish** run on `v0.5+`:
+   [Actions → CI / Publish (branch `v0.5+`)](https://github.com/Alexqwesa/mssql-dart/actions/workflows/publish.yml?query=branch%3Av0.5%2B)
+2. Download the artifact for your platform.
+3. Extract and copy into your project:
+
+```text
+native/bin/windows-x64/mssql_tls.dll                              # Windows  (mssql-tls-windows-x64)
+native/bin/linux-x64/libmssql_tls.so                              # Linux    (mssql-tls-linux-x64)
+android/app/src/main/jniLibs/arm64-v8a/libmssql_tls.so            # Android  (mssql-tls-android)
+android/app/src/main/jniLibs/armeabi-v7a/libmssql_tls.so
+android/app/src/main/jniLibs/x86_64/libmssql_tls.so
+```
+
+Windows and Linux load from `native/bin/...` at the project root. Android does
+**not** use that path — the OS linker finds `libmssql_tls.so` by name once it
+is under `jniLibs/<abi>/` and packaged into the APK.
+
+Tagged builds also publish the same ZIPs on
+[Releases](https://github.com/Alexqwesa/mssql-dart/releases).
+To build the library yourself, see
+[Native TLS helper](#native-tls-helper).
+
 ## Quick start
 
 ```dart
@@ -679,6 +720,98 @@ exist on `MssqlPoolConfig` / `MssqlPoolConfig.fromConnectionString`.
 - SQL Server 2008 R2 or later (TDS 7.4 / protocol 0x04000074)
 - Azure SQL Database / Azure SQL Edge
 - Port 1433 (or custom) reachable from the Dart process
+- For `encrypt: true`: the platform native TLS helper (Windows, Linux, or
+  Android) — see [Native TLS helper](#native-tls-helper)
+
+---
+
+## Native TLS helper
+
+TLS uses a small OpenSSL-backed shared library. It is **not** in the Dart
+package tree (`native/bin/` is gitignored), so git and path consumers must
+obtain a build once per machine or ship it with the app.
+
+| Platform | Library | Lookup path (after build) |
+| --- | --- | --- |
+| Windows x64 | `mssql_tls.dll` | `native/bin/windows-x64/` or next to the process / `MSSQL_TLS_LIBRARY` |
+| Linux x64 | `libmssql_tls.so` | `native/bin/linux-x64/` or `LD_LIBRARY_PATH` / `MSSQL_TLS_LIBRARY` |
+| Android | `libmssql_tls.so` | `jniLibs/<abi>/` inside the APK |
+
+Override the path with `MSSQL_TLS_LIBRARY` when the helper is not on the
+default search path (common when the package lives in the pub cache).
+
+### Prebuilt artifacts (recommended)
+
+Every push to `main` / `v0.5+` (and every tag) builds self-contained helpers
+in the [CI / Publish](https://github.com/Alexqwesa/mssql-dart/actions/workflows/publish.yml)
+workflow. Open a green run → **Artifacts**:
+
+| Artifact | Download from | Contents |
+| --- | --- | --- |
+| `mssql-tls-windows-x64` | [Actions on `v0.5+`](https://github.com/Alexqwesa/mssql-dart/actions/workflows/publish.yml?query=branch%3Av0.5%2B) | `mssql_tls.dll`, `SHA256SUMS`, notices |
+| `mssql-tls-linux-x64` | same | `libmssql_tls.so`, `SHA256SUMS`, notices |
+| `mssql-tls-android` | same | `arm64-v8a`, `armeabi-v7a`, `x86_64` |
+
+Tagged versions also attach the same ZIPs to
+[GitHub Releases](https://github.com/Alexqwesa/mssql-dart/releases)
+(permanent until you delete the release). Actions artifacts expire with the
+usual retention window (~90 days).
+
+Extract the artifact and copy into your project:
+
+```text
+native/bin/windows-x64/mssql_tls.dll                              # Windows  (mssql-tls-windows-x64)
+native/bin/linux-x64/libmssql_tls.so                              # Linux    (mssql-tls-linux-x64)
+android/app/src/main/jniLibs/arm64-v8a/libmssql_tls.so            # Android  (mssql-tls-android)
+android/app/src/main/jniLibs/armeabi-v7a/libmssql_tls.so
+android/app/src/main/jniLibs/x86_64/libmssql_tls.so
+```
+
+### Build locally
+
+#### Windows — `tool/build_native.ps1`
+
+Dependencies:
+
+- Visual Studio 2022 with the C++ desktop workload (needs `VsDevCmd.bat`)
+- [CMake](https://cmake.org/) ≥ 3.24
+- [Ninja](https://ninja-build.org/)
+- OpenSSL (e.g. `choco install openssl`, or any install CMake can find via
+  `OPENSSL_ROOT_DIR`)
+
+```powershell
+# optional if OpenSSL is not on the default path:
+# $env:OPENSSL_ROOT_DIR = 'C:\Program Files\OpenSSL-Win64'
+.\tool\build_native.ps1
+```
+
+This configures, builds, runs the C++ TLS tests, and copies
+`mssql_tls.dll` to `native/bin/windows-x64/`.
+
+#### Linux
+
+Dependencies: a C++17 toolchain, CMake ≥ 3.24, Ninja, and OpenSSL headers
+(`libssl-dev` on Debian/Ubuntu).
+
+```bash
+cmake -S native -B build/native -G Ninja -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
+cmake --build build/native
+ctest --test-dir build/native --output-on-failure
+mkdir -p native/bin/linux-x64
+cp build/native/libmssql_tls.so native/bin/linux-x64/
+```
+
+#### Android
+
+Dependencies: Android NDK r27 (or compatible), CMake, Ninja, Perl, Make, curl.
+The script downloads pinned OpenSSL and statically links it:
+
+```bash
+export ANDROID_NDK_HOME=/path/to/android-ndk
+bash tool/build_android_native.sh
+```
+
+Outputs land in `dist/android/<abi>/`.
 
 ---
 

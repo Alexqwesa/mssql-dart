@@ -19,16 +19,29 @@ The native OpenSSL ABI has an in-memory client/server CTest that covers the
 handshake, certificate extraction, and encrypted request/response flow.
 
 GitHub Actions builds and tests self-contained Windows x64 and Linux x64
-helpers on every pull request. It also cross-builds Android `arm64-v8a`,
-`armeabi-v7a`, and `x86_64` helpers, statically linking OpenSSL into each
-`libmssql_tls.so`. Tagged builds attach platform ZIPs, with `SHA256SUMS`, to
-the GitHub release.
+helpers on every push to `main` and `v0.5+`, and on pull requests. It also
+cross-builds Android `arm64-v8a`, `armeabi-v7a`, and `x86_64` helpers,
+statically linking OpenSSL into each `libmssql_tls.so`. Each run uploads
+`mssql-tls-*` artifacts (Actions → workflow run → Artifacts). Tagged builds
+also attach platform ZIPs, with `SHA256SUMS`, to the GitHub release.
 
-On Windows, with Visual Studio 2022, CMake, Ninja, and OpenSSL installed:
+### Windows — `tool/build_native.ps1`
+
+Dependencies:
+
+- Visual Studio 2022 (C++ desktop workload; `VsDevCmd.bat`)
+- CMake ≥ 3.24
+- Ninja
+- OpenSSL (`choco install openssl`, or set `OPENSSL_ROOT_DIR`)
 
 ```powershell
 .\tool\build_native.ps1
 ```
+
+The script builds the shared library, runs the C++ CTest suite, and copies
+`mssql_tls.dll` to `native/bin/windows-x64/`.
+
+### Linux
 
 On Linux, with a C++ compiler, CMake, Ninja, and OpenSSL development headers:
 
