@@ -81,6 +81,7 @@ jobs:
       - name: Ensure Release zips exist
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
           for name in mssql-tls-linux-x64.zip mssql-tls-windows-x64.zip mssql-tls-android.zip; do
