@@ -1,0 +1,17 @@
+name: Stage CI native TLS helpers
+description: >
+  Download mssql-tls-* CI artifacts into native/bin and dist/android so
+  hook/build.dart uses local libraries instead of a GitHub Release download
+  (which 404s before the tag ships). Ubuntu jobs only load linux/x64; Windows
+  and Android are staged too for pin tooling and parity with Release.
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/download-artifact@v4
+      with:
+        pattern: mssql-tls-*
+        path: native-assets
+    - name: Stage into package-local paths
+      shell: bash
+      run: bash tool/stage_ci_native_tls.sh native-assets

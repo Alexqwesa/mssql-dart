@@ -27,12 +27,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dart-lang/setup-dart@v1
         with: { sdk: stable }
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: mssql-tls-*
-          path: native-assets
-      - name: Stage artifacts for dart build hooks
-        run: bash tool/stage_ci_native_tls.sh native-assets
+      - uses: ./.github/actions/stage-ci-native-tls
       - run: dart pub get
       - name: Propose pins from CI artifacts
         run: |
@@ -123,11 +118,13 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   analyze:
     name: Analyze
+    needs: [native-build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dart-lang/setup-dart@v1
         with: { sdk: stable }
+      - uses: ./.github/actions/stage-ci-native-tls
       - run: dart pub get
       - run: dart analyze --fatal-warnings
 
@@ -138,12 +135,13 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   unit:
     name: Unit tests
-    needs: analyze
+    needs: [analyze, native-build]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: dart-lang/setup-dart@v1
         with: { sdk: stable }
+      - uses: ./.github/actions/stage-ci-native-tls
       - run: dart pub get
       - name: Run unit tests
         run: |
@@ -187,6 +185,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dart-lang/setup-dart@v1
         with: { sdk: stable }
+      - uses: ./.github/actions/stage-ci-native-tls
       - run: dart pub get
       - name: Start live SQL Servers (optional TLS + forceencryption)
         run: |
@@ -237,7 +236,7 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   test:
     name: Test (SQL Server 2022)
-    needs: [analyze, unit]
+    needs: [analyze, unit, native-build]
     runs-on: ubuntu-latest
 
     services:
@@ -260,6 +259,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dart-lang/setup-dart@v1
         with: { sdk: stable }
+      - uses: ./.github/actions/stage-ci-native-tls
       - run: dart pub get
       - name: Run tests
         env:
