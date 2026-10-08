@@ -77,7 +77,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: android-actions/setup-android@v3
+      # v3 defaults to the removed SDK package `tools` and fails with
+      # "Failed to find package 'tools'". v4 installs platform-tools only.
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: platform-tools
       - name: Install Android NDK
         run: |
           yes | sdkmanager --licenses >/dev/null
