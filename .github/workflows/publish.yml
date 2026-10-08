@@ -14,10 +14,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  native-build:
-    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-    uses: ./.github/workflows/native-tls-build.yml
-
+  
   # Verify in-repo SHA-256 pins against CI binaries (see DEV_README.md).
   # Pin commits + tagging are done by the manual Release workflow.
   native-tls-pins:
