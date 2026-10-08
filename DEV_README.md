@@ -111,12 +111,13 @@ what the consumer hook downloads.
    - refuses to continue if `vX.Y.Z` already exists
    - commits pins when hashes changed (`ci: pin native TLS SHA-256 for vX.Y.Z`)
    - creates and pushes annotated tag `vX.Y.Z`
+   - uploads those **same** binaries to the GitHub Release and attests them
    - starts **CI / Publish** on that tag
 
 3. **CI / Publish on the tag**  
-   Verifies every platform hash against the committed pins, attaches Release
-   zips, creates Sigstore **artifact attestations** for each zip and each
-   native library, runs tests, then waits on the `pub.dev` Environment.
+   Verifies the GitHub Release zips against the committed pins (not a rebuild —
+   native builds are not bit-reproducible). Runs tests, then waits on the
+   `pub.dev` Environment.
 
    Verify a downloaded asset (example):
 

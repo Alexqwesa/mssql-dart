@@ -132,11 +132,19 @@ Options:
         continue;
       }
       if (pinned != entry.value) {
-        stderr.writeln(
-          'Pin mismatch for ${entry.key}: in-repo $pinned vs artifact '
-          '${entry.value}',
-        );
-        ok = false;
+        final msg =
+            'Pin mismatch for ${entry.key}: in-repo $pinned vs artifact '
+            '${entry.value}';
+        // Branch/PR rebuilds are not bit-identical to the Release pin build.
+        // Only --require-all (tag / release verification) fails the job.
+        if (requireAll) {
+          stderr.writeln(msg);
+          ok = false;
+        } else {
+          stdout.writeln(
+            'warn  $msg (run the Release workflow to refresh pins)',
+          );
+        }
       } else {
         stdout.writeln('ok    ${entry.key}');
       }

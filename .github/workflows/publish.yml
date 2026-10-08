@@ -44,74 +44,50 @@ jobs:
       - name: Verify in-repo pins (branch / PR)
         if: ${{ !startsWith(github.ref, 'refs/tags/') }}
         run: |
+          # Rebuilds are not bit-identical; mismatches are warnings until Release
+          # refreshes pins. Use --require-all only against Release assets.
           dart run tool/update_native_tls_pins.dart \
             --from-dir native-assets \
             --check
-      - name: Verify in-repo pins match release binaries
+      - name: Verify in-repo pins match GitHub Release assets
         if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
+          set -euo pipefail
+          # Release workflow uploaded the exact pinned binaries. Do not verify
+          # against this job's rebuild (hashes will differ).
+          mkdir -p release-zips native-assets-from-release
+          gh release download "$GITHUB_REF_NAME" --pattern 'mssql-tls-*.zip' \
+            --dir release-zips
+          for z in release-zips/*.zip; do
+            name="$(basename "$z" .zip)"
+            mkdir -p "native-assets-from-release/$name"
+            unzip -q "$z" -d "native-assets-from-release/$name"
+          done
           dart run tool/update_native_tls_pins.dart \
-            --from-dir native-assets \
+            --from-dir native-assets-from-release \
             --check \
             --require-all
 
   release-native-assets:
-    name: Release native TLS assets
+    name: Confirm Release assets
     needs: [native-tls-pins]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-      id-token: write
-      attestations: write
+      contents: read
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: mssql-tls-*
-          path: native-assets
-      - name: Pack release zips
-        run: |
-          set -euo pipefail
-          mkdir -p release-binaries
-          for asset in native-assets/*; do
-            name="$(basename "$asset")"
-            (cd "$asset" && zip -r "$GITHUB_WORKSPACE/release-binaries/${name}.zip" .)
-            # Flatten libraries for per-binary attestations (same bytes as zip members).
-            case "$name" in
-              mssql-tls-linux-x64)
-                cp "$asset/libmssql_tls.so" release-binaries/linux-x64-libmssql_tls.so
-                ;;
-              mssql-tls-windows-x64)
-                cp "$asset/mssql_tls.dll" release-binaries/windows-x64-mssql_tls.dll
-                ;;
-              mssql-tls-android)
-                cp "$asset/arm64-v8a/libmssql_tls.so" \
-                  release-binaries/android-arm64-v8a-libmssql_tls.so
-                cp "$asset/armeabi-v7a/libmssql_tls.so" \
-                  release-binaries/android-armeabi-v7a-libmssql_tls.so
-                cp "$asset/x86_64/libmssql_tls.so" \
-                  release-binaries/android-x86_64-libmssql_tls.so
-                ;;
-            esac
-          done
-          ls -la release-binaries
-      - name: Attest release zips and binaries
-        uses: actions/attest@v4
-        with:
-          subject-path: |
-            release-binaries/*.zip
-            release-binaries/linux-x64-libmssql_tls.so
-            release-binaries/windows-x64-mssql_tls.dll
-            release-binaries/android-arm64-v8a-libmssql_tls.so
-            release-binaries/android-armeabi-v7a-libmssql_tls.so
-            release-binaries/android-x86_64-libmssql_tls.so
-      - name: Create or update release assets
+      - name: Ensure Release zips exist
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
-            gh release create "$GITHUB_REF_NAME" --generate-notes
-          gh release upload "$GITHUB_REF_NAME" release-binaries/*.zip --clobber
+          set -euo pipefail
+          for name in mssql-tls-linux-x64.zip mssql-tls-windows-x64.zip mssql-tls-android.zip; do
+            gh release view "$GITHUB_REF_NAME" --json assets \
+              --jq ".assets[].name" | grep -Fx "$name"
+          done
+          echo "Release $GITHUB_REF_NAME has all native TLS zips (uploaded by Release workflow)."
 
   # ════════════════════════════════════════════════════════════════════════════
   # 1 · Static analysis

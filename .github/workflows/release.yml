@@ -1,6 +1,6 @@
 # Manual release: build native helpers, commit SHA-256 pins if needed, push
-# vX.Y.Z tag. The tag run of CI / Publish then verifies pins, attaches Release
-# zips, and publishes to pub.dev (Environment approval).
+# vX.Y.Z tag, upload + attest those same binaries, then start CI / Publish for
+# tests + pub.dev (Environment approval).
 #
 # This file must also exist on the default branch (main) so `gh workflow run`
 # / the Actions UI can find it. Always start the run from your release branch:
@@ -20,12 +20,14 @@ jobs:
     uses: ./.github/workflows/native-tls-build.yml
 
   pin-and-tag:
-    name: Pin and tag
+    name: Pin, tag, and publish assets
     needs: native-build
     runs-on: ubuntu-latest
     permissions:
       contents: write
       actions: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -108,6 +110,32 @@ jobs:
           git tag -a "$TAG" -m "Release $TAG" "$SHA"
           git push origin "refs/tags/${TAG}"
           echo "Pushed ${TAG} → ${SHA}"
+
+      # Upload the exact binaries that were hashed into the pin commit (do not
+      # rebuild). Tag CI / Publish verifies these Release assets, not a rebuild.
+      - name: Pack release zips and binaries
+        run: bash tool/pack_release_native_tls.sh native-assets release-binaries
+
+      - name: Attest release zips and binaries
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            release-binaries/*.zip
+            release-binaries/linux-x64-libmssql_tls.so
+            release-binaries/windows-x64-mssql_tls.dll
+            release-binaries/android-arm64-v8a-libmssql_tls.so
+            release-binaries/android-armeabi-v7a-libmssql_tls.so
+            release-binaries/android-x86_64-libmssql_tls.so
+
+      - name: Upload GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --generate-notes --target "${{ steps.pins.outputs.sha }}"
+          gh release upload "$TAG" release-binaries/*.zip --clobber
 
       - name: Trigger CI / Publish on the new tag
         env:

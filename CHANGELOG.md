@@ -8,9 +8,9 @@
   Refresh pins with `dart run tool/update_native_tls_pins.dart`
   (`--from-dir`, `--check`, `--require-all`).
 * CI: manual **Release** workflow builds helpers, commits SHA-256 pins when
-  needed, and pushes `vX.Y.Z`; tag runs of **CI / Publish** verify pins,
-  attach Release zips, attest each zip and native library (Sigstore /
-  `actions/attest`), and publish to pub.dev after Environment approval.
+  needed, pushes `vX.Y.Z`, uploads and attests those same Release binaries;
+  tag **CI / Publish** verifies Release zips against pins (not a rebuild) and
+  publishes to pub.dev after Environment approval.
 * Docs: maintainer notes in `DEV_README.md`.
 
 ## 0.5.2
