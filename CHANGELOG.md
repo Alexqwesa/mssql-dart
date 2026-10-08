@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.5.8
+
+* Update docs.
+
 ## 0.5.7
 
 * TLS: pin GitHub Release helper SHA-256 digests in

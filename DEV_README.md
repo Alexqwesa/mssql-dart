@@ -17,6 +17,37 @@ bash tool/full_tests.sh            # native helper + offline + live stack
 bash tool/full_tests.sh --matrix   # SQL Server version matrix
 ```
 
+## Install from the development branch
+
+Use this only when testing changes that have not reached pub.dev:
+
+```yaml
+dependencies:
+  mssql_driver_with_native_tls:
+    git:
+      url: https://github.com/Alexqwesa/mssql-dart.git
+      ref: mssql_driver_with_native_tls
+```
+
+```bash
+dart pub get
+```
+
+Build-hook overrides belong in the consuming application's `pubspec.yaml`:
+
+```yaml
+hooks:
+  user_defines:
+    mssql_driver_with_native_tls:
+      release_tag: v0.5.5   # must have matching in-package SHA-256 pins
+      local_only: true      # require native/bin or dist/android; never download
+      force_download: true  # ignore local helpers and download the pinned asset
+```
+
+Normally, omit `release_tag`; the hook uses `nativeTlsPinnedReleaseTag` from
+the installed package. An arbitrary override is rejected unless the package
+contains matching SHA-256 pins.
+
 ## Native TLS — local build
 
 Hook resolution order at runtime:
