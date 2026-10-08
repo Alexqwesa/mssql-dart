@@ -1,19 +1,18 @@
 # Manual release: build native helpers, commit SHA-256 pins if needed, push
 # vX.Y.Z tag. The tag run of CI / Publish then verifies pins, attaches Release
 # zips, and publishes to pub.dev (Environment approval).
+#
+# This file must also exist on the default branch (main) so `gh workflow run`
+# / the Actions UI can find it. Always start the run from your release branch:
+#   gh workflow run release.yml --ref mssql_driver_with_native_tls
+#   Actions → Release → Run workflow → "Use workflow from" → that branch
 name: Release
 
 on:
   workflow_dispatch:
-    inputs:
-      branch:
-        description: Branch to release from (pubspec version must already be set)
-        required: true
-        default: mssql_native
-        type: string
 
 concurrency:
-  group: release-${{ inputs.branch }}
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -30,8 +29,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.branch }}
-          # Fetch tags + enough history to push a commit on the branch tip.
+          # Same branch as "Use workflow from" / gh --ref.
+          ref: ${{ github.ref }}
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -47,6 +46,7 @@ jobs:
         id: version
         run: |
           set -euo pipefail
+          echo "Releasing from branch ${GITHUB_REF_NAME} @ $(git rev-parse --short HEAD)"
           VERSION=$(sed -nE 's/^version:[[:space:]]*([^[:space:]]+).*/\1/p' pubspec.yaml | head -1)
           if [[ -z "$VERSION" || "$VERSION" == *-dev* || "$VERSION" == *+* ]]; then
             echo "Refusing to release version '$VERSION' (need a plain X.Y.Z in pubspec.yaml)"
@@ -93,7 +93,7 @@ jobs:
             git commit -m "ci: pin native TLS SHA-256 for ${TAG}"
             echo "committed=true" >> "$GITHUB_OUTPUT"
           fi
-          git push origin "HEAD:${{ inputs.branch }}"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
           echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Create and push tag

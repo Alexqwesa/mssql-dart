@@ -82,16 +82,34 @@ what the consumer hook downloads.
 ## Recommended release process
 
 1. **Prepare release**  
-   On `mssql_native` (or `main`): finalize native TLS source, set the plain
-   `X.Y.Z` in `pubspec.yaml`, update `CHANGELOG.md`, and push.
+   On your release branch (e.g. `mssql_driver_with_native_tls`): finalize
+   native TLS source, set the plain `X.Y.Z` in `pubspec.yaml`, update
+   `CHANGELOG.md`, and push. The Release workflow files must exist on that
+   branch (`.github/workflows/release.yml`).
 
-2. **Run Release (manual)**  
-   Actions → **Release** → Run workflow → choose the branch.  
-   That workflow:
-   - builds Windows / Linux / Android helpers
+2. **Run Release (manual) — pick the branch in the UI**  
+   You do **not** need this on `main`. The branch dropdown is what selects
+   the code that gets pinned and tagged:
+
+   - GitHub: **Actions** → **Release** → **Run workflow**  
+     → **Use workflow from:** `mssql_driver_with_native_tls` (not `main`)  
+     → Run workflow  
+   - CLI:
+     ```bash
+     gh workflow run release.yml --ref mssql_driver_with_native_tls
+     ```
+
+   **`gh workflow run` 404 / workflow missing:** the workflow file must exist
+   on the **default branch** (`main`) or the API returns
+   `workflow release.yml not found on the default branch`. Copy
+   `.github/workflows/release.yml` and `native-tls-build.yml` onto `main`
+   and push — that only registers the Action; you still always run it with
+   `--ref` / **Use workflow from** set to the release branch.
+
+   The workflow then:
+   - builds Windows / Linux / Android helpers from that branch tip
    - refuses to continue if `vX.Y.Z` already exists
-   - commits `lib/src/native_tls/native_tls_pins.dart` when hashes changed
-     (`ci: pin native TLS SHA-256 for vX.Y.Z`)
+   - commits pins when hashes changed (`ci: pin native TLS SHA-256 for vX.Y.Z`)
    - creates and pushes annotated tag `vX.Y.Z`
    - starts **CI / Publish** on that tag
 
