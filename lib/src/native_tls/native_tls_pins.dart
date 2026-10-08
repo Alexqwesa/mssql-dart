@@ -14,15 +14,15 @@ const String nativeTlsPinnedReleaseTag = 'v0.5.3';
 /// Keys match [nativeTlsPinKey].
 const Map<String, String> nativeTlsPinnedSha256 = {
   'android/arm':
-      '4e9cf58e778cc80e089156b46a806ed8e1e539f10712c7b548fb5cf6de092985',
+      'c24126b236de3ddd083624a03893207e11f0e85c1bd88728f49562cfbf6b4888',
   'android/arm64':
-      'b12a116e41cb43f064c019a8f6218bedca4f533ce698bbc19008150762641dee',
+      '02210bf803b75fc6c816439190996b4bad404f16e69531747fd58b0ab0d6842b',
   'android/x64':
-      '30daf1ab1d5b1f52aa3231ab75904c5b8ac6031ac664f110b31df700fddf75f8',
+      '18d0d43145fc363aa2f93053363ff26064992bde6dccc9eb5046b77e45b4116e',
   'linux/x64':
       '6d529a6ab5b06841def0f0d336e243c31917a7705c25f5a44c4586149eb87e46',
   'windows/x64':
-      '34b45d978d574aac4b8e898d4dd03e986e5a54501f440c2afdb430f1d4d02fc3',
+      '97284879c4ab18c35bc2f289d42f2a7de8902ab1093eea653bd898df688ab0fc',
 };
 
 /// Stable pin map key for a native-assets target.
