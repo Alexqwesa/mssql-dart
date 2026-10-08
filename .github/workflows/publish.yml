@@ -252,6 +252,7 @@ jobs:
             ! -name 'debug_test.dart' \
             ! -name 'integration_test.dart' \
             ! -name 'tls_certificate_live_test.dart' \
+            ! -name 'tls_force_encrypt_stress_test.dart' \
             ! -name 'connection_churn_live_test.dart' \
             | sort | tr '\n' ' ')
           dart test $TEST_FILES --timeout=90s --reporter=expanded \
