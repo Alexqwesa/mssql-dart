@@ -2,7 +2,7 @@ name: CI / Publish
 
 on:
   push:
-    branches: [main, 'v0.5+']
+    branches: [main, mssql_native]
     tags:
       - 'v[0-9]*'
   pull_request:
