@@ -34,12 +34,10 @@ final class NativeTlsTransport {
   var _ended = false;
 
   NativeTlsTransport({
-    required Socket socket,
-    required ChunkedStreamReader<int> reader,
-    required NativeTlsDriver engine,
-  })  : _socket = socket,
-        _reader = reader,
-        _engine = engine;
+    required this._socket,
+    required this._reader,
+    required this._engine,
+  });
 
   Stream<Uint8List> get plaintext => _plaintext.stream;
 
