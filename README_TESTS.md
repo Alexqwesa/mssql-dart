@@ -1,4 +1,4 @@
-# Testing mssql
+# Testing mssql_native
 
 See [`test/README.md`](test/README.md) for the coverage map organized by test
 category and for the external-infrastructure scenarios outside the Docker
@@ -19,7 +19,7 @@ The native OpenSSL ABI has an in-memory client/server CTest that covers the
 handshake, certificate extraction, and encrypted request/response flow.
 
 GitHub Actions builds and tests self-contained Windows x64 and Linux x64
-helpers on every push to `main` and `v0.5+`, and on pull requests. It also
+helpers on every push to `main` and `mssql_native`, and on pull requests. It also
 cross-builds Android `arm64-v8a`, `armeabi-v7a`, and `x86_64` helpers,
 statically linking OpenSSL into each `libmssql_tls.so`. Each run uploads
 `mssql-tls-*` artifacts (Actions → workflow run → Artifacts). Tagged builds
@@ -46,9 +46,17 @@ The script builds the shared library, runs the C++ CTest suite, and copies
 On Linux, with a C++ compiler, CMake, Ninja, and OpenSSL development headers:
 
 ```bash
+bash tool/build_native.sh
+```
+
+Or manually:
+
+```bash
 cmake -S native -B build/native -G Ninja -DBUILD_TESTING=ON
 cmake --build build/native
 ctest --test-dir build/native --output-on-failure
+mkdir -p native/bin/linux-x64
+cp -f build/native/libmssql_tls.so native/bin/linux-x64/
 ```
 
 ## Android native TLS helper
@@ -81,19 +89,34 @@ only for local development and controlled test environments.
 
 ## Full SQL Server matrix
 
-`tool/full_tests.ps1` builds the native helper, runs offline Dart tests, then
-starts normal and force-encryption containers for SQL Server 2017, 2019, 2022,
-and 2025. It runs `test/live` once per edition and leaves the matrix running
-for reuse on later runs.
+`tool/full_tests.ps1` (Windows) and `tool/full_tests.sh --matrix` (Linux) build
+the native helper, run offline Dart tests, then start normal and
+force-encryption containers for SQL Server 2017, 2019, 2022, and 2025. Each
+script runs `test/live` once per edition and leaves the matrix running for
+reuse on later runs.
 
 ```powershell
 .\tool\full_tests.ps1
+```
+
+```bash
+bash tool/full_tests.sh --matrix
+```
+
+On Linux, the default (no flags) uses the smaller live stack instead:
+
+```bash
+bash tool/full_tests.sh
 ```
 
 Stop the matrix when finished with:
 
 ```powershell
 docker compose -f .\docker-compose.matrix.yml down
+```
+
+```bash
+docker compose -f docker-compose.matrix.yml down
 ```
 
 The eight host ports are 14170/14171 (2017), 14190/14191 (2019),
@@ -147,6 +170,12 @@ able to install OpenSSL while building the live-test image.
 `MSSQL_PASSWORD` is required whenever `MSSQL_LIVE_TESTS=1`. Compose has no
 persistent volume; `docker compose down` wipes both containers. Do not use
 production credentials.
+
+```bash
+bash tool/full_tests.sh
+```
+
+Or manually:
 
 ```bash
 cp -n .env.example .env

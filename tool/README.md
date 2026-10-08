@@ -7,12 +7,16 @@ imported by applications.
 Run commands from the repository root so package imports and relative paths
 resolve correctly.
 
-## `build_native.ps1`
+## `build_native.ps1` / `build_native.sh`
 
-Builds the Windows native TLS helper (`mssql_tls.dll`), runs its C++ tests, and
-installs the DLL under `native/bin/windows-x64/`.
+Builds the native TLS helper, runs its C++ tests, and installs the library:
 
-### Dependencies
+| Script | Output |
+| --- | --- |
+| `tool/build_native.ps1` | `native/bin/windows-x64/mssql_tls.dll` |
+| `tool/build_native.sh` | `native/bin/linux-x64/libmssql_tls.so` |
+
+### Windows dependencies
 
 - Visual Studio 2022 with the **Desktop development with C++** workload
   (`C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\Tools\VsDevCmd.bat`)
@@ -25,6 +29,13 @@ installs the DLL under `native/bin/windows-x64/`.
   $env:OPENSSL_ROOT_DIR = 'C:\Program Files\OpenSSL-Win64'
   ```
 
+### Linux dependencies
+
+- C++ compiler (`g++` / `clang++`)
+- CMake ≥ 3.24, Ninja, OpenSSL development libraries
+- On openSUSE, the script auto-detects `/usr/lib64/libcrypto.so` when needed.
+  Override with `OPENSSL_ROOT_DIR`, `OPENSSL_CRYPTO_LIBRARY`, `OPENSSL_SSL_LIBRARY`.
+
 ### Run
 
 ```powershell
@@ -32,9 +43,31 @@ installs the DLL under `native/bin/windows-x64/`.
 # optional: .\tool\build_native.ps1 -Configuration Debug
 ```
 
+```bash
+bash tool/build_native.sh
+# optional: bash tool/build_native.sh Debug
+```
+
 For Android ABIs use `tool/build_android_native.sh` (needs `ANDROID_NDK_HOME`).
 Prebuilt Windows / Linux / Android libraries are also produced by GitHub
-Actions on `main` and `v0.5+` — see the README *Native TLS helper* section.
+Actions on `main` and `mssql_native` — see the README *Native TLS helper* section.
+
+## `full_tests.ps1` / `full_tests.sh`
+
+Builds the native helper, runs offline Dart tests, starts SQL Server containers,
+and runs `test/live`.
+
+```powershell
+.\tool\full_tests.ps1
+```
+
+```bash
+bash tool/full_tests.sh           # live stack on 14334/14335
+bash tool/full_tests.sh --matrix  # 2017/2019/2022/2025 matrix
+```
+
+`full_tests.sh` falls back to `DOCKER_HOST=unix:///var/run/docker.sock` when the
+configured Docker socket (for example Rancher Desktop) is unavailable.
 
 ## `profile_bench.dart`
 
