@@ -2,7 +2,7 @@ name: CI / Publish
 
 on:
   push:
-    branches: [mssql_native]
+    branches: [mssql_driver_with_native_tls]
     tags:
       - 'v[0-9]*'
   pull_request:
@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   native-build:
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     uses: ./.github/workflows/native-tls-build.yml
 
   # Verify in-repo SHA-256 pins against CI binaries (see DEV_README.md).
@@ -22,6 +23,7 @@ jobs:
   native-tls-pins:
     name: Native TLS pins
     needs: [native-build]
+    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -69,33 +71,76 @@ jobs:
             --from-dir native-assets-from-release \
             --check \
             --require-all
-
+            
   release-native-assets:
-    name: Confirm Release assets
-    needs: [native-tls-pins]
+    name: Load pinned Release binaries
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: read
+
     steps:
-      - name: Ensure Release zips exist
+      - uses: actions/checkout@v4
+
+      - uses: dart-lang/setup-dart@v1
+        with:
+          sdk: stable
+
+      - run: dart pub get
+
+      - name: Download and verify Release binaries
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          for name in mssql-tls-linux-x64.zip mssql-tls-windows-x64.zip mssql-tls-android.zip; do
-            gh release view "$GITHUB_REF_NAME" --json assets \
-              --jq ".assets[].name" | grep -Fx "$name"
+
+          mkdir -p release-zips native-assets
+
+          for name in \
+            mssql-tls-linux-x64 \
+            mssql-tls-windows-x64 \
+            mssql-tls-android
+          do
+            gh release download "$GITHUB_REF_NAME" \
+              --pattern "$name.zip" \
+              --dir release-zips
+
+            mkdir -p "native-assets/$name"
+            unzip -q "release-zips/$name.zip" \
+              -d "native-assets/$name"
           done
-          echo "Release $GITHUB_REF_NAME has all native TLS zips (uploaded by Release workflow)."
+
+          dart run tool/update_native_tls_pins.dart \
+            --from-dir native-assets \
+            --check \
+            --require-all
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mssql-tls-linux-x64
+          path: native-assets/mssql-tls-linux-x64/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mssql-tls-windows-x64
+          path: native-assets/mssql-tls-windows-x64/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mssql-tls-android
+          path: native-assets/mssql-tls-android/
+          if-no-files-found: error
 
   # ════════════════════════════════════════════════════════════════════════════
   # 1 · Static analysis
   # ════════════════════════════════════════════════════════════════════════════
-  analyze:
+  analyze:  
     name: Analyze
-    needs: [native-build]
+    needs: [native-build, release-native-assets]
+    if: ${{ always() && (needs.native-build.result == 'success' || needs.release-native-assets.result == 'success') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -112,7 +157,7 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   unit:
     name: Unit tests
-    needs: [analyze, native-build]
+    needs: [analyze]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -155,7 +200,7 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   test-tls-force:
     name: Test (forceencryption TLS)
-    needs: [analyze, unit, native-build]
+    needs: [analyze, unit]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -212,7 +257,7 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   test:
     name: Test (SQL Server 2022)
-    needs: [analyze, unit, native-build]
+    needs: [analyze, unit]
     runs-on: ubuntu-latest
 
     services:
