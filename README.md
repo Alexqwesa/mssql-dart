@@ -14,6 +14,22 @@ Unencrypted connections continue to use only Dart and TCP.
 dart pub add mssql_native
 ```
 
+Cleartext (`encrypt: false`) needs nothing else. For TLS (`encrypt: true`),
+`hook/build.dart` downloads the matching prebuilt OpenSSL helper from the
+GitHub Release for this package version (`v` + `pubspec` version) the first
+time you `dart pub get` / `dart test` / `dart run`. No manual copy and no
+local CMake/OpenSSL install are required on supported targets:
+
+| Target | Release asset |
+| --- | --- |
+| Linux x64 | `mssql-tls-linux-x64.zip` |
+| Windows x64 | `mssql-tls-windows-x64.zip` |
+| Android `arm64` / `arm` / `x64` | `mssql-tls-android.zip` |
+
+Override the helper path with `MSSQL_TLS_LIBRARY` when needed. For offline
+or git checkouts before a release exists, build locally
+(`bash tool/build_native.sh`) — the hook prefers `native/bin/...` when present.
+
 ### From git (`mssql_native`)
 
 Published pub.dev builds may lag this branch. Pin the branch in
@@ -31,29 +47,16 @@ dependencies:
 dart pub get
 ```
 
-Cleartext (`encrypt: false`) needs nothing else. For TLS (`encrypt: true`):
+Optional hook overrides in the **app** `pubspec.yaml`:
 
-1. Open the latest **CI / Publish** run on `mssql_native`:
-   [Actions → CI / Publish (branch `mssql_native`)](https://github.com/Alexqwesa/mssql-dart/actions/workflows/publish.yml?query=branch%3Amssql_native)
-2. Download the artifact for your platform.
-3. Extract and copy into your project:
-
-```text
-native/bin/windows-x64/mssql_tls.dll                              # Windows  (mssql-tls-windows-x64)
-native/bin/linux-x64/libmssql_tls.so                              # Linux    (mssql-tls-linux-x64)
-android/app/src/main/jniLibs/arm64-v8a/libmssql_tls.so            # Android  (mssql-tls-android)
-android/app/src/main/jniLibs/armeabi-v7a/libmssql_tls.so
-android/app/src/main/jniLibs/x86_64/libmssql_tls.so
+```yaml
+hooks:
+  user_defines:
+    mssql_native:
+      release_tag: v0.5.2   # default: v + package version
+      local_only: true      # never download; require native/bin or dist/android
+      force_download: true  # ignore local native/bin and re-fetch
 ```
-
-Windows and Linux load from `native/bin/...` at the project root. Android does
-**not** use that path — the OS linker finds `libmssql_tls.so` by name once it
-is under `jniLibs/<abi>/` and packaged into the APK.
-
-Tagged builds also publish the same ZIPs on
-[Releases](https://github.com/Alexqwesa/mssql-dart/releases).
-To build the library yourself, see
-[Native TLS helper](#native-tls-helper).
 
 ## Choosing a SQL Server package
 
@@ -786,56 +789,39 @@ exist on `MssqlPoolConfig` / `MssqlPoolConfig.fromConnectionString`.
 
 ## Requirements
 
-- Dart SDK >= 3.10
+- Dart SDK >= 3.13
 - SQL Server 2008 R2 or later (TDS 7.4 / protocol 0x04000074)
 - Azure SQL Database / Azure SQL Edge
 - Port 1433 (or custom) reachable from the Dart process
-- For `encrypt: true`: the platform native TLS helper (Windows, Linux, or
-  Android) — see [Native TLS helper](#native-tls-helper)
+- For `encrypt: true`: network access on first build so `hook/build.dart` can
+  download the platform helper (or a local build — see below)
 
 ---
 
 ## Native TLS helper
 
-TLS uses a small OpenSSL-backed shared library. It is **not** in the Dart
-package tree (`native/bin/` is gitignored), so git and path consumers must
-obtain a build once per machine or ship it with the app.
+TLS uses a small OpenSSL-backed shared library. Published package versions
+download it automatically via the Dart build hook from the matching GitHub
+Release zip. Resolution order at runtime:
 
-| Platform | Library | Lookup path (after build) |
+1. `MSSQL_TLS_LIBRARY` environment override
+2. Code asset from `hook/build.dart` (`DynamicLibrary.codeAsset`)
+3. Platform linker name (Android `jniLibs`, or process search path)
+4. Checked-out `native/bin/<platform>/` next to the working directory (dev/CI)
+
+| Platform | Library | Hook source |
 | --- | --- | --- |
-| Windows x64 | `mssql_tls.dll` | `native/bin/windows-x64/` or next to the process / `MSSQL_TLS_LIBRARY` |
-| Linux x64 | `libmssql_tls.so` | `native/bin/linux-x64/` or `LD_LIBRARY_PATH` / `MSSQL_TLS_LIBRARY` |
-| Android | `libmssql_tls.so` | `jniLibs/<abi>/` inside the APK |
+| Windows x64 | `mssql_tls.dll` | Release `mssql-tls-windows-x64.zip`, or `native/bin/windows-x64/` |
+| Linux x64 | `libmssql_tls.so` | Release `mssql-tls-linux-x64.zip`, or `native/bin/linux-x64/` |
+| Android | `libmssql_tls.so` | Release `mssql-tls-android.zip` per ABI, or `dist/android/<abi>/` |
 
-Override the path with `MSSQL_TLS_LIBRARY` when the helper is not on the
-default search path (common when the package lives in the pub cache).
+### Prebuilt artifacts
 
-### Prebuilt artifacts (recommended)
-
-Every push to `main` / `mssql_native` (and every tag) builds self-contained helpers
-in the [CI / Publish](https://github.com/Alexqwesa/mssql-dart/actions/workflows/publish.yml)
-workflow. Open a green run → **Artifacts**:
-
-| Artifact | Download from | Contents |
-| --- | --- | --- |
-| `mssql-tls-windows-x64` | [Actions on `mssql_native`](https://github.com/Alexqwesa/mssql-dart/actions/workflows/publish.yml?query=branch%3Amssql_native) | `mssql_tls.dll`, `SHA256SUMS`, notices |
-| `mssql-tls-linux-x64` | same | `libmssql_tls.so`, `SHA256SUMS`, notices |
-| `mssql-tls-android` | same | `arm64-v8a`, `armeabi-v7a`, `x86_64` |
-
-Tagged versions also attach the same ZIPs to
-[GitHub Releases](https://github.com/Alexqwesa/mssql-dart/releases)
-(permanent until you delete the release). Actions artifacts expire with the
-usual retention window (~90 days).
-
-Extract the artifact and copy into your project:
-
-```text
-native/bin/windows-x64/mssql_tls.dll                              # Windows  (mssql-tls-windows-x64)
-native/bin/linux-x64/libmssql_tls.so                              # Linux    (mssql-tls-linux-x64)
-android/app/src/main/jniLibs/arm64-v8a/libmssql_tls.so            # Android  (mssql-tls-android)
-android/app/src/main/jniLibs/armeabi-v7a/libmssql_tls.so
-android/app/src/main/jniLibs/x86_64/libmssql_tls.so
-```
+Every push to `main` / `mssql_native` (and every tag) builds the helpers in
+[CI / Publish](https://github.com/Alexqwesa/mssql-dart/actions/workflows/publish.yml).
+Tagged builds attach ZIPs (with `SHA256SUMS`) to
+[GitHub Releases](https://github.com/Alexqwesa/mssql-dart/releases) — that is
+what the hook downloads. Actions artifacts remain available for manual use.
 
 ### Build locally
 

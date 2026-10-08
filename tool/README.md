@@ -52,6 +52,11 @@ For Android ABIs use `tool/build_android_native.sh` (needs `ANDROID_NDK_HOME`).
 Prebuilt Windows / Linux / Android libraries are also produced by GitHub
 Actions on `main` and `mssql_native` — see the README *Native TLS helper* section.
 
+Published consumers normally get those helpers via `hook/build.dart` (download
+from the GitHub Release for the package version). Local `native/bin/` /
+`dist/android/` builds are preferred when present, which is what these scripts
+produce for development and CI.
+
 ## `full_tests.ps1` / `full_tests.sh`
 
 Builds the native helper, runs offline Dart tests, starts SQL Server containers,

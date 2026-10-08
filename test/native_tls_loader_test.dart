@@ -1,8 +1,16 @@
+import 'package:mssql_native/src/native_tls/native_tls_asset.dart';
 import 'package:mssql_native/src/native_tls/native_tls_loader.dart';
 import 'package:test/test.dart';
 
 void main() {
   group('native TLS library lookup', () {
+    test('uses a stable code-asset id', () {
+      expect(
+        nativeTlsAssetId,
+        'package:mssql_native/src/native_tls/native_tls_loader.dart',
+      );
+    });
+
     test('uses the Android linker name without desktop fallback paths', () {
       expect(nativeTlsLibraryName('android'), 'libmssql_tls.so');
       expect(

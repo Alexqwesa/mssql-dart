@@ -1,0 +1,11 @@
+# Keep the published archive focused on the driver and its native TLS helper.
+# Test/dev companions stay in git but are not needed on pub.dev.
+
+packages/
+feature_request.md
+.env
+.idea/
+.run/
+build/
+coverage/
+*.iml

@@ -1,17 +1,40 @@
 name: mssql_native
-description: A Microsoft SQL Server driver using the TDS 7.4 wire protocol and native OpenSSL TLS.
+description: >-
+  Dart TDS 7.4 Microsoft SQL Server driver with pooling, transactions,
+  Bulk Load, NTLM/Azure AD, and a small native OpenSSL TLS helper.
 version: 0.5.2
 homepage: https://github.com/Alexqwesa/mssql-dart
 repository: https://github.com/Alexqwesa/mssql-dart
 issue_tracker: https://github.com/Alexqwesa/mssql-dart/issues
 
 environment:
-  sdk: '>=3.10.0 <4.0.0'
+  # Build hooks + DynamicLibrary.codeAsset (native TLS download).
+  sdk: '>=3.13.0 <4.0.0'
+
+platforms:
+  android:
+  linux:
+  windows:
+
+topics:
+  - sql-server
+  - mssql
+  - database
+  - tds
+  - flutter
+
+# Self-signed keys used only by local Docker / unit-test TLS fixtures.
+false_secrets:
+  - /docker/live/certs/server.key
+  - /packages/tls_fragment_secure_socket/test/certificates/server.key
 
 dependencies:
+  archive: ^4.3.0
   async: ^2.11.0
+  code_assets: ^2.1.0
   crypto: ^3.0.7
   ffi: ^2.1.4
+  hooks: ^2.2.0
   http: ^1.2.0
 
 dev_dependencies:
