@@ -12,10 +12,38 @@ fi
 openssl_version="3.5.7"
 openssl_archive="openssl-${openssl_version}.tar.gz"
 openssl_sha256="a8c0d28a529ca480f9f36cf5792e2cd21984552a3c8e4aa11a24aa31aeac98e8"
+android_api="${MSSQL_ANDROID_API:-24}"
 downloads="${MSSQL_NATIVE_DOWNLOADS:-$root/build/downloads}"
 work="${MSSQL_NATIVE_BUILD_ROOT:-$root/build/android-native}"
 output="${MSSQL_NATIVE_OUTPUT:-$root/dist/android}"
 jobs="${MSSQL_NATIVE_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 2)}"
+
+# OpenSSL Configure looks for NDK clang on PATH; without it it falls back to
+# the removed gcc wrappers (aarch64-linux-android-gcc, etc.).
+host_tag="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+case "$host_tag" in
+  linux-x86_64|linux-aarch64|darwin-x86_64|darwin-arm64) ;;
+  linux-amd64) host_tag=linux-x86_64 ;;
+  darwin-amd64) host_tag=darwin-x86_64 ;;
+  *)
+    # NDK prebuilts use these directory names.
+    if [[ -d "$ndk/toolchains/llvm/prebuilt/linux-x86_64" ]]; then
+      host_tag=linux-x86_64
+    elif [[ -d "$ndk/toolchains/llvm/prebuilt/darwin-x86_64" ]]; then
+      host_tag=darwin-x86_64
+    elif [[ -d "$ndk/toolchains/llvm/prebuilt/darwin-arm64" ]]; then
+      host_tag=darwin-arm64
+    else
+      echo "Could not locate NDK LLVM prebuilt toolchain under $ndk/toolchains/llvm/prebuilt" >&2
+      exit 1
+    fi
+    ;;
+esac
+llvm_bin="$ndk/toolchains/llvm/prebuilt/$host_tag/bin"
+if [[ ! -d "$llvm_bin" ]]; then
+  echo "NDK LLVM bin directory not found: $llvm_bin" >&2
+  exit 1
+fi
 
 mkdir -p "$downloads" "$work" "$output"
 archive_path="$downloads/$openssl_archive"
@@ -39,7 +67,9 @@ build_abi() {
   (
     cd "$source"
     export ANDROID_NDK_ROOT="$ndk"
+    export PATH="$llvm_bin:$PATH"
     ./Configure "$openssl_target" no-shared no-tests no-apps no-module \
+      -D__ANDROID_API__="$android_api" \
       --prefix="$prefix" --openssldir=/etc/ssl
     make -j"$jobs"
     make install_sw
@@ -49,7 +79,7 @@ build_abi() {
     -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_TESTING=OFF \
     -DANDROID_ABI="$abi" \
-    -DANDROID_PLATFORM=android-24 \
+    -DANDROID_PLATFORM="android-${android_api}" \
     -DANDROID_STL=c++_static \
     -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
     -DOPENSSL_ROOT_DIR="$prefix" \

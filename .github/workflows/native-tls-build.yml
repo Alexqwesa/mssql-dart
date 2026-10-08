@@ -27,12 +27,22 @@ jobs:
       - name: Install Linux native dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y cmake ninja-build libssl-dev
-      - name: Install Windows native dependencies
+      - name: Install Windows OpenSSL (vcpkg)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          choco install openssl --no-progress --yes
-          'OPENSSL_ROOT_DIR=C:\Program Files\OpenSSL-Win64' >> $env:GITHUB_ENV
+          # Chocolatey OpenSSL layouts vary and often break FindOpenSSL on
+          # current CMake; the runner's vcpkg install is stable.
+          vcpkg install openssl:x64-windows-static-md
+          $prefix = Join-Path $env:VCPKG_INSTALLATION_ROOT 'installed\x64-windows-static-md'
+          if (-not (Test-Path (Join-Path $prefix 'include\openssl\ssl.h'))) {
+            throw "OpenSSL headers missing under $prefix"
+          }
+          # Forward slashes avoid quoting issues when the next step uses bash.
+          $prefixUnix = $prefix -replace '\\', '/'
+          "OPENSSL_ROOT_DIR=$prefixUnix" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "CMAKE_PREFIX_PATH=$prefixUnix" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "OPENSSL_ROOT_DIR=$prefixUnix"
       - uses: ilammy/msvc-dev-cmd@v1
         if: runner.os == 'Windows'
         with: { arch: x64 }
@@ -41,7 +51,8 @@ jobs:
         run: |
           cmake -S native -B build/native -G Ninja -DBUILD_TESTING=ON \
             -DCMAKE_BUILD_TYPE=Release \
-            -DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR"
+            ${OPENSSL_ROOT_DIR:+-DOPENSSL_ROOT_DIR="$OPENSSL_ROOT_DIR"} \
+            ${CMAKE_PREFIX_PATH:+-DCMAKE_PREFIX_PATH="$CMAKE_PREFIX_PATH"}
           cmake --build build/native --config Release
           ctest --test-dir build/native --output-on-failure
       - name: Stage Windows native asset
