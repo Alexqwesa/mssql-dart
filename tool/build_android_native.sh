@@ -75,6 +75,18 @@ build_abi() {
     make install_sw
   )
 
+  local openssl_include="$prefix/include"
+  local openssl_crypto="$prefix/lib/libcrypto.a"
+  local openssl_ssl="$prefix/lib/libssl.a"
+  if [[ ! -f "$openssl_include/openssl/ssl.h" || ! -f "$openssl_crypto" || ! -f "$openssl_ssl" ]]; then
+    echo "OpenSSL install incomplete under $prefix:" >&2
+    find "$prefix" -maxdepth 3 \( -name '*.a' -o -name 'ssl.h' \) -print >&2 || true
+    exit 1
+  fi
+
+  # NDK toolchain sets FIND_ROOT_PATH_MODE_*=ONLY, so FindOpenSSL ignores a
+  # host-side OPENSSL_ROOT_DIR unless we pass absolute library/include paths
+  # (or widen the find modes).
   cmake -S "$root/native" -B "$cmake_build" -G Ninja \
     -DCMAKE_BUILD_TYPE=Release \
     -DBUILD_TESTING=OFF \
@@ -82,7 +94,13 @@ build_abi() {
     -DANDROID_PLATFORM="android-${android_api}" \
     -DANDROID_STL=c++_static \
     -DCMAKE_TOOLCHAIN_FILE="$ndk/build/cmake/android.toolchain.cmake" \
+    -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=BOTH \
+    -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=BOTH \
+    -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=BOTH \
     -DOPENSSL_ROOT_DIR="$prefix" \
+    -DOPENSSL_INCLUDE_DIR="$openssl_include" \
+    -DOPENSSL_CRYPTO_LIBRARY="$openssl_crypto" \
+    -DOPENSSL_SSL_LIBRARY="$openssl_ssl" \
     -DOPENSSL_USE_STATIC_LIBS=TRUE
   cmake --build "$cmake_build"
   mkdir -p "$output/$abi"
