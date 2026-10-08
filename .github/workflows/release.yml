@@ -1,0 +1,117 @@
+# Manual release: build native helpers, commit SHA-256 pins if needed, push
+# vX.Y.Z tag. The tag run of CI / Publish then verifies pins, attaches Release
+# zips, and publishes to pub.dev (Environment approval).
+#
+# This file must also exist on the default branch (main) so `gh workflow run`
+# / the Actions UI can find it. Always start the run from your release branch:
+#   gh workflow run release.yml --ref mssql_driver_with_native_tls
+#   Actions → Release → Run workflow → "Use workflow from" → that branch
+name: Release
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  native-build:
+    uses: ./.github/workflows/native-tls-build.yml
+
+  pin-and-tag:
+    name: Pin and tag
+    needs: native-build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Same branch as "Use workflow from" / gh --ref.
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: dart-lang/setup-dart@v1
+        with: { sdk: stable }
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mssql-tls-*
+          path: native-assets
+
+      - name: Read package version
+        id: version
+        run: |
+          set -euo pipefail
+          echo "Releasing from branch ${GITHUB_REF_NAME} @ $(git rev-parse --short HEAD)"
+          VERSION=$(sed -nE 's/^version:[[:space:]]*([^[:space:]]+).*/\1/p' pubspec.yaml | head -1)
+          if [[ -z "$VERSION" || "$VERSION" == *-dev* || "$VERSION" == *+* ]]; then
+            echo "Refusing to release version '$VERSION' (need a plain X.Y.Z in pubspec.yaml)"
+            exit 1
+          fi
+          TAG="v${VERSION}"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Package version $VERSION → tag $TAG"
+
+      - name: Refuse if tag already exists
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if git ls-remote --exit-code --tags origin "refs/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists on origin. Bump pubspec.yaml for a new release."
+            exit 1
+          fi
+
+      - run: dart pub get
+
+      - name: Generate pins from this run's artifacts
+        run: |
+          dart run tool/update_native_tls_pins.dart \
+            --from-dir native-assets \
+            --require-all \
+            --tag "${{ steps.version.outputs.tag }}"
+
+      - name: Commit pins if needed
+        id: pins
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          DEST=lib/src/native_tls/native_tls_pins.dart
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          if git diff --quiet -- "$DEST"; then
+            echo "Pins already match artifacts for ${TAG}"
+            echo "committed=false" >> "$GITHUB_OUTPUT"
+          else
+            git add "$DEST"
+            git commit -m "ci: pin native TLS SHA-256 for ${TAG}"
+            echo "committed=true" >> "$GITHUB_OUTPUT"
+          fi
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          SHA: ${{ steps.pins.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git tag -a "$TAG" -m "Release $TAG" "$SHA"
+          git push origin "refs/tags/${TAG}"
+          echo "Pushed ${TAG} → ${SHA}"
+
+      - name: Trigger CI / Publish on the new tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          # Tag pushes authenticated as GITHUB_TOKEN do not start other
+          # workflows; dispatch CI / Publish explicitly on the tag ref.
+          gh workflow run publish.yml --ref "$TAG"
+          echo "Started CI / Publish for $TAG"
