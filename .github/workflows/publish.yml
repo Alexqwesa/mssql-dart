@@ -31,6 +31,8 @@ jobs:
         with:
           pattern: mssql-tls-*
           path: native-assets
+      - name: Stage artifacts for dart build hooks
+        run: bash tool/stage_ci_native_tls.sh native-assets
       - run: dart pub get
       - name: Propose pins from CI artifacts
         run: |

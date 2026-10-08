@@ -67,6 +67,9 @@ jobs:
             exit 1
           fi
 
+      - name: Stage artifacts for dart build hooks
+        run: bash tool/stage_ci_native_tls.sh native-assets
+
       - run: dart pub get
 
       - name: Generate pins from this run's artifacts
