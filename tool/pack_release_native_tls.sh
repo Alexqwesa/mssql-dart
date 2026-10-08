@@ -8,6 +8,11 @@ from="${1:-$root/native-assets}"
 out="${2:-$root/release-binaries}"
 
 mkdir -p "$out"
+# zip runs after cd into each asset dir. A relative output path would be
+# resolved there (native-assets/mssql-tls-android/release-binaries/...),
+# which does not exist, so zip exits 15.
+out="$(cd "$out" && pwd)"
+
 for asset in "$from"/*; do
   [[ -d "$asset" ]] || continue
   name="$(basename "$asset")"
