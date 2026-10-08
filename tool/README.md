@@ -53,9 +53,12 @@ Prebuilt Windows / Linux / Android libraries are also produced by GitHub
 Actions on `main` and `mssql_native` — see the README *Native TLS helper* section.
 
 Published consumers normally get those helpers via `hook/build.dart` (download
-from the GitHub Release for the package version). Local `native/bin/` /
-`dist/android/` builds are preferred when present, which is what these scripts
-produce for development and CI.
+from the GitHub Release for the package version). Downloads are checked against
+in-repo SHA-256 pins. Release pinning and publish steps are in
+[DEV_README.md](../DEV_README.md).
+
+Local `native/bin/` / `dist/android/` builds are preferred when present, which
+is what these scripts produce for development and CI.
 
 ## `full_tests.ps1` / `full_tests.sh`
 

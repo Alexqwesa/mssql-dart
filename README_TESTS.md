@@ -1,5 +1,7 @@
 # Testing mssql_driver_with_native_tls
 
+Maintainer index (builds, release, pins): [DEV_README.md](DEV_README.md).
+
 See [`test/README.md`](test/README.md) for the coverage map organized by test
 category and for the external-infrastructure scenarios outside the Docker
 matrix.

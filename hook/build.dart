@@ -7,6 +7,7 @@ import 'package:crypto/crypto.dart';
 import 'package:hooks/hooks.dart';
 import 'package:http/http.dart' as http;
 import 'package:mssql_driver_with_native_tls/src/native_tls/native_tls_asset.dart';
+import 'package:mssql_driver_with_native_tls/src/native_tls/native_tls_pins.dart';
 import 'package:mssql_driver_with_native_tls/src/native_tls/native_tls_release.dart';
 
 Future<void> main(List<String> args) async {
@@ -41,6 +42,8 @@ Future<void> main(List<String> args) async {
       output: output,
       asset: asset,
       releaseTag: releaseTag,
+      operatingSystem: code.targetOS.name,
+      architecture: code.targetArchitecture.name,
       localOnly: localOnly,
       forceDownload: forceDownload,
     );
@@ -76,11 +79,45 @@ String _packageVersion(Uri packageRoot) {
   return match.group(1)!;
 }
 
+String _requirePin({
+  required String releaseTag,
+  required String operatingSystem,
+  required String architecture,
+}) {
+  final pin = nativeTlsPinnedDigest(
+    releaseTag: releaseTag,
+    operatingSystem: operatingSystem,
+    architecture: architecture,
+  );
+  if (pin != null && pin.isNotEmpty) return pin;
+
+  final key = nativeTlsPinKey(
+    operatingSystem: operatingSystem,
+    architecture: architecture,
+  );
+  if (releaseTag != nativeTlsPinnedReleaseTag) {
+    throw StateError(
+      'No in-repo SHA-256 pin for release $releaseTag ($key). '
+      'Pinned tag is $nativeTlsPinnedReleaseTag. Either use that tag, or run '
+      '`dart run tool/update_native_tls_pins.dart --tag $releaseTag` and '
+      'commit lib/src/native_tls/native_tls_pins.dart.',
+    );
+  }
+  throw StateError(
+    'No in-repo SHA-256 pin for $key at $releaseTag. '
+    'Add it with `dart run tool/update_native_tls_pins.dart` '
+    '(preferably from the CI/Release artifacts) and commit '
+    'lib/src/native_tls/native_tls_pins.dart before publishing.',
+  );
+}
+
 Future<File> _resolveLibrary({
   required BuildInput input,
   required BuildOutputBuilder output,
   required NativeTlsReleaseAsset asset,
   required String releaseTag,
+  required String operatingSystem,
+  required String architecture,
   required bool localOnly,
   required bool forceDownload,
 }) async {
@@ -91,33 +128,35 @@ Future<File> _resolveLibrary({
         );
   if (!forceDownload && packageLocal != null && await packageLocal.exists()) {
     output.dependencies.add(packageLocal.uri);
+    // Dev/CI local builds skip the release pin so iteration is not blocked.
+    // Downloaded helpers always require an in-repo pin.
     return packageLocal;
   }
 
+  final pinnedSha256 = _requirePin(
+    releaseTag: releaseTag,
+    operatingSystem: operatingSystem,
+    architecture: architecture,
+  );
+
   final cacheDir = Directory.fromUri(
     input.outputDirectoryShared.resolve(
-      'mssql_tls/$releaseTag/'
-      '${input.config.code.targetOS.name}-'
-      '${input.config.code.targetArchitecture.name}/',
+      'mssql_tls/$releaseTag/$operatingSystem-$architecture/',
     ),
   );
   await cacheDir.create(recursive: true);
   final cachedLibrary = File.fromUri(
     cacheDir.uri.resolve(asset.libraryFileName),
   );
-  final cachedSums = File.fromUri(cacheDir.uri.resolve('SHA256SUMS'));
-  if (!forceDownload &&
-      await cachedLibrary.exists() &&
-      await cachedSums.exists()) {
-    await _verifySha256(cachedLibrary, cachedSums, asset.libraryFileName);
+  if (!forceDownload && await cachedLibrary.exists()) {
+    await _verifyPinnedSha256(cachedLibrary, pinnedSha256);
     return cachedLibrary;
   }
 
   if (localOnly) {
     throw StateError(
       'Native TLS helper not found locally for '
-      '${input.config.code.targetOS.name}/'
-      '${input.config.code.targetArchitecture.name}. '
+      '$operatingSystem/$architecture. '
       'Build it with tool/build_native.sh (or the Android script), or unset '
       'hooks.user_defines.mssql_driver_with_native_tls.local_only to download a release.',
     );
@@ -144,10 +183,26 @@ Future<File> _resolveLibrary({
     archive,
     _sumsPathFor(asset.libraryPathInZip),
   );
+  final sumsDigest = sha256FromSums(
+    String.fromCharCodes(sumsBytes),
+    asset.libraryFileName,
+  );
+  if (sumsDigest == null) {
+    throw StateError(
+      'Release zip $uri is missing SHA256SUMS entry for '
+      '${asset.libraryFileName}.',
+    );
+  }
+  if (sumsDigest != pinnedSha256) {
+    throw StateError(
+      'Release zip SHA256SUMS for ${asset.libraryFileName} ($sumsDigest) '
+      'does not match the in-repo pin ($pinnedSha256) for $releaseTag. '
+      'Refusing to install. Update pins only from trusted CI artifacts.',
+    );
+  }
 
   await cachedLibrary.writeAsBytes(libraryBytes, flush: true);
-  await cachedSums.writeAsBytes(sumsBytes, flush: true);
-  await _verifySha256(cachedLibrary, cachedSums, asset.libraryFileName);
+  await _verifyPinnedSha256(cachedLibrary, pinnedSha256);
   return cachedLibrary;
 }
 
@@ -169,25 +224,12 @@ Uint8List _archiveFileBytes(Archive archive, String path) {
   throw StateError('Zip is missing required member "$path".');
 }
 
-Future<void> _verifySha256(
-  File library,
-  File sumsFile,
-  String libraryFileName,
-) async {
-  final expected = sha256FromSums(
-    await sumsFile.readAsString(),
-    libraryFileName,
-  );
-  if (expected == null) {
-    throw StateError(
-      'SHA256SUMS does not list $libraryFileName (${sumsFile.path}).',
-    );
-  }
+Future<void> _verifyPinnedSha256(File library, String expected) async {
   final actual = sha256.convert(await library.readAsBytes()).toString();
   if (actual != expected) {
     throw StateError(
       'Native TLS helper hash mismatch for ${library.path}: '
-      'expected $expected, got $actual.',
+      'expected pinned $expected, got $actual.',
     );
   }
 }

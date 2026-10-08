@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.5.3
+
+* TLS: pin GitHub Release helper SHA-256 digests in
+  `lib/src/native_tls/native_tls_pins.dart`. `hook/build.dart` rejects
+  downloads that do not match the in-repo pin and the zip `SHA256SUMS`.
+  Refresh pins with `dart run tool/update_native_tls_pins.dart`
+  (`--from-dir`, `--check`, `--require-all`).
+* CI: manual **Release** workflow builds helpers, commits SHA-256 pins when
+  needed, and pushes `vX.Y.Z`; tag runs of **CI / Publish** verify pins,
+  attach Release zips, and publish to pub.dev after Environment approval.
+* Docs: maintainer notes in `DEV_README.md`.
+
 ## 0.5.2
 
 * Package: publish as `mssql_driver_with_native_tls`

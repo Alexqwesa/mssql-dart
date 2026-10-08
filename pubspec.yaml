@@ -2,7 +2,7 @@ name: mssql_driver_with_native_tls
 description: >-
   Dart TDS 7.4 Microsoft SQL Server driver with pooling, transactions,
   Bulk Load, NTLM/Azure AD, and a small native OpenSSL TLS helper.
-version: 0.5.2
+version: 0.5.3
 homepage: https://github.com/Alexqwesa/mssql-dart
 repository: https://github.com/Alexqwesa/mssql-dart
 issue_tracker: https://github.com/Alexqwesa/mssql-dart/issues

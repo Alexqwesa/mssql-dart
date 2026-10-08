@@ -27,8 +27,11 @@ local CMake/OpenSSL install are required on supported targets:
 | Android `arm64` / `arm` / `x64` | `mssql-tls-android.zip` |
 
 Override the helper path with `MSSQL_TLS_LIBRARY` when needed. For offline
-or git checkouts before a release exists, build locally
-(`bash tool/build_native.sh`) — the hook prefers `native/bin/...` when present.
+builds, local helpers, testing, and releasing, see [DEV_README.md](DEV_README.md).
+
+Security of downloaded native assets is protected by in-repo SHA-256 pins
+(`lib/src/native_tls/native_tls_pins.dart`) plus each release zip’s
+`SHA256SUMS`; the build hook refuses mismatched helpers.
 
 ### From git (`mssql_native`)
 
@@ -793,7 +796,7 @@ exist on `MssqlPoolConfig` / `MssqlPoolConfig.fromConnectionString`.
 - Azure SQL Database / Azure SQL Edge
 - Port 1433 (or custom) reachable from the Dart process
 - For `encrypt: true`: network access on first build so `hook/build.dart` can
-  download the platform helper (or a local build — see below)
+  download the platform helper (or a local build — see [DEV_README.md](DEV_README.md))
 
 ---
 
@@ -801,79 +804,16 @@ exist on `MssqlPoolConfig` / `MssqlPoolConfig.fromConnectionString`.
 
 TLS uses a small OpenSSL-backed shared library. Published package versions
 download it automatically via the Dart build hook from the matching GitHub
-Release zip. Resolution order at runtime:
+Release zip. Security of those downloads is protected by in-repo SHA-256 pins
+and each zip’s `SHA256SUMS`.
 
-1. `MSSQL_TLS_LIBRARY` environment override
-2. Code asset from `hook/build.dart` (`DynamicLibrary.codeAsset`)
-3. Platform linker name (Android `jniLibs`, or process search path)
-4. Checked-out `native/bin/<platform>/` next to the working directory (dev/CI)
-
-| Platform | Library | Hook source |
+| Platform | Library | Release asset |
 | --- | --- | --- |
-| Windows x64 | `mssql_tls.dll` | Release `mssql-tls-windows-x64.zip`, or `native/bin/windows-x64/` |
-| Linux x64 | `libmssql_tls.so` | Release `mssql-tls-linux-x64.zip`, or `native/bin/linux-x64/` |
-| Android | `libmssql_tls.so` | Release `mssql-tls-android.zip` per ABI, or `dist/android/<abi>/` |
+| Windows x64 | `mssql_tls.dll` | `mssql-tls-windows-x64.zip` |
+| Linux x64 | `libmssql_tls.so` | `mssql-tls-linux-x64.zip` |
+| Android | `libmssql_tls.so` | `mssql-tls-android.zip` (per ABI) |
 
-### Prebuilt artifacts
-
-Every push to `main` / `mssql_native` (and every tag) builds the helpers in
-[CI / Publish](https://github.com/Alexqwesa/mssql-dart/actions/workflows/publish.yml).
-Tagged builds attach ZIPs (with `SHA256SUMS`) to
-[GitHub Releases](https://github.com/Alexqwesa/mssql-dart/releases) — that is
-what the hook downloads. Actions artifacts remain available for manual use.
-
-### Build locally
-
-#### Windows — `tool/build_native.ps1`
-
-Dependencies:
-
-- Visual Studio 2022 with the C++ desktop workload (needs `VsDevCmd.bat`)
-- [CMake](https://cmake.org/) ≥ 3.24
-- [Ninja](https://ninja-build.org/)
-- OpenSSL (e.g. `choco install openssl`, or any install CMake can find via
-  `OPENSSL_ROOT_DIR`)
-
-```powershell
-# optional if OpenSSL is not on the default path:
-# $env:OPENSSL_ROOT_DIR = 'C:\Program Files\OpenSSL-Win64'
-.\tool\build_native.ps1
-```
-
-This configures, builds, runs the C++ TLS tests, and copies
-`mssql_tls.dll` to `native/bin/windows-x64/`.
-
-#### Linux
-
-Dependencies: a C++17 toolchain, CMake ≥ 3.24, Ninja, and OpenSSL headers
-(`libssl-dev` on Debian/Ubuntu).
-
-```bash
-cmake -S native -B build/native -G Ninja -DBUILD_TESTING=ON -DCMAKE_BUILD_TYPE=Release
-cmake --build build/native
-ctest --test-dir build/native --output-on-failure
-mkdir -p native/bin/linux-x64
-cp build/native/libmssql_tls.so native/bin/linux-x64/
-```
-
-#### Android
-
-Dependencies: Android NDK r27 (or compatible), CMake, Ninja, Perl, Make, curl.
-The script downloads pinned OpenSSL and statically links it:
-
-```bash
-export ANDROID_NDK_HOME=/path/to/android-ndk
-bash tool/build_android_native.sh
-```
-
-Outputs land in `dist/android/<abi>/`.
-
----
-
-## Testing
-
-See [README_TESTS.md](README_TESTS.md) for offline, native TLS, Docker matrix,
-and opt-in live SQL Server testing instructions.
+Local builds, CI artifacts, testing, and releasing: [DEV_README.md](DEV_README.md).
 
 ## Limitations
 
