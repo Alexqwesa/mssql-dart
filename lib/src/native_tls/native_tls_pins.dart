@@ -7,22 +7,22 @@
 // tagging that release.
 
 /// Release tag whose helpers are pinned below (`v` + `pubspec` version).
-const String nativeTlsPinnedReleaseTag = 'v0.5.4';
+const String nativeTlsPinnedReleaseTag = 'v0.5.5';
 
 /// Map of `<os>/<arch>` → lowercase hex SHA-256 of the dynamic library.
 ///
 /// Keys match [nativeTlsPinKey].
 const Map<String, String> nativeTlsPinnedSha256 = {
   'android/arm':
-      '0e5e289610a1e07e3479a7f83c20e4968d3c8615a98d968497bedcacf0eb7dd4',
+      '51c2ee3bf88799143ecb2faf02f972eca7a830a209a4f970a2b619368cbe4c09',
   'android/arm64':
-      '58ff7f3c40bab16387179b41f82470fb263898d037524d4bfe7a08c94305f640',
+      'a9b5498eb716afac147aff59214d90e49ec6cf5c8e6662b1cbc154483bebeb02',
   'android/x64':
-      'f4436b829ce2fb6034722c95986ee19877e522cd43f6f77379f13713111f471c',
+      'beff68270388aaec846dde7263c76ccc2ecf02dbc28fa2bb97897003358328ad',
   'linux/x64':
       '6d529a6ab5b06841def0f0d336e243c31917a7705c25f5a44c4586149eb87e46',
   'windows/x64':
-      '4057b5d2455b0894295170b69e6904ba81c8a8fd401cc175f84273d0871d8cf9',
+      '2d934723ef9a35baf5d5579446a1196a1b598dfebd68b88fc9d6422dbf531949',
 };
 
 /// Stable pin map key for a native-assets target.
