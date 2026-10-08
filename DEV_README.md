@@ -115,7 +115,14 @@ what the consumer hook downloads.
 
 3. **CI / Publish on the tag**  
    Verifies every platform hash against the committed pins, attaches Release
-   zips, runs tests, then waits on the `pub.dev` Environment.
+   zips, creates Sigstore **artifact attestations** for each zip and each
+   native library, runs tests, then waits on the `pub.dev` Environment.
+
+   Verify a downloaded asset (example):
+
+   ```bash
+   gh attestation verify mssql-tls-linux-x64.zip --owner Alexqwesa
+   ```
 
 4. **Approve publication**  
    Approve the `pub.dev` Environment deployment when ready.

@@ -67,21 +67,56 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/download-artifact@v4
         with:
           pattern: mssql-tls-*
           path: native-assets
+      - name: Pack release zips
+        run: |
+          set -euo pipefail
+          mkdir -p release-binaries
+          for asset in native-assets/*; do
+            name="$(basename "$asset")"
+            (cd "$asset" && zip -r "$GITHUB_WORKSPACE/release-binaries/${name}.zip" .)
+            # Flatten libraries for per-binary attestations (same bytes as zip members).
+            case "$name" in
+              mssql-tls-linux-x64)
+                cp "$asset/libmssql_tls.so" release-binaries/linux-x64-libmssql_tls.so
+                ;;
+              mssql-tls-windows-x64)
+                cp "$asset/mssql_tls.dll" release-binaries/windows-x64-mssql_tls.dll
+                ;;
+              mssql-tls-android)
+                cp "$asset/arm64-v8a/libmssql_tls.so" \
+                  release-binaries/android-arm64-v8a-libmssql_tls.so
+                cp "$asset/armeabi-v7a/libmssql_tls.so" \
+                  release-binaries/android-armeabi-v7a-libmssql_tls.so
+                cp "$asset/x86_64/libmssql_tls.so" \
+                  release-binaries/android-x86_64-libmssql_tls.so
+                ;;
+            esac
+          done
+          ls -la release-binaries
+      - name: Attest release zips and binaries
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            release-binaries/*.zip
+            release-binaries/linux-x64-libmssql_tls.so
+            release-binaries/windows-x64-mssql_tls.dll
+            release-binaries/android-arm64-v8a-libmssql_tls.so
+            release-binaries/android-armeabi-v7a-libmssql_tls.so
+            release-binaries/android-x86_64-libmssql_tls.so
       - name: Create or update release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 || \
             gh release create "$GITHUB_REF_NAME" --generate-notes
-          for asset in native-assets/*; do
-            (cd "$asset" && zip -r "../$(basename "$asset").zip" .)
-          done
-          gh release upload "$GITHUB_REF_NAME" native-assets/*.zip --clobber
+          gh release upload "$GITHUB_REF_NAME" release-binaries/*.zip --clobber
 
   # ════════════════════════════════════════════════════════════════════════════
   # 1 · Static analysis

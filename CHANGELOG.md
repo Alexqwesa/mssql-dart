@@ -9,7 +9,8 @@
   (`--from-dir`, `--check`, `--require-all`).
 * CI: manual **Release** workflow builds helpers, commits SHA-256 pins when
   needed, and pushes `vX.Y.Z`; tag runs of **CI / Publish** verify pins,
-  attach Release zips, and publish to pub.dev after Environment approval.
+  attach Release zips, attest each zip and native library (Sigstore /
+  `actions/attest`), and publish to pub.dev after Environment approval.
 * Docs: maintainer notes in `DEV_README.md`.
 
 ## 0.5.2

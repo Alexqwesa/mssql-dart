@@ -30,8 +30,9 @@ Override the helper path with `MSSQL_TLS_LIBRARY` when needed. For offline
 builds, local helpers, testing, and releasing, see [DEV_README.md](DEV_README.md).
 
 Security of downloaded native assets is protected by in-repo SHA-256 pins
-(`lib/src/native_tls/native_tls_pins.dart`) plus each release zip’s
-`SHA256SUMS`; the build hook refuses mismatched helpers.
+(`lib/src/native_tls/native_tls_pins.dart`), each release zip’s `SHA256SUMS`,
+and GitHub artifact attestations on every release binary; the build hook
+refuses mismatched helpers.
 
 ### From git (`mssql_native`)
 
