@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:crypto/crypto.dart';
-import 'package:mssql_native/mssql_native.dart';
-import 'package:mssql_native/src/auth/md4.dart';
+import 'package:mssql_driver_with_native_tls/mssql_driver_with_native_tls.dart';
+import 'package:mssql_driver_with_native_tls/src/auth/md4.dart';
 import 'package:test/test.dart';
 
 /// NTLM Type 1/2/3 tests with curl/davenport / [MS-NLMP] golden vectors.

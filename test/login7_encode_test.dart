@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:typed_data';
 
-import 'package:mssql_native/src/tds/buf.dart';
-import 'package:mssql_native/src/tds/constants.dart';
-import 'package:mssql_native/src/tds/login7.dart';
+import 'package:mssql_driver_with_native_tls/src/tds/buf.dart';
+import 'package:mssql_driver_with_native_tls/src/tds/constants.dart';
+import 'package:mssql_driver_with_native_tls/src/tds/login7.dart';
 import 'package:test/test.dart';
 
 import 'helpers/tds_socket.dart';

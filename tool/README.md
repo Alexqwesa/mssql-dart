@@ -1,6 +1,6 @@
 # Development tools
 
-This directory contains developer-only utilities for the `mssql_native` driver. These
+This directory contains developer-only utilities for the `mssql_driver_with_native_tls` driver. These
 programs are not part of the public package API and are not intended to be
 imported by applications.
 

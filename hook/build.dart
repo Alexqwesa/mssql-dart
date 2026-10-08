@@ -6,8 +6,8 @@ import 'package:code_assets/code_assets.dart';
 import 'package:crypto/crypto.dart';
 import 'package:hooks/hooks.dart';
 import 'package:http/http.dart' as http;
-import 'package:mssql_native/src/native_tls/native_tls_asset.dart';
-import 'package:mssql_native/src/native_tls/native_tls_release.dart';
+import 'package:mssql_driver_with_native_tls/src/native_tls/native_tls_asset.dart';
+import 'package:mssql_driver_with_native_tls/src/native_tls/native_tls_release.dart';
 
 Future<void> main(List<String> args) async {
   await build(args, (input, output) async {
@@ -16,7 +16,7 @@ Future<void> main(List<String> args) async {
     final code = input.config.code;
     if (code.linkModePreference == LinkModePreference.static) {
       throw UnsupportedError(
-        'mssql_native TLS helper only supports dynamic loading.',
+        'mssql_driver_with_native_tls TLS helper only supports dynamic loading.',
       );
     }
 
@@ -119,7 +119,7 @@ Future<File> _resolveLibrary({
       '${input.config.code.targetOS.name}/'
       '${input.config.code.targetArchitecture.name}. '
       'Build it with tool/build_native.sh (or the Android script), or unset '
-      'hooks.user_defines.mssql_native.local_only to download a release.',
+      'hooks.user_defines.mssql_driver_with_native_tls.local_only to download a release.',
     );
   }
 

@@ -2,7 +2,7 @@ import 'live_test_config.dart';
 import 'live_test_gate.dart';
 import 'dart:async';
 
-import 'package:mssql_native/mssql_native.dart';
+import 'package:mssql_driver_with_native_tls/mssql_driver_with_native_tls.dart';
 import 'package:test/test.dart';
 
 /// Live SQL Server tests for Attention cancel and large multi-packet results.

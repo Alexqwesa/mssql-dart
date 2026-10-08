@@ -1,4 +1,4 @@
-import 'package:mssql_native/src/native_tls/native_tls_release.dart';
+import 'package:mssql_driver_with_native_tls/src/native_tls/native_tls_release.dart';
 import 'package:test/test.dart';
 
 void main() {

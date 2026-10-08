@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:mssql_native/mssql_native.dart';
+import 'package:mssql_driver_with_native_tls/mssql_driver_with_native_tls.dart';
 
 /// Same packet-splitting behaviour, but over cleartext TCP: isolates whether
 /// SQL Server rejects small non-final TDS packets or only the TLS framing.

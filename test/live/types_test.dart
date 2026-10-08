@@ -1,7 +1,7 @@
 import 'live_test_gate.dart';
 import 'live_test_config.dart';
 import 'package:test/test.dart';
-import 'package:mssql_native/mssql_native.dart';
+import 'package:mssql_driver_with_native_tls/mssql_driver_with_native_tls.dart';
 
 // Runs against the dart-mssql Docker container on port 14330.
 // Start with:

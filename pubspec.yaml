@@ -1,4 +1,4 @@
-name: mssql_native
+name: mssql_driver_with_native_tls
 description: >-
   Dart TDS 7.4 Microsoft SQL Server driver with pooling, transactions,
   Bulk Load, NTLM/Azure AD, and a small native OpenSSL TLS helper.

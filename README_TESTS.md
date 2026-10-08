@@ -1,4 +1,4 @@
-# Testing mssql_native
+# Testing mssql_driver_with_native_tls
 
 See [`test/README.md`](test/README.md) for the coverage map organized by test
 category and for the external-infrastructure scenarios outside the Docker

@@ -1,5 +1,5 @@
-import 'package:mssql_native/src/native_tls/native_tls_asset.dart';
-import 'package:mssql_native/src/native_tls/native_tls_loader.dart';
+import 'package:mssql_driver_with_native_tls/src/native_tls/native_tls_asset.dart';
+import 'package:mssql_driver_with_native_tls/src/native_tls/native_tls_loader.dart';
 import 'package:test/test.dart';
 
 void main() {
@@ -7,7 +7,7 @@ void main() {
     test('uses a stable code-asset id', () {
       expect(
         nativeTlsAssetId,
-        'package:mssql_native/src/native_tls/native_tls_loader.dart',
+        'package:mssql_driver_with_native_tls/src/native_tls/native_tls_loader.dart',
       );
     });
 

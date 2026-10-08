@@ -2,7 +2,8 @@
 
 ## 0.5.2
 
-* Package: rename to `mssql_native` (import `package:mssql_native/mssql_native.dart`).
+* Package: publish as `mssql_driver_with_native_tls`
+  (`package:mssql_driver_with_native_tls/mssql_driver_with_native_tls.dart`).
 * TLS: add `hook/build.dart` to download prebuilt OpenSSL helpers from GitHub
   Releases (linux/windows x64, Android ABIs) and load them via
   `DynamicLibrary.codeAsset`. Manual `native/bin` copies are no longer required
@@ -20,11 +21,11 @@
 * Tests: port offline fault injection, protocol/connection fuzzing, live
   fault injection, pooled session isolation, and sustained load coverage
   from `main`, plus three pooled isolation cases in `session_db_live_test`.
-* Docs: document git install for `ref: mssql_native`, prebuilt native TLS
+* Docs: document git install for branch `mssql_native`, prebuilt native TLS
   artifacts from Actions, package comparison guidance, and local
   `tool/build_native.ps1` / Linux / Android build dependencies.
 * CI: build and upload Windows, Linux, and Android native TLS artifacts on
-  pushes to `mssql_native` (in addition to `main` and tags).
+  pushes to branch `mssql_native` (in addition to `main` and tags).
 
 ## 0.5.1
 

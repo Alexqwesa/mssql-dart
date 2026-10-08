@@ -2,8 +2,8 @@ import 'dart:collection';
 import 'dart:typed_data';
 
 import 'package:async/async.dart';
-import 'package:mssql_native/src/native_tls/native_tls_engine.dart';
-import 'package:mssql_native/src/native_tls/native_tls_transport.dart';
+import 'package:mssql_driver_with_native_tls/src/native_tls/native_tls_engine.dart';
+import 'package:mssql_driver_with_native_tls/src/native_tls/native_tls_transport.dart';
 import 'package:test/test.dart';
 
 import 'helpers/tds_socket.dart';

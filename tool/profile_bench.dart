@@ -13,7 +13,7 @@
 import 'dart:developer';
 import 'dart:io';
 
-import 'package:mssql_native/mssql_native.dart';
+import 'package:mssql_driver_with_native_tls/mssql_driver_with_native_tls.dart';
 
 // Connection details from environment variables. Defaults target the standard
 // local dev container; override for other environments:

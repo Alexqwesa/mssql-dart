@@ -1,4 +1,4 @@
-# mssql_native
+# mssql_driver_with_native_tls
 
 A Dart-first driver for Microsoft SQL Server, built on the TDS 7.4 wire
 protocol. SQL Server protocol handling, authentication, queries, pooling,
@@ -11,7 +11,7 @@ requests, Bulk Load, and Attention cancellation on a standard Dart SDK.
 Unencrypted connections continue to use only Dart and TCP.
 
 ```
-dart pub add mssql_native
+dart pub add mssql_driver_with_native_tls
 ```
 
 Cleartext (`encrypt: false`) needs nothing else. For TLS (`encrypt: true`),
@@ -37,7 +37,7 @@ Published pub.dev builds may lag this branch. Pin the branch in
 
 ```yaml
 dependencies:
-  mssql_native:
+  mssql_driver_with_native_tls:
     git:
       url: https://github.com/Alexqwesa/mssql-dart.git
       ref: mssql_native
@@ -52,7 +52,7 @@ Optional hook overrides in the **app** `pubspec.yaml`:
 ```yaml
 hooks:
   user_defines:
-    mssql_native:
+    mssql_driver_with_native_tls:
       release_tag: v0.5.2   # default: v + package version
       local_only: true      # never download; require native/bin or dist/android
       force_download: true  # ignore local native/bin and re-fetch
@@ -62,25 +62,26 @@ hooks:
 
 There are several Dart and Flutter packages for connecting to Microsoft SQL Server. They use different architectures and target different use cases.
 
-`mssql_native` is a TDS driver implemented primarily in Dart. SQL Server protocol handling, authentication, queries, pooling, transactions, type encoding/decoding, Bulk Load, and related functionality are implemented by the package itself. Native code is used only for the TLS transport.
+`mssql_driver_with_native_tls` is a TDS driver implemented primarily in Dart. SQL Server protocol handling, authentication, queries, pooling, transactions, type encoding/decoding, Bulk Load, and related functionality are implemented by the package itself. Native code is used only for the TLS transport.
 
 ### Architecture and platform comparison
 
 | Package | Architecture | SQL Server protocol | Native dependency | Platforms |
 | --- | --- | --- | --- | --- |
-| **`mssql_native`** | Dart TDS driver + native TLS | Implemented in Dart | Small OpenSSL TLS helper | Windows, Linux, Android |
+| **`mssql_driver_with_native_tls`** | Dart TDS driver + native TLS | Implemented in Dart | Small OpenSSL TLS helper | Windows, Linux, Android |
 | **`mssql` 0.6.x** | Pure-Dart TDS driver | Implemented in Dart | None in the package; encrypted connections currently require a patched Dart SDK | Platforms supported by the patched Dart runtime |
+| `mssql_native` (Aksoyhlc) | Flutter/Dart FFI around FreeTDS | FreeTDS | FreeTDS (bundled) | Windows, Linux, macOS, Android, iOS |
 | `mssql_connection` | Flutter/Dart FFI wrapper around FreeTDS | FreeTDS | FreeTDS | Windows, Linux, macOS, Android, iOS |
 | `mssql_io` | Flutter plugin around FreeTDS | FreeTDS | FreeTDS | Windows, Linux, macOS, Android, iOS; Web through a backend proxy |
 | `mssql_connect` | Flutter SQL Server plugin | Platform implementation | Platform-specific | Android, Windows |
 
-The main architectural difference is that `mssql_native` is not a Dart wrapper around FreeTDS. It implements the TDS protocol directly in Dart and uses a small native OpenSSL component only where the current Dart TLS API cannot provide the required encrypted-write semantics.
+The main architectural difference is that `mssql_driver_with_native_tls` is not a Dart wrapper around FreeTDS. It implements the TDS protocol directly in Dart and uses a small native OpenSSL component only where the current Dart TLS API cannot provide the required encrypted-write semantics.
 
 ### Feature comparison
 
 The table below compares publicly documented functionality. `Not documented` means that the feature is not part of the package's currently documented public API; it does not necessarily mean that the underlying native library is incapable of it.
 
-| Feature | **`mssql_native`** | `mssql_connection` | `mssql_io` | `mssql_connect` |
+| Feature | **`mssql_driver_with_native_tls`** | `mssql_connection` | `mssql_io` | `mssql_connect` |
 | --- | :---: | :---: | :---: | :---: |
 | Parameterized queries | ✅ | ✅ | ✅ | Not documented |
 | Transactions | ✅ | ✅ | ✅ | Not documented |
@@ -106,13 +107,13 @@ The table below compares publicly documented functionality. `Not documented` mea
 | SQL Server Change Tracking API | No dedicated API | Not documented | Not documented | ✅ |
 | Flutter required | No | Yes / Dart+Flutter package | Yes | Yes |
 | Can be used from Dart server/CLI code | ✅ | Package is also marked for Dart | Primarily Flutter | No |
-| Own TDS implementation | ✅ | FreeTDS | FreeTDS | Platform-specific |
+| Own TDS implementation | ✅ | ❌ FreeTDS | ❌ FreeTDS | Platform-specific |
 
-### `mssql_native` vs `mssql`
+### `mssql_driver_with_native_tls` vs `mssql`
 
 These two packages share the same TDS implementation and provide essentially the same high-level SQL Server API. The primary difference is encrypted transport.
 
-| | **`mssql_native`** | **`mssql` 0.6.x** |
+| | **`mssql_driver_with_native_tls`** | **`mssql` 0.6.x** |
 | --- | --- | --- |
 | Dart / Flutter SDK | Standard SDK | Patched Dart SDK currently required for encrypted connections |
 | TDS implementation | Dart | Dart |
@@ -123,24 +124,22 @@ These two packages share the same TDS implementation and provide essentially the
 | Bulk Load over TLS | Supported | Supported |
 | TLS TDS packet size | Up to 16,383 bytes | Currently up to 8,191 bytes |
 
-Use **`mssql_native`** when you need the complete driver on a standard Dart or Flutter SDK today.
+Use **`mssql_driver_with_native_tls`** when you need the complete driver on a standard Dart or Flutter SDK today.
 
 Use **`mssql` 0.6.x** when you specifically want the pure-Dart transport direction and can use the required Dart SDK patch.
 
 ### When another package may be a better choice
 
-`mssql_connection` is a good fit when you want broad native platform coverage and prefer using the mature FreeTDS implementation rather than a Dart implementation of TDS.
-
-`mssql_io` is similarly suitable for Flutter applications that already fit a FreeTDS-based architecture, particularly when iOS or macOS support is required.
+`mssql_connection` / `mssql_native` (Aksoyhlc) / `mssql_io` are a good fit when you want broad native platform coverage (including iOS/macOS) and prefer the mature FreeTDS implementation rather than a Dart implementation of TDS.
 
 `mssql_connect` may be useful for Flutter applications targeting its supported platforms, particularly applications that want its SQL Server Change Tracking functionality.
 
-`mssql_native` is intended for applications that want a Dart-native SQL Server API with direct control over TDS features, authentication, pooling, cancellation, Bulk Load, SQL Server-specific types, and connection behavior, while still working with an unmodified Dart SDK.
+`mssql_driver_with_native_tls` is intended for applications that want a Dart-native SQL Server API with direct control over TDS features, authentication, pooling, cancellation, Bulk Load, SQL Server-specific types, and connection behavior, while still working with an unmodified Dart SDK.
 
 ## Quick start
 
 ```dart
-import 'package:mssql_native/mssql_native.dart';
+import 'package:mssql_driver_with_native_tls/mssql_driver_with_native_tls.dart';
 
 final conn = await MssqlConnection.connect(
   host: 'localhost',
