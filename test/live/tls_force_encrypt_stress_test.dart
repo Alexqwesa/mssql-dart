@@ -3,7 +3,7 @@ library;
 
 import 'dart:io';
 
-import 'package:mssql/mssql.dart';
+import 'package:mssql_native/mssql_native.dart';
 import 'package:test/test.dart';
 
 import 'live_test_config.dart';

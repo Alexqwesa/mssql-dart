@@ -1,9 +1,9 @@
-name: mssql
+name: mssql_native
 description: A Microsoft SQL Server driver using the TDS 7.4 wire protocol and native OpenSSL TLS.
 version: 0.5.2
-homepage: https://github.com/kartikey321/mssql-dart
-repository: https://github.com/kartikey321/mssql-dart
-issue_tracker: https://github.com/kartikey321/mssql-dart/issues
+homepage: https://github.com/Alexqwesa/mssql-dart
+repository: https://github.com/Alexqwesa/mssql-dart
+issue_tracker: https://github.com/Alexqwesa/mssql-dart/issues
 
 environment:
   sdk: '>=3.10.0 <4.0.0'

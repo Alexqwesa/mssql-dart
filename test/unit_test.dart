@@ -1,7 +1,7 @@
 import 'package:test/test.dart';
-import 'package:mssql/mssql.dart';
-import 'package:mssql/src/tds/token_stream.dart';
-import 'package:mssql/src/tds/type_info.dart';
+import 'package:mssql_native/mssql_native.dart';
+import 'package:mssql_native/src/tds/token_stream.dart';
+import 'package:mssql_native/src/tds/type_info.dart';
 
 // Pure unit tests — no live SQL Server required.
 // Exercises result.dart and exception.dart APIs directly.

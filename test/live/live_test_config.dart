@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:mssql/mssql.dart';
+import 'package:mssql_native/mssql_native.dart';
 
 /// Environment-backed settings for normal live suites (`mssql-dart-live` :14334).
 ///

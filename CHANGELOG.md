@@ -2,6 +2,7 @@
 
 ## 0.5.2
 
+* Package: rename to `mssql_native` (import `package:mssql_native/mssql_native.dart`).
 * Connection: close the session when a query or Bulk Load hits a dead
   transport (`StateError` / `SocketException`), a severity-20+ error, or
   error 596 (kill state). Unacknowledged Attention after a query timeout
@@ -14,11 +15,11 @@
 * Tests: port offline fault injection, protocol/connection fuzzing, live
   fault injection, pooled session isolation, and sustained load coverage
   from `main`, plus three pooled isolation cases in `session_db_live_test`.
-* Docs: document git install for `ref: v0.5+`, prebuilt native TLS artifacts
-  from Actions, and local `tool/build_native.ps1` / Linux / Android build
-  dependencies.
+* Docs: document git install for `ref: mssql_native`, prebuilt native TLS
+  artifacts from Actions, package comparison guidance, and local
+  `tool/build_native.ps1` / Linux / Android build dependencies.
 * CI: build and upload Windows, Linux, and Android native TLS artifacts on
-  pushes to `v0.5+` (in addition to `main` and tags).
+  pushes to `mssql_native` (in addition to `main` and tags).
 
 ## 0.5.1
 

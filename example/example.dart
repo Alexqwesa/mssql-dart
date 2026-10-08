@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:mssql/mssql.dart';
+import 'package:mssql_native/mssql_native.dart';
 
 // Read connection details from environment variables so no credentials are
 // hardcoded in source. Set them before running:

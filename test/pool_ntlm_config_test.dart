@@ -1,4 +1,4 @@
-import 'package:mssql/mssql.dart';
+import 'package:mssql_native/mssql_native.dart';
 import 'package:test/test.dart';
 
 // Offline pool config coverage for NTLM / SSPI open path selection.

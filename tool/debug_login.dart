@@ -2,7 +2,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:async/async.dart';
-import 'package:mssql/src/tds/constants.dart';
+import 'package:mssql_native/src/tds/constants.dart';
 
 void main() async {
   print('1. Connecting TCP...');

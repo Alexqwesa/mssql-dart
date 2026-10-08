@@ -1,4 +1,4 @@
-import 'package:mssql/src/native_tls/native_tls_loader.dart';
+import 'package:mssql_native/src/native_tls/native_tls_loader.dart';
 import 'package:test/test.dart';
 
 void main() {

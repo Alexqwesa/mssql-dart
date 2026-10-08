@@ -1,5 +1,5 @@
-/// Pure Dart driver for Microsoft SQL Server (TDS 7.4 protocol).
-library mssql;
+/// Dart TDS 7.4 driver for Microsoft SQL Server with native OpenSSL TLS.
+library mssql_native;
 
 export 'src/auth/azure_ad_auth.dart';
 export 'src/auth/ntlm_auth.dart';

@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:mssql/src/native_tls/native_tls_engine.dart';
+import 'package:mssql_native/src/native_tls/native_tls_engine.dart';
 import 'package:test/test.dart';
 
 void main() {

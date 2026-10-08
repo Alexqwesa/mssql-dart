@@ -1,7 +1,7 @@
 import 'dart:io';
 
-import 'package:mssql/mssql.dart';
-import 'package:mssql/src/tcp_options.dart';
+import 'package:mssql_native/mssql_native.dart';
+import 'package:mssql_native/src/tcp_options.dart';
 import 'package:test/test.dart';
 
 import 'live_test_config.dart';

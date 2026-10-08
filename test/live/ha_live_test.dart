@@ -1,6 +1,6 @@
 import 'live_test_config.dart';
 import 'live_test_gate.dart';
-import 'package:mssql/mssql.dart';
+import 'package:mssql_native/mssql_native.dart';
 import 'package:test/test.dart';
 
 /// Always On / HA connect options against a normal (non-AG) SQL Server.

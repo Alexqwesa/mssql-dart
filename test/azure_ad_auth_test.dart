@@ -1,5 +1,5 @@
 import 'package:http/http.dart' as http;
-import 'package:mssql/mssql.dart';
+import 'package:mssql_native/mssql_native.dart';
 import 'package:test/test.dart';
 
 /// Offline Azure AD token response parsing (no network).
