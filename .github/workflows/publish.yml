@@ -29,10 +29,25 @@ jobs:
 
       - run: dart pub get
 
+      - name: Read pinned native release tag
+        id: native-release
+        run: |
+          set -euo pipefail
+          TAG=$(sed -nE \
+            "s/^const String nativeTlsPinnedReleaseTag = '([^']+)';/\1/p" \
+            lib/src/native_tls/native_tls_pins.dart | head -1)
+          if [[ -z "$TAG" ]]; then
+            echo "Could not read nativeTlsPinnedReleaseTag" >&2
+            exit 1
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "Using native assets from $TAG"
+
       - name: Download and verify Release binaries
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          NATIVE_RELEASE_TAG: ${{ steps.native-release.outputs.tag }}
         run: |
           set -euo pipefail
 
@@ -43,7 +58,7 @@ jobs:
             mssql-tls-windows-x64 \
             mssql-tls-android
           do
-            gh release download "$GITHUB_REF_NAME" \
+            gh release download "$NATIVE_RELEASE_TAG" \
               --pattern "$name.zip" \
               --dir release-zips
 
@@ -54,6 +69,7 @@ jobs:
 
           dart run tool/update_native_tls_pins.dart \
             --from-dir native-assets \
+            --tag "$NATIVE_RELEASE_TAG" \
             --check \
             --require-all
 

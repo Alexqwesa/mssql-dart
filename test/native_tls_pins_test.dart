@@ -2,7 +2,7 @@ import 'package:mssql_driver_with_native_tls/src/native_tls/native_tls_pins.dart
 import 'package:test/test.dart';
 
 void main() {
-  test('pinned release tag matches v + current package version style', () {
+  test('pinned native release tag and hashes are valid', () {
     expect(nativeTlsPinnedReleaseTag, startsWith('v'));
     expect(nativeTlsPinnedSha256, isNotEmpty);
     expect(nativeTlsPinnedSha256['linux/x64'], hasLength(64));

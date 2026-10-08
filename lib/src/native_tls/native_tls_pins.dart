@@ -6,7 +6,9 @@
 // published for nativeTlsPinnedReleaseTag, then commit this file before
 // tagging that release.
 
-/// Release tag whose helpers are pinned below (`v` + `pubspec` version).
+/// Release tag whose helpers are pinned below.
+///
+/// This may be older than the package version when native code is unchanged.
 const String nativeTlsPinnedReleaseTag = 'v0.5.5';
 
 /// Map of `<os>/<arch>` → lowercase hex SHA-256 of the dynamic library.
@@ -44,4 +46,3 @@ String? nativeTlsPinnedDigest({
     architecture: architecture,
   )];
 }
-

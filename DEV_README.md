@@ -72,12 +72,15 @@ Outputs land in `dist/android/<abi>/`.
 
 ## Prebuilt release artifacts
 
-The manual Release native assets workflow is the only workflow that builds the native
-binaries. It pins their hashes and attaches the ZIPs (with `SHA256SUMS`) to
-[GitHub Releases](https://github.com/Alexqwesa/mssql-dart/releases) before it
-starts [Publish](https://github.com/Alexqwesa/mssql-dart/actions/workflows/publish.yml)
-on the new tag. Publish does not rebuild the binaries; it downloads and verifies
-those existing Release assets. The consumer hook downloads the same assets.
+The manual Release native assets workflow is the only workflow that builds the
+native binaries. It records their Release tag and hashes in
+`native_tls_pins.dart`, then attaches the ZIPs (with `SHA256SUMS`) to
+[GitHub Releases](https://github.com/Alexqwesa/mssql-dart/releases).
+
+The pinned native Release tag is independent of the Dart package version. A
+package-only release keeps the existing pins, so both
+[Publish](https://github.com/Alexqwesa/mssql-dart/actions/workflows/publish.yml)
+and the consumer build hook reuse and verify those existing Release assets.
 
 ## Recommended release process
 
@@ -87,7 +90,12 @@ those existing Release assets. The consumer hook downloads the same assets.
    `CHANGELOG.md`, and push. The release workflow files must exist on that
    branch (`.github/workflows/release_native_assets.yml`).
 
-2. **Run Release native assets (manual) — pick the branch in the UI**
+2. **Choose the release path**
+
+   If native code or its toolchain changed, run **Release native assets**. The
+   workflow builds and pins fresh helpers, creates the package tag, uploads the
+   assets, and starts Publish. Pick the release branch in the UI:
+
    You do **not** need this on `main`. The branch dropdown is what selects
    the code that gets pinned and tagged:
 
@@ -99,6 +107,16 @@ those existing Release assets. The consumer hook downloads the same assets.
      gh workflow run release_native_assets.yml --ref mssql_driver_with_native_tls
      ```
 
+   If native code did not change, do not run the native-assets workflow. Keep
+   `nativeTlsPinnedReleaseTag` unchanged and create the package tag normally:
+
+   ```bash
+   git tag -a vX.Y.Z -m "Release vX.Y.Z"
+   git push origin vX.Y.Z
+   ```
+
+   The tag-triggered Publish workflow will reuse the pinned native Release.
+
    **`gh workflow run` 404 / workflow missing:** the workflow file must exist
    on the **default branch** (`main`) or the API returns
    `workflow release_native_assets.yml not found on the default branch`. Copy
@@ -106,18 +124,19 @@ those existing Release assets. The consumer hook downloads the same assets.
    and push — that only registers the Action; you still always run it with
    `--ref` / **Use workflow from** set to the release branch.
 
-   The workflow then:
-   - builds Windows / Linux / Android helpers from that branch tip
+   When run, the native-assets workflow:
+
+   - builds fresh Windows / Linux / Android helpers
    - refuses to continue if `vX.Y.Z` already exists
    - commits pins when hashes changed (`ci: pin native TLS SHA-256 for vX.Y.Z`)
    - creates and pushes annotated tag `vX.Y.Z`
    - uploads those **same** binaries to the GitHub Release and attests them
    - starts **Publish** on that tag
 
-3. **Publish on the tag**
-   Verifies the GitHub Release zips against the committed pins (not a rebuild —
-   native builds are not bit-reproducible). Runs tests, then waits on the
-   `pub.dev` Environment.
+3. **Publish on the package tag**
+   Downloads the Release zips from `nativeTlsPinnedReleaseTag`, verifies them
+   against the committed hashes, and never rebuilds them. It runs tests, then
+   waits on the `pub.dev` Environment.
 
    Verify a downloaded asset (example):
 
@@ -129,8 +148,8 @@ those existing Release assets. The consumer hook downloads the same assets.
    Approve the `pub.dev` Environment deployment when ready.
 
 5. **Publish**  
-   The action publishes the tagged package; Release zips are already online for
-   the download hook.
+   The action publishes the tagged package. The consumer hook downloads from
+   the pinned native Release, which can be older than the package tag.
 
 ## Pin tooling (optional / local)
 

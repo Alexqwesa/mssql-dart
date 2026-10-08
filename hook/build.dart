@@ -62,21 +62,7 @@ Future<void> main(List<String> args) async {
 String _releaseTag(BuildInput input) {
   final override = input.userDefines['release_tag'];
   if (override is String && override.isNotEmpty) return override;
-  final version = _packageVersion(input.packageRoot);
-  return version.startsWith('v') ? version : 'v$version';
-}
-
-String _packageVersion(Uri packageRoot) {
-  final pubspec = File.fromUri(packageRoot.resolve('pubspec.yaml'));
-  final text = pubspec.readAsStringSync();
-  final match = RegExp(
-    r'^version:\s*(\S+)\s*$',
-    multiLine: true,
-  ).firstMatch(text);
-  if (match == null) {
-    throw StateError('Could not read version from ${pubspec.path}');
-  }
-  return match.group(1)!;
+  return nativeTlsPinnedReleaseTag;
 }
 
 String _requirePin({

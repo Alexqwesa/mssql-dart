@@ -230,8 +230,10 @@ String _renderPins({
     ..writeln('// published for nativeTlsPinnedReleaseTag, then commit this file before')
     ..writeln('// tagging that release.')
     ..writeln()
+    ..writeln('/// Release tag whose helpers are pinned below.')
+    ..writeln('///')
     ..writeln(
-      '/// Release tag whose helpers are pinned below (`v` + `pubspec` version).',
+      '/// This may be older than the package version when native code is unchanged.',
     )
     ..writeln("const String nativeTlsPinnedReleaseTag = '$tag';")
     ..writeln()

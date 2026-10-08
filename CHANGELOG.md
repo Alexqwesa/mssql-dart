@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.5
+## 0.5.6
 
 * TLS: pin GitHub Release helper SHA-256 digests in
   `lib/src/native_tls/native_tls_pins.dart`. `hook/build.dart` rejects
@@ -11,6 +11,8 @@
   needed, pushes `vX.Y.Z`, uploads and attests those same Release binaries;
   tag **Publish** verifies Release zips against pins (not a rebuild) and
   publishes to pub.dev after Environment approval.
+  Package-only releases reuse the independently versioned pinned native
+  Release; only native changes require the native-assets workflow.
 * Docs: maintainer notes in `DEV_README.md`.
 
 ## 0.5.2
