@@ -1,12 +1,11 @@
-name: CI / Publish
+name: Publish
 
 on:
   push:
-    branches: [mssql_driver_with_native_tls]
     tags:
       - 'v[0-9]*'
-  pull_request:
-    types: [opened, synchronize, reopened, ready_for_review]
+  # Release native assets dispatches this on the tag after uploading assets.
+  # GITHUB_TOKEN tag pushes do not trigger another workflow automatically.
   workflow_dispatch: {}
 
 concurrency:
@@ -14,62 +13,7 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  
-  # Verify in-repo SHA-256 pins against CI binaries (see DEV_README.md).
-  # Pin commits + tagging are done by the manual Release workflow.
-  native-tls-pins:
-    name: Native TLS pins
-    needs: [native-build]
-    if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dart-lang/setup-dart@v1
-        with: { sdk: stable }
-      - uses: ./.github/actions/stage-ci-native-tls
-      - run: dart pub get
-      - name: Propose pins from CI artifacts
-        run: |
-          mkdir -p proposed-pins
-          dart run tool/update_native_tls_pins.dart \
-            --from-dir native-assets \
-            --require-all \
-            --output proposed-pins/native_tls_pins.dart
-      - uses: actions/upload-artifact@v4
-        with:
-          name: proposed-native-tls-pins
-          path: proposed-pins/native_tls_pins.dart
-          if-no-files-found: error
-      - name: Verify in-repo pins (branch / PR)
-        if: ${{ !startsWith(github.ref, 'refs/tags/') }}
-        run: |
-          # Rebuilds are not bit-identical; mismatches are warnings until Release
-          # refreshes pins. Use --require-all only against Release assets.
-          dart run tool/update_native_tls_pins.dart \
-            --from-dir native-assets \
-            --check
-      - name: Verify in-repo pins match GitHub Release assets
-        if: startsWith(github.ref, 'refs/tags/')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          # Release workflow uploaded the exact pinned binaries. Do not verify
-          # against this job's rebuild (hashes will differ).
-          mkdir -p release-zips native-assets-from-release
-          gh release download "$GITHUB_REF_NAME" --pattern 'mssql-tls-*.zip' \
-            --dir release-zips
-          for z in release-zips/*.zip; do
-            name="$(basename "$z" .zip)"
-            mkdir -p "native-assets-from-release/$name"
-            unzip -q "$z" -d "native-assets-from-release/$name"
-          done
-          dart run tool/update_native_tls_pins.dart \
-            --from-dir native-assets-from-release \
-            --check \
-            --require-all
-            
-  release-native-assets:
+  load-release-assets:
     name: Load pinned Release binaries
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
@@ -134,10 +78,9 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   # 1 · Static analysis
   # ════════════════════════════════════════════════════════════════════════════
-  analyze:  
+  analyze:
     name: Analyze
-    needs: [native-build, release-native-assets]
-    if: ${{ always() && (needs.native-build.result == 'success' || needs.release-native-assets.result == 'success') }}
+    needs: [load-release-assets]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -308,7 +251,7 @@ jobs:
   # ════════════════════════════════════════════════════════════════════════════
   publish:
     name: Publish to pub.dev
-    needs: [test, test-tls-force, release-native-assets]
+    needs: [test, test-tls-force, load-release-assets]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
     environment: pub.dev

@@ -7,9 +7,9 @@
   downloads that do not match the in-repo pin and the zip `SHA256SUMS`.
   Refresh pins with `dart run tool/update_native_tls_pins.dart`
   (`--from-dir`, `--check`, `--require-all`).
-* CI: manual **Release** workflow builds helpers, commits SHA-256 pins when
+* CI: manual **Release native assets** workflow builds helpers, commits SHA-256 pins when
   needed, pushes `vX.Y.Z`, uploads and attests those same Release binaries;
-  tag **CI / Publish** verifies Release zips against pins (not a rebuild) and
+  tag **Publish** verifies Release zips against pins (not a rebuild) and
   publishes to pub.dev after Environment approval.
 * Docs: maintainer notes in `DEV_README.md`.
 

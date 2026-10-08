@@ -1,18 +1,18 @@
-# Manual release: build native helpers, commit SHA-256 pins if needed, push
-# vX.Y.Z tag, upload + attest those same binaries, then start CI / Publish for
-# tests + pub.dev (Environment approval).
+# Manual release asset preparation: build native helpers, commit SHA-256 pins,
+# push the vX.Y.Z tag, upload + attest those same binaries, then start Publish
+# for tests + pub.dev (Environment approval).
 #
 # This file must also exist on the default branch (main) so `gh workflow run`
 # / the Actions UI can find it. Always start the run from your release branch:
-#   gh workflow run release.yml --ref mssql_driver_with_native_tls
-#   Actions → Release → Run workflow → "Use workflow from" → that branch
-name: Release
+#   gh workflow run release_native_assets.yml --ref mssql_driver_with_native_tls
+#   Actions → Release native assets → Run workflow → "Use workflow from" → branch
+name: Release native assets
 
 on:
   workflow_dispatch:
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-native-assets-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -20,7 +20,7 @@ jobs:
     uses: ./.github/workflows/native-tls-build.yml
 
   pin-and-tag:
-    name: Pin, tag, and publish assets
+    name: Pin, tag, and upload release assets
     needs: native-build
     runs-on: ubuntu-latest
     permissions:
@@ -112,7 +112,7 @@ jobs:
           echo "Pushed ${TAG} → ${SHA}"
 
       # Upload the exact binaries that were hashed into the pin commit (do not
-      # rebuild). Tag CI / Publish verifies these Release assets, not a rebuild.
+      # rebuild). Publish verifies these Release assets, not a rebuild.
       - name: Pack release zips and binaries
         run: bash tool/pack_release_native_tls.sh native-assets release-binaries
 
@@ -137,12 +137,13 @@ jobs:
             gh release create "$TAG" --generate-notes --target "${{ steps.pins.outputs.sha }}"
           gh release upload "$TAG" release-binaries/*.zip --clobber
 
-      - name: Trigger CI / Publish on the new tag
+      - name: Trigger Publish on the new tag
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           # Tag pushes authenticated as GITHUB_TOKEN do not start other
-          # workflows; dispatch CI / Publish explicitly on the tag ref.
+          # workflows; dispatch Publish explicitly on the tag ref after the
+          # Release assets exist.
           gh workflow run publish.yml --ref "$TAG"
-          echo "Started CI / Publish for $TAG"
+          echo "Started Publish for $TAG"

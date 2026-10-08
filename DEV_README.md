@@ -70,39 +70,39 @@ bash tool/build_android_native.sh
 
 Outputs land in `dist/android/<abi>/`.
 
-## Prebuilt CI artifacts
+## Prebuilt release artifacts
 
-Every push / PR / tag runs native builds via
-[CI / Publish](https://github.com/Alexqwesa/mssql-dart/actions/workflows/publish.yml)
-(reusing [native-tls-build.yml](https://github.com/Alexqwesa/mssql-dart/actions/workflows/native-tls-build.yml)).
-Tagged runs attach ZIPs (with `SHA256SUMS`) to
-[GitHub Releases](https://github.com/Alexqwesa/mssql-dart/releases) — that is
-what the consumer hook downloads.
+The manual Release native assets workflow is the only workflow that builds the native
+binaries. It pins their hashes and attaches the ZIPs (with `SHA256SUMS`) to
+[GitHub Releases](https://github.com/Alexqwesa/mssql-dart/releases) before it
+starts [Publish](https://github.com/Alexqwesa/mssql-dart/actions/workflows/publish.yml)
+on the new tag. Publish does not rebuild the binaries; it downloads and verifies
+those existing Release assets. The consumer hook downloads the same assets.
 
 ## Recommended release process
 
 1. **Prepare release**  
    On your release branch (e.g. `mssql_driver_with_native_tls`): finalize
    native TLS source, set the plain `X.Y.Z` in `pubspec.yaml`, update
-   `CHANGELOG.md`, and push. The Release workflow files must exist on that
-   branch (`.github/workflows/release.yml`).
+   `CHANGELOG.md`, and push. The release workflow files must exist on that
+   branch (`.github/workflows/release_native_assets.yml`).
 
-2. **Run Release (manual) — pick the branch in the UI**  
+2. **Run Release native assets (manual) — pick the branch in the UI**
    You do **not** need this on `main`. The branch dropdown is what selects
    the code that gets pinned and tagged:
 
-   - GitHub: **Actions** → **Release** → **Run workflow**  
+   - GitHub: **Actions** → **Release native assets** → **Run workflow**
      → **Use workflow from:** `mssql_driver_with_native_tls` (not `main`)  
      → Run workflow  
    - CLI:
      ```bash
-     gh workflow run release.yml --ref mssql_driver_with_native_tls
+     gh workflow run release_native_assets.yml --ref mssql_driver_with_native_tls
      ```
 
    **`gh workflow run` 404 / workflow missing:** the workflow file must exist
    on the **default branch** (`main`) or the API returns
-   `workflow release.yml not found on the default branch`. Copy
-   `.github/workflows/release.yml` and `native-tls-build.yml` onto `main`
+   `workflow release_native_assets.yml not found on the default branch`. Copy
+   `.github/workflows/release_native_assets.yml` and `native-tls-build.yml` onto `main`
    and push — that only registers the Action; you still always run it with
    `--ref` / **Use workflow from** set to the release branch.
 
@@ -112,9 +112,9 @@ what the consumer hook downloads.
    - commits pins when hashes changed (`ci: pin native TLS SHA-256 for vX.Y.Z`)
    - creates and pushes annotated tag `vX.Y.Z`
    - uploads those **same** binaries to the GitHub Release and attests them
-   - starts **CI / Publish** on that tag
+   - starts **Publish** on that tag
 
-3. **CI / Publish on the tag**  
+3. **Publish on the tag**
    Verifies the GitHub Release zips against the committed pins (not a rebuild —
    native builds are not bit-reproducible). Runs tests, then waits on the
    `pub.dev` Environment.
