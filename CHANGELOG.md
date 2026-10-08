@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.4
+## 0.5.5
 
 * TLS: pin GitHub Release helper SHA-256 digests in
   `lib/src/native_tls/native_tls_pins.dart`. `hook/build.dart` rejects
