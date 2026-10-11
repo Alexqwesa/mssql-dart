@@ -412,6 +412,9 @@ jobs:
           mkdir -p build/apple-smoke/integration_test
           cp .github/fixtures/apple_smoke/native_tls_smoke_test.dart \
             build/apple-smoke/integration_test/native_tls_smoke_test.dart
+          mkdir -p build/apple-smoke/assets
+          cp docker/live/certs/server.pem build/apple-smoke/assets/
+          cp docker/live/certs/server.key build/apple-smoke/assets/
           cd build/apple-smoke
           flutter pub get
       - name: Enable macOS network client

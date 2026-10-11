@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:integration_test/integration_test.dart';
 import 'package:mssql_driver_with_native_tls/src/native_tls/native_tls_engine.dart';
@@ -28,11 +29,22 @@ void main() {
   });
 
   testWidgets('Apple system trust rejects an unknown CA', (_) async {
-    await expectLater(
-      _handshakePublicTls('self-signed.badssl.com')
-          .timeout(const Duration(seconds: 30)),
-      throwsA(isA<StateError>()),
-    );
+    await withUntrustedTlsServer((port) async {
+      await expectLater(
+        _handshakePublicTls(
+          'localhost',
+          port: port,
+          address: InternetAddress.loopbackIPv4,
+        ).timeout(const Duration(seconds: 30)),
+        throwsA(
+          isA<StateError>().having(
+            (error) => error.toString(),
+            'error',
+            contains('Apple certificate trust evaluation failed'),
+          ),
+        ),
+      );
+    });
   });
 
   testWidgets('Apple hostname policy rejects a mismatched certificate', (
@@ -45,21 +57,73 @@ void main() {
     );
   });
 
-  testWidgets('trustServerCertificate bypasses Apple trust evaluation', (
-    _,
-  ) async {
-    await _handshakePublicTls(
-      'self-signed.badssl.com',
-      trustServerCertificate: true,
-    ).timeout(const Duration(seconds: 30));
+  testWidgets('trustServerCertificate bypasses Apple trust', (_) async {
+    await withUntrustedTlsServer((port) async {
+      await _handshakePublicTls(
+        'localhost',
+        port: port,
+        address: InternetAddress.loopbackIPv4,
+        trustServerCertificate: true,
+      ).timeout(const Duration(seconds: 30));
+    });
   });
+}
+
+Future<void> withUntrustedTlsServer(
+  Future<void> Function(int port) test,
+) async {
+  final certificate = await rootBundle.load('assets/server.pem');
+  final key = await rootBundle.load('assets/server.key');
+
+  final context = SecurityContext()
+    ..useCertificateChainBytes(
+      certificate.buffer.asUint8List(
+        certificate.offsetInBytes,
+        certificate.lengthInBytes,
+      ),
+    )
+    ..usePrivateKeyBytes(
+      key.buffer.asUint8List(key.offsetInBytes, key.lengthInBytes),
+    );
+
+  final server = await SecureServerSocket.bind(
+    InternetAddress.loopbackIPv4,
+    0,
+    context,
+  );
+
+  final clients = <SecureSocket>{};
+
+  final subscription = server.listen((socket) {
+    clients.add(socket);
+    socket.listen(
+      (_) {},
+      onError: (Object _) {},
+      onDone: () {
+        clients.remove(socket);
+        socket.destroy();
+      },
+    );
+  });
+
+  try {
+    await test(server.port);
+  } finally {
+    for (final socket in clients) {
+      socket.destroy();
+    }
+    await subscription.cancel();
+    await server.close();
+  }
 }
 
 Future<void> _handshakePublicTls(
   String host, {
+  int port = 443,
+  InternetAddress? address,
   bool trustServerCertificate = false,
 }) async {
-  final socket = await Socket.connect(host, 443);
+  final socket = await Socket.connect(address ?? host, port);
   final input = StreamIterator<Uint8List>(socket);
   final engine = NativeTlsEngine(
     serverName: host,
