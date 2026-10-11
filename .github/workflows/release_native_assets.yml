@@ -132,15 +132,27 @@ jobs:
             release-binaries/ios-iphonesimulator-arm64-libmssql_tls.dylib
             release-binaries/ios-iphonesimulator-x86_64-libmssql_tls.dylib
 
-      - name: Upload GitHub Release assets
+      - name: Create draft GitHub Release with assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          SHA: ${{ steps.pins.outputs.sha }}
+        run: |
+          set -euo pipefail
+
+          gh release create "$TAG" release-binaries/*.zip \
+            --draft \
+            --verify-tag \
+            --generate-notes \
+            --target "$SHA"
+
+      - name: Publish immutable GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           set -euo pipefail
-          gh release view "$TAG" >/dev/null 2>&1 || \
-            gh release create "$TAG" --generate-notes --target "${{ steps.pins.outputs.sha }}"
-          gh release upload "$TAG" release-binaries/*.zip --clobber
+          gh release edit "$TAG" --draft=false
 
       - name: Trigger Publish on the new tag
         env:
