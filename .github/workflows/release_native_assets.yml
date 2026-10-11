@@ -1,18 +1,18 @@
-# Manual release: build native helpers, commit SHA-256 pins if needed, push
-# vX.Y.Z tag. The tag run of CI / Publish then verifies pins, attaches Release
-# zips, and publishes to pub.dev (Environment approval).
+# Manual release asset preparation: build native helpers, commit SHA-256 pins,
+# push the vX.Y.Z tag, upload + attest those same binaries, then start Publish
+# for tests + pub.dev (Environment approval).
 #
 # This file must also exist on the default branch (main) so `gh workflow run`
 # / the Actions UI can find it. Always start the run from your release branch:
-#   gh workflow run release.yml --ref mssql_driver_with_native_tls
-#   Actions → Release → Run workflow → "Use workflow from" → that branch
-name: Release
+#   gh workflow run release_native_assets.yml --ref mssql_driver_with_native_tls
+#   Actions → Release native assets → Run workflow → "Use workflow from" → branch
+name: Release native assets
 
 on:
   workflow_dispatch:
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release-native-assets-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -20,12 +20,14 @@ jobs:
     uses: ./.github/workflows/native-tls-build.yml
 
   pin-and-tag:
-    name: Pin and tag
+    name: Pin, tag, and upload release assets
     needs: native-build
     runs-on: ubuntu-latest
     permissions:
       contents: write
       actions: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
         with:
@@ -67,6 +69,9 @@ jobs:
             exit 1
           fi
 
+      - name: Stage artifacts for dart build hooks
+        run: bash tool/stage_ci_native_tls.sh native-assets
+
       - run: dart pub get
 
       - name: Generate pins from this run's artifacts
@@ -106,12 +111,44 @@ jobs:
           git push origin "refs/tags/${TAG}"
           echo "Pushed ${TAG} → ${SHA}"
 
-      - name: Trigger CI / Publish on the new tag
+      # Upload the exact binaries that were hashed into the pin commit (do not
+      # rebuild). Publish verifies these Release assets, not a rebuild.
+      - name: Pack release zips and binaries
+        run: bash tool/pack_release_native_tls.sh native-assets release-binaries
+
+      - name: Attest release zips and binaries
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            release-binaries/*.zip
+            release-binaries/linux-x64-libmssql_tls.so
+            release-binaries/windows-x64-mssql_tls.dll
+            release-binaries/android-arm64-v8a-libmssql_tls.so
+            release-binaries/android-armeabi-v7a-libmssql_tls.so
+            release-binaries/android-x86_64-libmssql_tls.so
+            release-binaries/macos-arm64-libmssql_tls.dylib
+            release-binaries/macos-x86_64-libmssql_tls.dylib
+            release-binaries/ios-iphoneos-arm64-libmssql_tls.dylib
+            release-binaries/ios-iphonesimulator-arm64-libmssql_tls.dylib
+            release-binaries/ios-iphonesimulator-x86_64-libmssql_tls.dylib
+
+      - name: Upload GitHub Release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          set -euo pipefail
+          gh release view "$TAG" >/dev/null 2>&1 || \
+            gh release create "$TAG" --generate-notes --target "${{ steps.pins.outputs.sha }}"
+          gh release upload "$TAG" release-binaries/*.zip --clobber
+
+      - name: Trigger Publish on the new tag
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           # Tag pushes authenticated as GITHUB_TOKEN do not start other
-          # workflows; dispatch CI / Publish explicitly on the tag ref.
+          # workflows; dispatch Publish explicitly on the tag ref after the
+          # Release assets exist.
           gh workflow run publish.yml --ref "$TAG"
-          echo "Started CI / Publish for $TAG"
+          echo "Started Publish for $TAG"
