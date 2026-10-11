@@ -55,7 +55,6 @@ echo "$openssl_sha256  $archive_path" | shasum -a 256 --check --status
 build_slice() {
   local name="$1"
   local openssl_target sdk architecture deployment_flag destination
-  local cmake_system_args=()
 
   case "$name" in
     macos-arm64)
@@ -78,7 +77,6 @@ build_slice() {
       architecture=arm64
       deployment_flag="-mios-version-min=$ios_min"
       destination="$output/ios/iphoneos/arm64"
-      cmake_system_args=(-DCMAKE_SYSTEM_NAME=iOS)
       ;;
     ios-sim-arm64)
       openssl_target=iossimulator-arm64-xcrun
@@ -86,7 +84,6 @@ build_slice() {
       architecture=arm64
       deployment_flag="-mios-simulator-version-min=$ios_min"
       destination="$output/ios/iphonesimulator/arm64"
-      cmake_system_args=(-DCMAKE_SYSTEM_NAME=iOS)
       ;;
     ios-sim-x64)
       openssl_target=iossimulator-xcrun
@@ -94,7 +91,6 @@ build_slice() {
       architecture=x86_64
       deployment_flag="-mios-simulator-version-min=$ios_min"
       destination="$output/ios/iphonesimulator/x86_64"
-      cmake_system_args=(-DCMAKE_SYSTEM_NAME=iOS)
       ;;
     *)
       echo "Unknown Apple target '$name'." >&2
@@ -147,18 +143,28 @@ build_slice() {
     run_tests=ON
   fi
 
-  cmake -S "$root/native" -B "$cmake_build" -G Ninja \
-    "${cmake_system_args[@]}" \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_OSX_ARCHITECTURES="$architecture" \
-    -DCMAKE_OSX_DEPLOYMENT_TARGET="$deployment_target" \
-    -DCMAKE_OSX_SYSROOT="$sdk_path" \
-    -DBUILD_TESTING="$run_tests" \
-    -DOPENSSL_ROOT_DIR="$prefix" \
-    -DOPENSSL_INCLUDE_DIR="$openssl_include" \
-    -DOPENSSL_CRYPTO_LIBRARY="$openssl_crypto" \
-    -DOPENSSL_SSL_LIBRARY="$openssl_ssl" \
+  # macOS runners still ship Bash 3.2, where expanding an empty array under
+  # `set -u` fails. Keep this array non-empty and append the iOS-only CMake
+  # system setting instead of expanding a separate possibly-empty array.
+  local cmake_args=(
+    -S "$root/native"
+    -B "$cmake_build"
+    -G Ninja
+    -DCMAKE_BUILD_TYPE=Release
+    -DCMAKE_OSX_ARCHITECTURES="$architecture"
+    -DCMAKE_OSX_DEPLOYMENT_TARGET="$deployment_target"
+    -DCMAKE_OSX_SYSROOT="$sdk_path"
+    -DBUILD_TESTING="$run_tests"
+    -DOPENSSL_ROOT_DIR="$prefix"
+    -DOPENSSL_INCLUDE_DIR="$openssl_include"
+    -DOPENSSL_CRYPTO_LIBRARY="$openssl_crypto"
+    -DOPENSSL_SSL_LIBRARY="$openssl_ssl"
     -DOPENSSL_USE_STATIC_LIBS=TRUE
+  )
+  if [[ "$sdk" != macosx ]]; then
+    cmake_args+=(-DCMAKE_SYSTEM_NAME=iOS)
+  fi
+  cmake "${cmake_args[@]}"
   cmake --build "$cmake_build"
   if [[ "$run_tests" == ON ]]; then
     ctest --test-dir "$cmake_build" --output-on-failure
