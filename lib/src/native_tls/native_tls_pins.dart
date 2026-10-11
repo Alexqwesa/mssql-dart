@@ -16,25 +16,25 @@ const String nativeTlsPinnedReleaseTag = 'v0.5.9';
 /// Keys match [nativeTlsPinKey].
 const Map<String, String> nativeTlsPinnedSha256 = {
   'android/arm':
-      '9fbd94324dd2037ee857d4bd0cf23cc20a1e684bddbbb69b44c8d9e710e040ba',
+      '5b8aa381f604bfe6ea803c229357f8cbf772e446a2b3e0ea2ebf52bf639d2c8c',
   'android/arm64':
-      'aafe3d7c5d3af48ee116d25de06af36ed365b59974aa91fc45357258252f7ea0',
+      '0b296ae9cb776ed3e78729cce15cefddad22fd5c25c99cf0edfd4652cba28cda',
   'android/x64':
-      '8cf337552cf5d35f12f72bad54d4c1d4042a99e4d966b4d0aa4b416427e6d586',
+      '9f6afe7de73d862ccf228f42d0094f9e0af3495f301ccbb5644201cf81f9ce71',
   'ios/iphoneos/arm64':
-      '8ea90c1b899f4d3cd2c6a96381bbd7887d8370a8fea41d62e4eeded1903a40ff',
+      '064116612b9da7f26cfc6c5ad5266208c05d08491ac5e4af80fe22b0860fd54e',
   'ios/iphonesimulator/arm64':
-      'ddcb36fd4c0c05790c415bd6c11841791d1b7a9eb4b0edeed08b619c1d379526',
+      '8387220069b7bcfdc738b300e5990989a7618762102292344e1110b2c95d124c',
   'ios/iphonesimulator/x64':
-      'ecae4ea5ac822159633e830094a07f84f3f08c892fe68e8693fce3b19cf4a5be',
+      'd2ecbe2a1f7347219ffa672cce6f6afe6e2764d9846547c797f8239cc22dff17',
   'linux/x64':
       'ec330078577dfaef66ad70016ca509e495950822698e74fd3484a05bf4abb567',
   'macos/arm64':
-      '6d9ae9a92d91235460a8789a909b195250991801e999100f988eebe1b9866a05',
+      '946596548a7bd011f4f23cda9060b94933e56e0eb6a5962bc35fa00532070b36',
   'macos/x64':
-      '2ad96907f608746098ca32de85d60b5ab8319b343b8c16ba6371981783e9c850',
+      '56be77ab36e2a3b8b76fcf7bbf2f857cb196b131fa79c201f9020acc659e5e55',
   'windows/x64':
-      '7cba320887ac96058ad87d5213c2e5519599c7b124b72a47f25f689eb982c42f',
+      '5803ce24408ba8981bc7286d9e1454dd5ce48121a281eddb55376656e5ce7ebd',
 };
 
 /// Stable pin map key for a native-assets target.
