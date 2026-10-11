@@ -24,9 +24,11 @@ The manual **Release native assets** workflow builds and tests self-contained
 Windows x64 and Linux x64 helpers, cross-builds Android `arm64-v8a`,
 `armeabi-v7a`, and `x86_64`, and builds macOS arm64/x64 plus iOS
 device/simulator helpers. OpenSSL is linked statically into each platform
-helper. The workflow uploads `mssql-tls-*` artifacts, pins their hashes, and
-attaches the ZIPs with `SHA256SUMS` to the GitHub release. Ordinary package
-tags reuse those pinned assets instead of rebuilding them.
+helper. Flutter smoke applications verify release-bundle packaging and native
+TLS initialization on Windows, Linux, Android, macOS, and the iOS Simulator.
+The workflow uploads `mssql-tls-*` artifacts, pins their hashes, and attaches
+the ZIPs with `SHA256SUMS` to the GitHub release. Ordinary package tags reuse
+those pinned assets instead of rebuilding them.
 
 ### Windows — `tool/build_native.ps1`
 
