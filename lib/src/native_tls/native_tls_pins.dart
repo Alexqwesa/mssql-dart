@@ -9,32 +9,32 @@
 /// Release tag whose helpers are pinned below.
 ///
 /// This may be older than the package version when native code is unchanged.
-const String nativeTlsPinnedReleaseTag = 'v0.5.9';
+const String nativeTlsPinnedReleaseTag = 'v0.5.10';
 
 /// Map of `<os>/<arch>` → lowercase hex SHA-256 of the dynamic library.
 ///
 /// Keys match [nativeTlsPinKey].
 const Map<String, String> nativeTlsPinnedSha256 = {
   'android/arm':
-      '5b8aa381f604bfe6ea803c229357f8cbf772e446a2b3e0ea2ebf52bf639d2c8c',
+      'e9477c26acd2de98a2a3c7c39b9a69372cfa0efce938b1c568ea543c66e49690',
   'android/arm64':
-      '0b296ae9cb776ed3e78729cce15cefddad22fd5c25c99cf0edfd4652cba28cda',
+      '7350f46dd8d17b42fdd4f771d8ee4f3e7f497a38de1f39e336323ec1392656d0',
   'android/x64':
-      '9f6afe7de73d862ccf228f42d0094f9e0af3495f301ccbb5644201cf81f9ce71',
+      'd1a7e38b3f8746e3f596f33c89053a6fde3220f756952156d7eb30e4719109ea',
   'ios/iphoneos/arm64':
-      '064116612b9da7f26cfc6c5ad5266208c05d08491ac5e4af80fe22b0860fd54e',
+      '6b6e820b289ab35521297af0826d128b8fed88499b265d18a49448359e5bc768',
   'ios/iphonesimulator/arm64':
-      '8387220069b7bcfdc738b300e5990989a7618762102292344e1110b2c95d124c',
+      '36b8105ce88b24479053a7826ef2d9ed4a3e119814bb32001ce11c059d37f352',
   'ios/iphonesimulator/x64':
-      'd2ecbe2a1f7347219ffa672cce6f6afe6e2764d9846547c797f8239cc22dff17',
+      'cc446be83600bec35d889b15c2208eef95883b99029006946ce14926e84a94bb',
   'linux/x64':
       'ec330078577dfaef66ad70016ca509e495950822698e74fd3484a05bf4abb567',
   'macos/arm64':
-      '946596548a7bd011f4f23cda9060b94933e56e0eb6a5962bc35fa00532070b36',
+      '0039f401699a9144d8d8e598f8d64ff0fd10d2edcb39afa46763a5a9e95e7481',
   'macos/x64':
-      '56be77ab36e2a3b8b76fcf7bbf2f857cb196b131fa79c201f9020acc659e5e55',
+      '6e7c3464f9c3c69e50536586d76d192e2403c43be2db6e5fe3a7864ea00775c2',
   'windows/x64':
-      '5803ce24408ba8981bc7286d9e1454dd5ce48121a281eddb55376656e5ce7ebd',
+      'dc7244246ede163ca6ec0736784ab2254f7c8ec0a12449b11fa395f45f63391a',
 };
 
 /// Stable pin map key for a native-assets target.
