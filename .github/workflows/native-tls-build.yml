@@ -235,6 +235,16 @@ jobs:
             build/apple-smoke/integration_test/native_tls_smoke_test.dart
           cd build/apple-smoke
           flutter pub get
+      - name: Enable macOS network client
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in DebugProfile Release; do
+            file="build/apple-smoke/macos/Runner/${name}.entitlements"
+            /usr/libexec/PlistBuddy \
+              -c "Add :com.apple.security.network.client bool true" \
+              "$file"
+          done
       - name: Run macOS Flutter smoke test
         working-directory: build/apple-smoke
         run: |
