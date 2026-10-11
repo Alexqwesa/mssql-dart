@@ -1,3 +1,7 @@
+#ifdef NDEBUG
+#undef NDEBUG
+#endif
+
 #include "mssql_tls.h"
 
 #include <openssl/evp.h>
@@ -120,6 +124,12 @@ int main() {
   assert(client != nullptr);
   const std::vector<uint8_t> packet(8, 0);
   assert(mssql_tls_write_packet(client, packet.data(), packet.size()) == MSSQL_TLS_INVALID_STATE);
+  uint8_t pre_handshake_plaintext = 0;
+  size_t pre_handshake_size = 1;
+  assert(mssql_tls_read_plaintext(client, &pre_handshake_plaintext, 1,
+                                  &pre_handshake_size) ==
+         MSSQL_TLS_INVALID_STATE);
+  assert(pre_handshake_size == 0);
   assert(mssql_tls_retry_write(client) == MSSQL_TLS_INVALID_STATE);
   assert(mssql_tls_has_pending_write(client) == 0);
 
@@ -200,6 +210,15 @@ int main() {
   client = mssql_tls_create(&unknown_ca);
   assert(client != nullptr);
   assert(!complete_handshake(client, server));
+  const uint8_t rejected_request = 0x01;
+  assert(mssql_tls_write_packet(client, &rejected_request, 1) ==
+         MSSQL_TLS_INVALID_STATE);
+  uint8_t rejected_plaintext = 0;
+  size_t rejected_plaintext_size = 1;
+  assert(mssql_tls_read_plaintext(client, &rejected_plaintext, 1,
+                                  &rejected_plaintext_size) ==
+         MSSQL_TLS_INVALID_STATE);
+  assert(rejected_plaintext_size == 0);
   mssql_tls_destroy(client);
   SSL_free(server);
   SSL_CTX_free(server_context);

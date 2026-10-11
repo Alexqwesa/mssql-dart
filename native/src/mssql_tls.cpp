@@ -239,7 +239,9 @@ extern "C" mssql_tls_result mssql_tls_drain_encrypted(mssql_tls* tls, uint8_t* o
 extern "C" mssql_tls_result mssql_tls_write_packet(mssql_tls* tls, const uint8_t* packet, size_t length) {
   if (tls == nullptr || packet == nullptr || length == 0) return MSSQL_TLS_INVALID_ARGUMENT;
   if (length > tls->maximum_packet) return MSSQL_TLS_PACKET_TOO_LARGE;
-  if (!SSL_is_init_finished(tls->ssl) || !tls->pending_write.empty()) return MSSQL_TLS_INVALID_STATE;
+  if (!mssql_tls_is_handshake_complete(tls) || !tls->pending_write.empty()) {
+    return MSSQL_TLS_INVALID_STATE;
+  }
   tls->pending_write.assign(packet, packet + length);
   return mssql_tls_retry_write(tls);
 }
@@ -261,6 +263,10 @@ extern "C" int mssql_tls_has_pending_write(const mssql_tls* tls) {
 
 extern "C" mssql_tls_result mssql_tls_read_plaintext(mssql_tls* tls, uint8_t* output, size_t capacity, size_t* written) {
   if (tls == nullptr || written == nullptr || (output == nullptr && capacity != 0)) return MSSQL_TLS_INVALID_ARGUMENT;
+  *written = 0;
+  if (!mssql_tls_is_handshake_complete(tls)) {
+    return MSSQL_TLS_INVALID_STATE;
+  }
   size_t read = 0;
   const int value = SSL_read_ex(tls->ssl, output, capacity, &read);
   *written = read;
