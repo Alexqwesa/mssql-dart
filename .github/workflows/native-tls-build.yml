@@ -375,20 +375,18 @@ jobs:
           path: dist/ios/
           if-no-files-found: error
 
-  apple-flutter-smoke:
-    name: Flutter native asset (${{ matrix.name }})
-    needs: [native-tls, android-native-tls, apple-native-tls]
+  macos-flutter-smoke:
+    name: Flutter native asset (macOS ${{ matrix.arch }})
+    needs: [native-tls, apple-native-tls]
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: macOS arm64 + iOS arm64
+          - arch: arm64
             os: macos-15
-            test_ios: true
-          - name: macOS x64
+          - arch: x64
             os: macos-15-intel
-            test_ios: false
     steps:
       - uses: actions/checkout@v4
       - uses: subosito/flutter-action@v2
@@ -403,7 +401,7 @@ jobs:
       - name: Create smoke application
         run: |
           flutter create \
-            --platforms=ios,macos \
+            --platforms=macos \
             --org dev.mssql \
             --project-name mssql_apple_smoke \
             build/apple-smoke
@@ -454,8 +452,40 @@ jobs:
 
           find dist/macos \
             -name 'libmssql_tls.dylib' -print
+
+  ios-flutter-smoke:
+    name: Flutter native asset (iOS arm64)
+    needs: [native-tls, apple-native-tls]
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mssql-tls-*
+          path: native-assets
+      - run: bash tool/stage_ci_native_tls.sh native-assets
+      - name: Create smoke application
+        run: |
+          flutter create \
+            --platforms=ios \
+            --org dev.mssql \
+            --project-name mssql_apple_smoke \
+            build/apple-smoke
+          cp .github/fixtures/apple_smoke/pubspec.yaml \
+            build/apple-smoke/pubspec.yaml
+          mkdir -p build/apple-smoke/integration_test
+          cp .github/fixtures/apple_smoke/native_tls_smoke_test.dart \
+            build/apple-smoke/integration_test/native_tls_smoke_test.dart
+          mkdir -p build/apple-smoke/assets
+          cp docker/live/certs/server.pem build/apple-smoke/assets/
+          cp docker/live/certs/server.key build/apple-smoke/assets/
+          cd build/apple-smoke
+          flutter pub get
       - name: Run iOS Simulator Flutter smoke test
-        if: matrix.test_ios
         working-directory: build/apple-smoke
         run: |
           set -euo pipefail
@@ -465,7 +495,6 @@ jobs:
           xcrun simctl bootstatus "$DEVICE" -b
           flutter test integration_test/native_tls_smoke_test.dart -d "$DEVICE"
       - name: Build unsigned iOS device application
-        if: matrix.test_ios
         working-directory: build/apple-smoke
         run: |
           set -euo pipefail
@@ -476,3 +505,14 @@ jobs:
           test -n "$HELPER"
           file "$HELPER"
           otool -l "$HELPER" | grep -A 5 LC_BUILD_VERSION | grep 'platform 2'
+      - name: Inspect iOS native asset packaging
+        if: always()
+        run: |
+          find build/apple-smoke/build/ios \
+            -iname '*mssql_tls*' -print || true
+
+          find build/apple-smoke/.dart_tool \
+            -iname '*mssql_tls*' -print || true
+
+          find dist/ios \
+            -name 'libmssql_tls.dylib' -print
