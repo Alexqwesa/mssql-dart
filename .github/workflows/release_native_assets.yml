@@ -126,6 +126,11 @@ jobs:
             release-binaries/android-arm64-v8a-libmssql_tls.so
             release-binaries/android-armeabi-v7a-libmssql_tls.so
             release-binaries/android-x86_64-libmssql_tls.so
+            release-binaries/macos-arm64-libmssql_tls.dylib
+            release-binaries/macos-x86_64-libmssql_tls.dylib
+            release-binaries/ios-iphoneos-arm64-libmssql_tls.dylib
+            release-binaries/ios-iphonesimulator-arm64-libmssql_tls.dylib
+            release-binaries/ios-iphonesimulator-x86_64-libmssql_tls.dylib
 
       - name: Upload GitHub Release assets
         env:

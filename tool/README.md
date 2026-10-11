@@ -7,7 +7,7 @@ imported by applications.
 Run commands from the repository root so package imports and relative paths
 resolve correctly.
 
-## `build_native.ps1` / `build_native.sh`
+## Native TLS build scripts
 
 Builds the native TLS helper, runs its C++ tests, and installs the library:
 
@@ -15,6 +15,8 @@ Builds the native TLS helper, runs its C++ tests, and installs the library:
 | --- | --- |
 | `tool/build_native.ps1` | `native/bin/windows-x64/mssql_tls.dll` |
 | `tool/build_native.sh` | `native/bin/linux-x64/libmssql_tls.so` |
+| `tool/build_android_native.sh` | `dist/android/<abi>/libmssql_tls.so` |
+| `tool/build_apple_native.sh` | `dist/macos/...` and `dist/ios/...` dylibs |
 
 ### Windows dependencies
 
@@ -49,16 +51,18 @@ bash tool/build_native.sh
 ```
 
 For Android ABIs use `tool/build_android_native.sh` (needs `ANDROID_NDK_HOME`).
-Prebuilt Windows / Linux / Android libraries are also produced by GitHub
-Actions on `main` and `mssql_native` — see the README *Native TLS helper* section.
+On macOS with Xcode installed, `tool/build_apple_native.sh` builds macOS arm64
+and x64 plus iOS device/simulator slices. Prebuilt helpers for every supported
+platform are produced by the manual native-assets GitHub workflow; see the
+README *Native TLS helper* section.
 
 Published consumers normally get those helpers via `hook/build.dart` (download
-from the GitHub Release for the package version). Downloads are checked against
-in-repo SHA-256 pins. Release pinning and publish steps are in
+from the independently pinned native GitHub Release). Downloads are checked
+against in-repo SHA-256 pins. Release pinning and publish steps are in
 [DEV_README.md](../DEV_README.md).
 
-Local `native/bin/` / `dist/android/` builds are preferred when present, which
-is what these scripts produce for development and CI.
+Local `native/bin/` / `dist/<platform>/` builds are preferred when present,
+which is what these scripts produce for development and CI.
 
 ## `full_tests.ps1` / `full_tests.sh`
 

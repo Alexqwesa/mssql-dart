@@ -1,0 +1,17 @@
+name: mssql_apple_smoke
+publish_to: none
+
+environment:
+  sdk: '>=3.13.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  mssql_driver_with_native_tls:
+    path: ../..
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter

@@ -1,4 +1,4 @@
-# Reusable Windows / Linux / Android native TLS helper builds.
+# Reusable Windows / Linux / Android / Apple native TLS helper builds.
 name: Native TLS build
 
 on:
@@ -111,3 +111,159 @@ jobs:
           name: mssql-tls-android
           path: dist/android/
           if-no-files-found: error
+
+  apple-native-slices:
+    name: Native TLS (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Apple arm64
+            os: macos-15
+            artifact: apple-slices-arm64
+            targets: macos-arm64 ios-device-arm64 ios-sim-arm64
+            macos_path: dist/macos/arm64
+            ios_paths: |
+              dist/ios/iphoneos/arm64
+              dist/ios/iphonesimulator/arm64
+          - name: Apple x64
+            os: macos-15-intel
+            artifact: apple-slices-x64
+            targets: macos-x64 ios-sim-x64
+            macos_path: dist/macos/x86_64
+            ios_paths: dist/ios/iphonesimulator/x86_64
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dart-lang/setup-dart@v1
+        with: { sdk: stable }
+      - name: Build Apple native helpers
+        run: bash tool/build_apple_native.sh ${{ matrix.targets }}
+      - name: Inspect Apple helpers
+        run: |
+          set -euo pipefail
+          while IFS= read -r library; do
+            file "$library"
+            otool -L "$library"
+            otool -l "$library" | grep -A 5 LC_BUILD_VERSION
+            diff <(sort native/apple_exports.txt) \
+              <(nm -gjU "$library" | sort)
+          done < <(find dist/macos dist/ios -name libmssql_tls.dylib -type f | sort)
+      - run: dart pub get
+      - name: Run Dart native TLS smoke test
+        run: dart test test/native_tls_engine_test.dart
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: |
+            ${{ matrix.macos_path }}
+            ${{ matrix.ios_paths }}
+            dist/macos/THIRD_PARTY_NOTICES.md
+            dist/ios/THIRD_PARTY_NOTICES.md
+          if-no-files-found: error
+
+  apple-native-tls:
+    name: Native TLS (Apple artifacts)
+    needs: apple-native-slices
+    runs-on: macos-15
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: apple-slices-*
+          path: dist
+          merge-multiple: true
+      - name: Verify complete Apple matrix
+        run: |
+          set -euo pipefail
+          for library in \
+            dist/macos/arm64/libmssql_tls.dylib \
+            dist/macos/x86_64/libmssql_tls.dylib \
+            dist/ios/iphoneos/arm64/libmssql_tls.dylib \
+            dist/ios/iphonesimulator/arm64/libmssql_tls.dylib \
+            dist/ios/iphonesimulator/x86_64/libmssql_tls.dylib
+          do
+            test -f "$library"
+            (cd "$(dirname "$library")" && shasum -a 256 --check SHA256SUMS)
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mssql-tls-macos
+          path: dist/macos/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mssql-tls-ios
+          path: dist/ios/
+          if-no-files-found: error
+
+  apple-flutter-smoke:
+    name: Flutter native asset (${{ matrix.name }})
+    needs: [native-tls, android-native-tls, apple-native-tls]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS arm64 + iOS arm64
+            os: macos-15
+            test_ios: true
+          - name: macOS x64
+            os: macos-15-intel
+            test_ios: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: mssql-tls-*
+          path: native-assets
+      - run: bash tool/stage_ci_native_tls.sh native-assets
+      - name: Create smoke application
+        run: |
+          flutter create \
+            --platforms=ios,macos \
+            --org dev.mssql \
+            --project-name mssql_apple_smoke \
+            build/apple-smoke
+          cp .github/fixtures/apple_smoke/pubspec.yaml \
+            build/apple-smoke/pubspec.yaml
+          mkdir -p build/apple-smoke/integration_test
+          cp .github/fixtures/apple_smoke/native_tls_smoke_test.dart \
+            build/apple-smoke/integration_test/native_tls_smoke_test.dart
+          cd build/apple-smoke
+          flutter pub get
+      - name: Run macOS Flutter smoke test
+        working-directory: build/apple-smoke
+        run: |
+          set -euo pipefail
+          flutter test integration_test/native_tls_smoke_test.dart -d macos
+          flutter build macos --release
+          HELPER=$(find build/macos -path \
+            '*Frameworks/libmssql_tls.framework/libmssql_tls' -print -quit)
+          test -n "$HELPER"
+          file "$HELPER"
+          otool -l "$HELPER" | grep -A 5 LC_BUILD_VERSION
+      - name: Run iOS Simulator Flutter smoke test
+        if: matrix.test_ios
+        working-directory: build/apple-smoke
+        run: |
+          set -euo pipefail
+          DEVICE=$(xcrun simctl list devices available -j | \
+            python3 -c 'import json,sys; d=json.load(sys.stdin)["devices"]; print(next(x["udid"] for values in d.values() for x in values if "iPhone" in x["name"]))')
+          xcrun simctl boot "$DEVICE" || true
+          xcrun simctl bootstatus "$DEVICE" -b
+          flutter test integration_test/native_tls_smoke_test.dart -d "$DEVICE"
+      - name: Build unsigned iOS device application
+        if: matrix.test_ios
+        working-directory: build/apple-smoke
+        run: |
+          set -euo pipefail
+          flutter build ios --release --no-codesign
+          HELPER=$(find build/ios/iphoneos -path \
+            '*Frameworks/libmssql_tls.framework/libmssql_tls' -print -quit)
+          test -n "$HELPER"
+          file "$HELPER"
+          otool -l "$HELPER" | grep -A 5 LC_BUILD_VERSION | grep 'platform 2'

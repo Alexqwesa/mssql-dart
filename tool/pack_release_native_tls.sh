@@ -29,6 +29,18 @@ for asset in "$from"/*; do
       cp "$asset/armeabi-v7a/libmssql_tls.so" "$out/android-armeabi-v7a-libmssql_tls.so"
       cp "$asset/x86_64/libmssql_tls.so" "$out/android-x86_64-libmssql_tls.so"
       ;;
+    mssql-tls-macos)
+      cp "$asset/arm64/libmssql_tls.dylib" "$out/macos-arm64-libmssql_tls.dylib"
+      cp "$asset/x86_64/libmssql_tls.dylib" "$out/macos-x86_64-libmssql_tls.dylib"
+      ;;
+    mssql-tls-ios)
+      cp "$asset/iphoneos/arm64/libmssql_tls.dylib" \
+        "$out/ios-iphoneos-arm64-libmssql_tls.dylib"
+      cp "$asset/iphonesimulator/arm64/libmssql_tls.dylib" \
+        "$out/ios-iphonesimulator-arm64-libmssql_tls.dylib"
+      cp "$asset/iphonesimulator/x86_64/libmssql_tls.dylib" \
+        "$out/ios-iphonesimulator-x86_64-libmssql_tls.dylib"
+      ;;
   esac
 done
 ls -la "$out"

@@ -23,6 +23,29 @@ void main() {
       );
     });
 
+    test('uses dylibs and architecture-specific macOS fallbacks', () {
+      expect(nativeTlsLibraryName('macos'), 'libmssql_tls.dylib');
+      expect(nativeTlsLibraryName('ios'), 'libmssql_tls.dylib');
+      expect(
+        nativeTlsLibraryCandidates(
+          operatingSystem: 'macos',
+          currentDirectory: '/project',
+          pathSeparator: '/',
+          architecture: 'arm64',
+        ),
+        ['libmssql_tls.dylib', '/project/dist/macos/arm64/libmssql_tls.dylib'],
+      );
+      expect(
+        nativeTlsLibraryCandidates(
+          operatingSystem: 'ios',
+          currentDirectory: '/unused',
+          pathSeparator: '/',
+          architecture: 'arm64',
+        ),
+        ['libmssql_tls.dylib'],
+      );
+    });
+
     test('puts an explicit override before the Android linker name', () {
       expect(
         nativeTlsLibraryCandidates(
@@ -42,10 +65,7 @@ void main() {
           currentDirectory: '/project',
           pathSeparator: '/',
         ),
-        [
-          'libmssql_tls.so',
-          '/project/native/bin/linux-x64/libmssql_tls.so',
-        ],
+        ['libmssql_tls.so', '/project/native/bin/linux-x64/libmssql_tls.so'],
       );
     });
   });

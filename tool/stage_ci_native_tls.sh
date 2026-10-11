@@ -11,11 +11,18 @@ if [[ ! -d "$from" ]]; then
   exit 1
 fi
 
-mkdir -p "$root/native/bin/linux-x64" "$root/native/bin/windows-x64" "$root/dist/android"
+mkdir -p \
+  "$root/native/bin/linux-x64" \
+  "$root/native/bin/windows-x64" \
+  "$root/dist/android" \
+  "$root/dist/macos" \
+  "$root/dist/ios"
 
 linux="$from/mssql-tls-linux-x64/libmssql_tls.so"
 windows="$from/mssql-tls-windows-x64/mssql_tls.dll"
 android_dir="$from/mssql-tls-android"
+macos_dir="$from/mssql-tls-macos"
+ios_dir="$from/mssql-tls-ios"
 
 if [[ -f "$linux" ]]; then
   cp "$linux" "$root/native/bin/linux-x64/libmssql_tls.so"
@@ -28,6 +35,14 @@ fi
 if [[ -d "$android_dir" ]]; then
   cp -a "$android_dir"/. "$root/dist/android/"
   echo "staged android -> dist/android/"
+fi
+if [[ -d "$macos_dir" ]]; then
+  cp -a "$macos_dir"/. "$root/dist/macos/"
+  echo "staged macOS -> dist/macos/"
+fi
+if [[ -d "$ios_dir" ]]; then
+  cp -a "$ios_dir"/. "$root/dist/ios/"
+  echo "staged iOS -> dist/ios/"
 fi
 
 if [[ ! -f "$root/native/bin/linux-x64/libmssql_tls.so" ]]; then

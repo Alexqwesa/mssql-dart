@@ -4,15 +4,18 @@
 #include <openssl/rsa.h>
 #include <openssl/ssl.h>
 #include <openssl/x509.h>
+#include <openssl/x509v3.h>
 
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <filesystem>
+#include <string>
 #include <vector>
 
 namespace {
 
-SSL_CTX* make_server_context() {
+SSL_CTX* make_server_context(const char* certificate_path = nullptr) {
   SSL_CTX* context = SSL_CTX_new(TLS_server_method());
   assert(context != nullptr);
   EVP_PKEY_CTX* key_context = EVP_PKEY_CTX_new_id(EVP_PKEY_RSA, nullptr);
@@ -34,9 +37,27 @@ SSL_CTX* make_server_context() {
   assert(X509_NAME_add_entry_by_txt(name, "CN", MBSTRING_ASC,
       reinterpret_cast<const unsigned char*>("localhost"), -1, -1, 0) == 1);
   assert(X509_set_issuer_name(certificate, name) == 1);
+  X509_EXTENSION* basic_constraints = X509V3_EXT_conf_nid(
+      nullptr, nullptr, NID_basic_constraints,
+      const_cast<char*>("critical,CA:TRUE"));
+  assert(basic_constraints != nullptr);
+  assert(X509_add_ext(certificate, basic_constraints, -1) == 1);
+  X509_EXTENSION_free(basic_constraints);
+  X509_EXTENSION* subject_alt_name = X509V3_EXT_conf_nid(
+      nullptr, nullptr, NID_subject_alt_name,
+      const_cast<char*>("DNS:localhost"));
+  assert(subject_alt_name != nullptr);
+  assert(X509_add_ext(certificate, subject_alt_name, -1) == 1);
+  X509_EXTENSION_free(subject_alt_name);
   assert(X509_sign(certificate, key, EVP_sha256()) > 0);
   assert(SSL_CTX_use_certificate(context, certificate) == 1);
   assert(SSL_CTX_use_PrivateKey(context, key) == 1);
+  if (certificate_path != nullptr) {
+    BIO* output = BIO_new_file(certificate_path, "w");
+    assert(output != nullptr);
+    assert(PEM_write_bio_X509(output, certificate) == 1);
+    BIO_free(output);
+  }
   X509_free(certificate);
   EVP_PKEY_free(key);
   return context;
@@ -63,6 +84,34 @@ void transfer_server_output(SSL* server, mssql_tls* client) {
   }
 }
 
+SSL* make_server(SSL_CTX* context) {
+  SSL* server = SSL_new(context);
+  assert(server != nullptr);
+  SSL_set_bio(server, BIO_new(BIO_s_mem()), BIO_new(BIO_s_mem()));
+  SSL_set_accept_state(server);
+  return server;
+}
+
+bool complete_handshake(mssql_tls* client, SSL* server) {
+  for (int i = 0; i < 100 && !mssql_tls_is_handshake_complete(client); ++i) {
+    const mssql_tls_result result = mssql_tls_handshake(client);
+    if (result < 0) return false;
+    assert(result == MSSQL_TLS_WANT_INPUT || result == MSSQL_TLS_WANT_OUTPUT ||
+           result == MSSQL_TLS_HANDSHAKE_COMPLETE);
+    transfer_client_output(client, server);
+    const int server_result = SSL_do_handshake(server);
+    if (server_result != 1) {
+      const int server_error = SSL_get_error(server, server_result);
+      if (server_error != SSL_ERROR_WANT_READ &&
+          server_error != SSL_ERROR_WANT_WRITE) {
+        return false;
+      }
+    }
+    transfer_server_output(server, client);
+  }
+  return mssql_tls_is_handshake_complete(client) != 0;
+}
+
 }  // namespace
 
 int main() {
@@ -75,23 +124,11 @@ int main() {
   assert(mssql_tls_has_pending_write(client) == 0);
 
   SSL_CTX* server_context = make_server_context();
-  SSL* server = SSL_new(server_context);
-  assert(server != nullptr);
-  SSL_set_bio(server, BIO_new(BIO_s_mem()), BIO_new(BIO_s_mem()));
-  SSL_set_accept_state(server);
+  SSL* server = make_server(server_context);
 
   // Complete a full in-memory TLS handshake, exercising the same BIO pumping
   // used by the Dart TDS PRELOGIN bridge.
-  for (int i = 0; i < 100 && !mssql_tls_is_handshake_complete(client); ++i) {
-    const mssql_tls_result result = mssql_tls_handshake(client);
-    assert(result == MSSQL_TLS_WANT_INPUT || result == MSSQL_TLS_WANT_OUTPUT ||
-           result == MSSQL_TLS_HANDSHAKE_COMPLETE);
-    transfer_client_output(client, server);
-    const int server_result = SSL_do_handshake(server);
-    assert(server_result == 1 || SSL_get_error(server, server_result) == SSL_ERROR_WANT_READ);
-    transfer_server_output(server, client);
-  }
-  assert(mssql_tls_is_handshake_complete(client) != 0);
+  assert(complete_handshake(client, server));
   assert(SSL_is_init_finished(server));
 
   size_t certificate_size = 0;
@@ -125,5 +162,47 @@ int main() {
   mssql_tls_destroy(client);
   SSL_free(server);
   SSL_CTX_free(server_context);
+
+  // A caller-provided PEM root continues to use OpenSSL chain + hostname
+  // validation on every platform, including Apple.
+  const std::filesystem::path ca_path =
+      std::filesystem::temp_directory_path() / "mssql_tls_test_ca.pem";
+  server_context = make_server_context(ca_path.string().c_str());
+  server = make_server(server_context);
+  const std::string ca_file = ca_path.string();
+  const mssql_tls_config custom_ca = {
+      "localhost", ca_file.c_str(), nullptr, 0, 1, 16383};
+  client = mssql_tls_create(&custom_ca);
+  assert(client != nullptr);
+  assert(complete_handshake(client, server));
+  mssql_tls_destroy(client);
+  SSL_free(server);
+  SSL_CTX_free(server_context);
+
+  // The same trusted certificate must fail for a different hostname.
+  server_context = make_server_context(ca_path.string().c_str());
+  server = make_server(server_context);
+  const mssql_tls_config wrong_hostname = {
+      "not-localhost.example", ca_file.c_str(), nullptr, 0, 1, 16383};
+  client = mssql_tls_create(&wrong_hostname);
+  assert(client != nullptr);
+  assert(!complete_handshake(client, server));
+  mssql_tls_destroy(client);
+  SSL_free(server);
+  SSL_CTX_free(server_context);
+
+  // With no explicit root, the generated certificate is unknown to both the
+  // OpenSSL defaults and the Apple system Keychain.
+  server_context = make_server_context();
+  server = make_server(server_context);
+  const mssql_tls_config unknown_ca = {
+      "localhost", nullptr, nullptr, 0, 1, 16383};
+  client = mssql_tls_create(&unknown_ca);
+  assert(client != nullptr);
+  assert(!complete_handshake(client, server));
+  mssql_tls_destroy(client);
+  SSL_free(server);
+  SSL_CTX_free(server_context);
+  std::filesystem::remove(ca_path);
   return 0;
 }

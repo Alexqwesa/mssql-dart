@@ -40,7 +40,7 @@ hooks:
   user_defines:
     mssql_driver_with_native_tls:
       release_tag: v0.5.5   # must have matching in-package SHA-256 pins
-      local_only: true      # require native/bin or dist/android; never download
+      local_only: true      # require a platform helper under native/bin or dist
       force_download: true  # ignore local helpers and download the pinned asset
 ```
 
@@ -54,8 +54,8 @@ Hook resolution order at runtime:
 
 1. `MSSQL_TLS_LIBRARY` environment override
 2. Code asset from `hook/build.dart` (`DynamicLibrary.codeAsset`)
-3. Platform linker name (Android `jniLibs`, or process search path)
-4. Checked-out `native/bin/<platform>/` (or `dist/android/<abi>/`)
+3. Platform linker name (bundled app library or process search path)
+4. Checked-out `native/bin/<platform>/` or `dist/<platform>/<slice>/`
 
 ### Windows — `tool/build_native.ps1`
 
@@ -100,6 +100,27 @@ bash tool/build_android_native.sh
 ```
 
 Outputs land in `dist/android/<abi>/`.
+
+### macOS and iOS
+
+Dependencies: macOS with Xcode command-line tools, CMake ≥ 3.24, Ninja, Perl,
+Make, and curl. The script downloads the same pinned OpenSSL source used for
+Android, builds it statically, and links thin dylibs for each Apple slice:
+
+```bash
+bash tool/build_apple_native.sh
+```
+
+Outputs:
+
+- `dist/macos/{arm64,x86_64}/libmssql_tls.dylib`
+- `dist/ios/iphoneos/arm64/libmssql_tls.dylib`
+- `dist/ios/iphonesimulator/{arm64,x86_64}/libmssql_tls.dylib`
+
+The defaults are macOS 12 and iOS 15. Override them only when validating a
+different supported baseline with `MSSQL_MACOS_MIN` / `MSSQL_IOS_MIN`.
+Default Apple certificate validation uses Security.framework and the system
+trust store; explicit PEM CA paths still use OpenSSL validation.
 
 ## Prebuilt release artifacts
 
@@ -148,6 +169,11 @@ and the consumer build hook reuse and verify those existing Release assets.
 
    The tag-triggered Publish workflow will reuse the pinned native Release.
 
+   The first package release that advertises macOS/iOS support is an exception:
+   it **must** use **Release native assets**, because the currently pinned
+   `v0.5.5` Release has no Apple ZIPs or Apple SHA-256 pins. Later package-only
+   releases can reuse the first complete Apple-capable native Release.
+
    **`gh workflow run` 404 / workflow missing:** the workflow file must exist
    on the **default branch** (`main`) or the API returns
    `workflow release_native_assets.yml not found on the default branch`. Copy
@@ -157,7 +183,7 @@ and the consumer build hook reuse and verify those existing Release assets.
 
    When run, the native-assets workflow:
 
-   - builds fresh Windows / Linux / Android helpers
+   - builds fresh Windows / Linux / Android / macOS / iOS helpers
    - refuses to continue if `vX.Y.Z` already exists
    - commits pins when hashes changed (`ci: pin native TLS SHA-256 for vX.Y.Z`)
    - creates and pushes annotated tag `vX.Y.Z`

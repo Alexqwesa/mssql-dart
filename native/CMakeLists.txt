@@ -11,6 +11,26 @@ find_package(OpenSSL REQUIRED COMPONENTS SSL Crypto)
 add_library(mssql_tls SHARED src/mssql_tls.cpp)
 target_include_directories(mssql_tls PUBLIC include)
 target_link_libraries(mssql_tls PRIVATE OpenSSL::SSL OpenSSL::Crypto)
+set_target_properties(mssql_tls PROPERTIES
+  CXX_VISIBILITY_PRESET hidden
+  VISIBILITY_INLINES_HIDDEN YES
+)
+if(APPLE)
+  find_library(CORE_FOUNDATION_FRAMEWORK CoreFoundation REQUIRED)
+  find_library(SECURITY_FRAMEWORK Security REQUIRED)
+  target_link_libraries(mssql_tls PRIVATE
+    ${CORE_FOUNDATION_FRAMEWORK}
+    ${SECURITY_FRAMEWORK}
+  )
+  target_link_options(mssql_tls PRIVATE
+    "-Wl,-exported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/apple_exports.txt"
+  )
+  set_target_properties(mssql_tls PROPERTIES
+    MACOSX_RPATH ON
+    INSTALL_NAME_DIR "@rpath"
+    BUILD_WITH_INSTALL_NAME_DIR ON
+  )
+endif()
 if(MSVC)
   target_compile_options(mssql_tls PRIVATE /W4 /WX)
 else()

@@ -5,9 +5,10 @@ protocol. SQL Server protocol handling, authentication, queries, pooling,
 transactions, type encoding/decoding, Bulk Load, and related functionality are
 implemented in Dart. Native code is used only for the TLS transport.
 
-The native OpenSSL helper is currently required for TLS on Windows, Linux, and
-Android. This is the compatibility trade-off for reliable encrypted multi-packet
-requests, Bulk Load, and Attention cancellation on a standard Dart SDK.
+The native OpenSSL helper is currently required for TLS on Windows, Linux,
+Android, macOS, and iOS. This is the compatibility trade-off for reliable
+encrypted multi-packet requests, Bulk Load, and Attention cancellation on a
+standard Dart SDK.
 Unencrypted connections continue to use only Dart and TCP.
 
 ```
@@ -39,7 +40,7 @@ There are several Dart and Flutter packages for connecting to Microsoft SQL Serv
 
 | Package                                                                                   | Architecture | SQL Server protocol | Native dependency | Platforms |
 |-------------------------------------------------------------------------------------------| --- | --- | --- | --- |
-| **`mssql_driver_with_native_tls`**                                                        | Dart TDS driver + native TLS | Implemented in Dart | Small OpenSSL TLS helper | Windows, Linux, Android |
+| **`mssql_driver_with_native_tls`**                                                        | Dart TDS driver + native TLS | Implemented in Dart | Small OpenSSL TLS helper | Windows, Linux, Android, macOS, iOS |
 | **[`mssql`](https://pub.dev/packages/mssql)**                                             | Pure-Dart TDS 7.4/8.0 driver | Implemented in Dart | None; encrypted TDS uses 512-byte packet alignment and padding | Windows, Linux, macOS, Android, iOS |
 | [`mssql` experimental fork (v0.6.x)](https://github.com/Alexqwesa/mssql-dart/tree/v0.6.0) | Pure-Dart TDS 7.4 driver | Implemented in Dart | None; encrypted connections require a patched Dart SDK | Platforms supported by the patched Dart runtime |
 | `mssql_native`                                                                            | Flutter/Dart FFI around FreeTDS | FreeTDS | FreeTDS (bundled) | Windows, Linux, macOS, Android, iOS |
@@ -794,10 +795,15 @@ Named parameters use `@name` placeholders. Supported Dart → SQL type mappings:
 ## TLS / Encryption
 
 TDS 7.x wraps the TLS handshake in PRELOGIN packets, then switches to raw TLS
-for the rest of the session. On Windows, Linux, and Android, encrypted connections use
-the bundled native OpenSSL transport. It serializes TLS reads and writes so
+for the rest of the session. On Windows, Linux, Android, macOS, and iOS,
+encrypted connections use the bundled native OpenSSL transport. It serializes TLS reads and writes so
 multi-packet requests, Bulk Load, and Attention cancellation remain reliable.
 Cleartext connections continue to use Dart and TCP only.
+
+On Apple platforms, default certificate validation uses the macOS/iOS system
+trust store and hostname policy through Security.framework. Explicit
+`trustedCertificateFile` and `trustedCertificateDirectory` values continue to
+use the supplied PEM roots.
 
 ```dart
 // Production (Azure SQL, SQL Server with TLS)
@@ -844,6 +850,7 @@ exist on `MssqlPoolConfig` / `MssqlPoolConfig.fromConnectionString`.
 ## Requirements
 
 - Dart SDK >= 3.13
+- macOS 12+ or iOS 15+ when targeting Apple platforms
 - SQL Server 2008 R2 or later (TDS 7.4 / protocol 0x04000074)
 - Azure SQL Database / Azure SQL Edge
 - Port 1433 (or custom) reachable from the Dart process
@@ -865,6 +872,12 @@ SHA-256 pins and each zip’s `SHA256SUMS`.
 | Windows x64 | `mssql_tls.dll` | `mssql-tls-windows-x64.zip` |
 | Linux x64 | `libmssql_tls.so` | `mssql-tls-linux-x64.zip` |
 | Android | `libmssql_tls.so` | `mssql-tls-android.zip` (per ABI) |
+| macOS arm64 / x64 | `libmssql_tls.dylib` | `mssql-tls-macos.zip` |
+| iOS device arm64; Simulator arm64 / x64 | `libmssql_tls.dylib` | `mssql-tls-ios.zip` |
+
+Flutter bundles Apple code assets into the application and signs them with the
+app. An iOS app connecting to a SQL Server on the local network must also
+declare an appropriate `NSLocalNetworkUsageDescription` in its `Info.plist`.
 
 Local builds, CI artifacts, testing, and releasing: [DEV_README.md](DEV_README.md).
 
@@ -873,8 +886,9 @@ Local builds, CI artifacts, testing, and releasing: [DEV_README.md](DEV_README.m
 - Tested with SQL Server 2017, 2019, 2022, and 2025. Earlier versions from SQL
   Server 2012 onward should be protocol-compatible through TDS 7.4 but are not
   currently tested.
-- TLS on Windows, Linux, and Android requires the native OpenSSL helper. A pure-Dart TLS
-  fallback is not provided in 0.5.0; use 0.4.1 only when its encrypted
+- TLS on Windows, Linux, Android, macOS, and iOS requires the native OpenSSL
+  helper. A pure-Dart TLS fallback is not provided in 0.5.0; use 0.4.1 only
+  when its encrypted
   multi-packet and Bulk Load limitations are acceptable.
 - Azure AD authentication requires a bearer token supplied by the caller (e.g. obtained via `azure_identity`); the driver does not fetch tokens itself.
 - Prepared statement handles (`sp_prepare` / `sp_execute`) are not supported. All parameterized queries use `sp_executesql`, which SQL Server plan-caches by query hash, so repeated-query performance is similar in practice.

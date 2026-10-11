@@ -26,6 +26,7 @@ final class NativeTlsReleaseAsset {
 NativeTlsReleaseAsset? nativeTlsReleaseAsset({
   required String operatingSystem,
   required String architecture,
+  String? platformVariant,
 }) {
   switch (operatingSystem) {
     case 'linux':
@@ -62,6 +63,33 @@ NativeTlsReleaseAsset? nativeTlsReleaseAsset({
         libraryFileName: 'libmssql_tls.so',
         localPackageRelativePath: 'dist/android/$abi/libmssql_tls.so',
       );
+    case 'macos':
+      final directory = switch (architecture) {
+        'arm64' => 'arm64',
+        'x64' => 'x86_64',
+        _ => null,
+      };
+      if (directory == null) return null;
+      return NativeTlsReleaseAsset(
+        zipName: 'mssql-tls-macos.zip',
+        libraryPathInZip: '$directory/libmssql_tls.dylib',
+        libraryFileName: 'libmssql_tls.dylib',
+        localPackageRelativePath: 'dist/macos/$directory/libmssql_tls.dylib',
+      );
+    case 'ios':
+      final directory = switch ((platformVariant, architecture)) {
+        ('iphoneos', 'arm64') => 'iphoneos/arm64',
+        ('iphonesimulator', 'arm64') => 'iphonesimulator/arm64',
+        ('iphonesimulator', 'x64') => 'iphonesimulator/x86_64',
+        _ => null,
+      };
+      if (directory == null) return null;
+      return NativeTlsReleaseAsset(
+        zipName: 'mssql-tls-ios.zip',
+        libraryPathInZip: '$directory/libmssql_tls.dylib',
+        libraryFileName: 'libmssql_tls.dylib',
+        localPackageRelativePath: 'dist/ios/$directory/libmssql_tls.dylib',
+      );
     default:
       return null;
   }
@@ -72,11 +100,10 @@ Uri nativeTlsReleaseUri({
   required String releaseTag,
   required String zipName,
   String repository = 'Alexqwesa/mssql-dart',
-}) =>
-    Uri.https(
-      'github.com',
-      '/$repository/releases/download/$releaseTag/$zipName',
-    );
+}) => Uri.https(
+  'github.com',
+  '/$repository/releases/download/$releaseTag/$zipName',
+);
 
 /// Parses a `SHA256SUMS` file and returns the expected digest for [fileName].
 String? sha256FromSums(String sumsText, String fileName) {

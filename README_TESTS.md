@@ -20,12 +20,13 @@ than fail.
 The native OpenSSL ABI has an in-memory client/server CTest that covers the
 handshake, certificate extraction, and encrypted request/response flow.
 
-GitHub Actions builds and tests self-contained Windows x64 and Linux x64
-helpers on every push to `main` and `mssql_native`, and on pull requests. It also
-cross-builds Android `arm64-v8a`, `armeabi-v7a`, and `x86_64` helpers,
-statically linking OpenSSL into each `libmssql_tls.so`. Each run uploads
-`mssql-tls-*` artifacts (Actions → workflow run → Artifacts). Tagged builds
-also attach platform ZIPs, with `SHA256SUMS`, to the GitHub release.
+The manual **Release native assets** workflow builds and tests self-contained
+Windows x64 and Linux x64 helpers, cross-builds Android `arm64-v8a`,
+`armeabi-v7a`, and `x86_64`, and builds macOS arm64/x64 plus iOS
+device/simulator helpers. OpenSSL is linked statically into each platform
+helper. The workflow uploads `mssql-tls-*` artifacts, pins their hashes, and
+attaches the ZIPs with `SHA256SUMS` to the GitHub release. Ordinary package
+tags reuse those pinned assets instead of rebuilding them.
 
 ### Windows — `tool/build_native.ps1`
 

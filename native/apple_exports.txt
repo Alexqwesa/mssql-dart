@@ -1,0 +1,13 @@
+_mssql_tls_create
+_mssql_tls_destroy
+_mssql_tls_drain_encrypted
+_mssql_tls_feed_encrypted
+_mssql_tls_handshake
+_mssql_tls_has_pending_write
+_mssql_tls_is_handshake_complete
+_mssql_tls_last_error
+_mssql_tls_openssl_version
+_mssql_tls_peer_certificate_der
+_mssql_tls_read_plaintext
+_mssql_tls_retry_write
+_mssql_tls_write_packet

@@ -31,18 +31,22 @@ const Map<String, String> nativeTlsPinnedSha256 = {
 String nativeTlsPinKey({
   required String operatingSystem,
   required String architecture,
-}) =>
-    '$operatingSystem/$architecture';
+  String? platformVariant,
+}) => platformVariant == null
+    ? '$operatingSystem/$architecture'
+    : '$operatingSystem/$platformVariant/$architecture';
 
 /// Returns the pinned SHA-256 for [releaseTag] + target, or `null` if absent.
 String? nativeTlsPinnedDigest({
   required String releaseTag,
   required String operatingSystem,
   required String architecture,
+  String? platformVariant,
 }) {
   if (releaseTag != nativeTlsPinnedReleaseTag) return null;
   return nativeTlsPinnedSha256[nativeTlsPinKey(
     operatingSystem: operatingSystem,
     architecture: architecture,
+    platformVariant: platformVariant,
   )];
 }

@@ -56,7 +56,9 @@ jobs:
           for name in \
             mssql-tls-linux-x64 \
             mssql-tls-windows-x64 \
-            mssql-tls-android
+            mssql-tls-android \
+            mssql-tls-macos \
+            mssql-tls-ios
           do
             gh release download "$NATIVE_RELEASE_TAG" \
               --pattern "$name.zip" \
@@ -89,6 +91,18 @@ jobs:
         with:
           name: mssql-tls-android
           path: native-assets/mssql-tls-android/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mssql-tls-macos
+          path: native-assets/mssql-tls-macos/
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mssql-tls-ios
+          path: native-assets/mssql-tls-ios/
           if-no-files-found: error
 
   # ════════════════════════════════════════════════════════════════════════════

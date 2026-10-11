@@ -27,10 +27,26 @@ void main() {
     );
   });
 
-  test('pin keys are os/arch', () {
+  test('pin keys include the Apple SDK when required', () {
     expect(
       nativeTlsPinKey(operatingSystem: 'android', architecture: 'arm64'),
       'android/arm64',
+    );
+    expect(
+      nativeTlsPinKey(
+        operatingSystem: 'ios',
+        architecture: 'arm64',
+        platformVariant: 'iphoneos',
+      ),
+      'ios/iphoneos/arm64',
+    );
+    expect(
+      nativeTlsPinKey(
+        operatingSystem: 'ios',
+        architecture: 'arm64',
+        platformVariant: 'iphonesimulator',
+      ),
+      'ios/iphonesimulator/arm64',
     );
   });
 }

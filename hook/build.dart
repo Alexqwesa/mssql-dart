@@ -21,15 +21,22 @@ Future<void> main(List<String> args) async {
       );
     }
 
+    final platformVariant = code.targetOS.name == 'ios'
+        ? code.iOS.targetSdk.type
+        : null;
     final asset = nativeTlsReleaseAsset(
       operatingSystem: code.targetOS.name,
       architecture: code.targetArchitecture.name,
+      platformVariant: platformVariant,
     );
     if (asset == null) {
       throw UnsupportedError(
         'No prebuilt native TLS helper for '
-        '${code.targetOS.name}/${code.targetArchitecture.name}. '
-        'Supported: linux/x64, windows/x64, android arm/arm64/x64.',
+        '${code.targetOS.name}'
+        '${platformVariant == null ? '' : '/$platformVariant'}'
+        '/${code.targetArchitecture.name}. Supported: linux/x64, '
+        'windows/x64, android arm/arm64/x64, macos arm64/x64, '
+        'ios arm64, and ios-simulator arm64/x64.',
       );
     }
 
@@ -44,6 +51,7 @@ Future<void> main(List<String> args) async {
       releaseTag: releaseTag,
       operatingSystem: code.targetOS.name,
       architecture: code.targetArchitecture.name,
+      platformVariant: platformVariant,
       localOnly: localOnly,
       forceDownload: forceDownload,
     );
@@ -69,17 +77,20 @@ String _requirePin({
   required String releaseTag,
   required String operatingSystem,
   required String architecture,
+  String? platformVariant,
 }) {
   final pin = nativeTlsPinnedDigest(
     releaseTag: releaseTag,
     operatingSystem: operatingSystem,
     architecture: architecture,
+    platformVariant: platformVariant,
   );
   if (pin != null && pin.isNotEmpty) return pin;
 
   final key = nativeTlsPinKey(
     operatingSystem: operatingSystem,
     architecture: architecture,
+    platformVariant: platformVariant,
   );
   if (releaseTag != nativeTlsPinnedReleaseTag) {
     throw StateError(
@@ -104,6 +115,7 @@ Future<File> _resolveLibrary({
   required String releaseTag,
   required String operatingSystem,
   required String architecture,
+  String? platformVariant,
   required bool localOnly,
   required bool forceDownload,
 }) async {
@@ -123,11 +135,17 @@ Future<File> _resolveLibrary({
     releaseTag: releaseTag,
     operatingSystem: operatingSystem,
     architecture: architecture,
+    platformVariant: platformVariant,
   );
 
+  final targetKey = nativeTlsPinKey(
+    operatingSystem: operatingSystem,
+    architecture: architecture,
+    platformVariant: platformVariant,
+  );
   final cacheDir = Directory.fromUri(
     input.outputDirectoryShared.resolve(
-      'mssql_tls/$releaseTag/$operatingSystem-$architecture/',
+      'mssql_tls/$releaseTag/${targetKey.replaceAll('/', '-')}/',
     ),
   );
   await cacheDir.create(recursive: true);
@@ -142,8 +160,7 @@ Future<File> _resolveLibrary({
   if (localOnly) {
     throw StateError(
       'Native TLS helper not found locally for '
-      '$operatingSystem/$architecture. '
-      'Build it with tool/build_native.sh (or the Android script), or unset '
+      '$targetKey. Build it with the platform build script, or unset '
       'hooks.user_defines.mssql_driver_with_native_tls.local_only to download a release.',
     );
   }

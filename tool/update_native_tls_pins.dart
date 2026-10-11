@@ -12,12 +12,17 @@ import 'package:crypto/crypto.dart';
 import 'package:mssql_driver_with_native_tls/src/native_tls/native_tls_pins.dart';
 import 'package:mssql_driver_with_native_tls/src/native_tls/native_tls_release.dart';
 
-const _targets = <(String os, String arch)>[
-  ('linux', 'x64'),
-  ('windows', 'x64'),
-  ('android', 'arm64'),
-  ('android', 'arm'),
-  ('android', 'x64'),
+const _targets = <({String os, String arch, String? platformVariant})>[
+  (os: 'linux', arch: 'x64', platformVariant: null),
+  (os: 'windows', arch: 'x64', platformVariant: null),
+  (os: 'android', arch: 'arm64', platformVariant: null),
+  (os: 'android', arch: 'arm', platformVariant: null),
+  (os: 'android', arch: 'x64', platformVariant: null),
+  (os: 'macos', arch: 'arm64', platformVariant: null),
+  (os: 'macos', arch: 'x64', platformVariant: null),
+  (os: 'ios', arch: 'arm64', platformVariant: 'iphoneos'),
+  (os: 'ios', arch: 'arm64', platformVariant: 'iphonesimulator'),
+  (os: 'ios', arch: 'x64', platformVariant: 'iphonesimulator'),
 ];
 
 Future<void> main(List<String> args) async {
@@ -63,18 +68,19 @@ Options:
 
   final found = <String, String>{};
   final missing = <String>[];
-  for (final (os, arch) in _targets) {
+  for (final target in _targets) {
     final asset = nativeTlsReleaseAsset(
-      operatingSystem: os,
-      architecture: arch,
+      operatingSystem: target.os,
+      architecture: target.arch,
+      platformVariant: target.platformVariant,
     );
     if (asset == null) continue;
-    final key = '$os/$arch';
-    final file = _locateLibrary(
-      root: root,
-      fromDir: fromDir,
-      asset: asset,
+    final key = nativeTlsPinKey(
+      operatingSystem: target.os,
+      architecture: target.arch,
+      platformVariant: target.platformVariant,
     );
+    final file = _locateLibrary(root: root, fromDir: fromDir, asset: asset);
     if (file == null) {
       missing.add(key);
       stdout.writeln('skip  $key (not found)');
@@ -96,9 +102,7 @@ Options:
   }
 
   if (requireAll && missing.isNotEmpty) {
-    stderr.writeln(
-      'Missing required native libraries: ${missing.join(', ')}',
-    );
+    stderr.writeln('Missing required native libraries: ${missing.join(', ')}');
     exitCode = 1;
     return;
   }
@@ -169,7 +173,8 @@ Options:
     return;
   }
 
-  final out = output ??
+  final out =
+      output ??
       File.fromUri(root.uri.resolve('lib/src/native_tls/native_tls_pins.dart'));
   out.parent.createSync(recursive: true);
   await out.writeAsString(_renderPins(tag: tag, pins: found));
@@ -204,7 +209,8 @@ File? _locateLibrary({
 }
 
 String _readPubspecVersion(Directory root) {
-  final text = File.fromUri(root.uri.resolve('pubspec.yaml')).readAsStringSync();
+  final text = File.fromUri(root.uri.resolve('pubspec.yaml'))
+      .readAsStringSync();
   final match = RegExp(
     r'^version:\s*(\S+)\s*$',
     multiLine: true,
@@ -215,19 +221,21 @@ String _readPubspecVersion(Directory root) {
   return match.group(1)!;
 }
 
-String _renderPins({
-  required String tag,
-  required Map<String, String> pins,
-}) {
-  final entries = pins.entries.toList()
-    ..sort((a, b) => a.key.compareTo(b.key));
+String _renderPins({required String tag, required Map<String, String> pins}) {
+  final entries = pins.entries.toList()..sort((a, b) => a.key.compareTo(b.key));
   final buffer = StringBuffer()
     ..writeln('// In-repo SHA-256 pins for GitHub Release native TLS helpers.')
     ..writeln('//')
     ..writeln('// Update with:')
-    ..writeln('//   dart run tool/update_native_tls_pins.dart --from-dir <ci-artifacts>')
-    ..writeln('// Prefer hashing the exact CI / Release zip members that will be')
-    ..writeln('// published for nativeTlsPinnedReleaseTag, then commit this file before')
+    ..writeln(
+      '//   dart run tool/update_native_tls_pins.dart --from-dir <ci-artifacts>',
+    )
+    ..writeln(
+      '// Prefer hashing the exact CI / Release zip members that will be',
+    )
+    ..writeln(
+      '// published for nativeTlsPinnedReleaseTag, then commit this file before',
+    )
     ..writeln('// tagging that release.')
     ..writeln()
     ..writeln('/// Release tag whose helpers are pinned below.')
@@ -254,8 +262,10 @@ String _renderPins({
     ..writeln('String nativeTlsPinKey({')
     ..writeln('  required String operatingSystem,')
     ..writeln('  required String architecture,')
-    ..writeln('}) =>')
-    ..writeln(r"    '$operatingSystem/$architecture';")
+    ..writeln('  String? platformVariant,')
+    ..writeln('}) => platformVariant == null')
+    ..writeln(r"    ? '$operatingSystem/$architecture'")
+    ..writeln(r"    : '$operatingSystem/$platformVariant/$architecture';")
     ..writeln()
     ..writeln(
       '/// Returns the pinned SHA-256 for [releaseTag] + target, or `null` if absent.',
@@ -264,13 +274,14 @@ String _renderPins({
     ..writeln('  required String releaseTag,')
     ..writeln('  required String operatingSystem,')
     ..writeln('  required String architecture,')
+    ..writeln('  String? platformVariant,')
     ..writeln('}) {')
     ..writeln('  if (releaseTag != nativeTlsPinnedReleaseTag) return null;')
     ..writeln('  return nativeTlsPinnedSha256[nativeTlsPinKey(')
     ..writeln('    operatingSystem: operatingSystem,')
     ..writeln('    architecture: architecture,')
+    ..writeln('    platformVariant: platformVariant,')
     ..writeln('  )];')
-    ..writeln('}')
-    ..writeln();
+    ..writeln('}');
   return buffer.toString();
 }
