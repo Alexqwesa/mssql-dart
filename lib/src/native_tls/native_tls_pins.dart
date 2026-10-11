@@ -9,22 +9,32 @@
 /// Release tag whose helpers are pinned below.
 ///
 /// This may be older than the package version when native code is unchanged.
-const String nativeTlsPinnedReleaseTag = 'v0.5.5';
+const String nativeTlsPinnedReleaseTag = 'v0.5.9';
 
 /// Map of `<os>/<arch>` → lowercase hex SHA-256 of the dynamic library.
 ///
 /// Keys match [nativeTlsPinKey].
 const Map<String, String> nativeTlsPinnedSha256 = {
   'android/arm':
-      '51c2ee3bf88799143ecb2faf02f972eca7a830a209a4f970a2b619368cbe4c09',
+      '9fbd94324dd2037ee857d4bd0cf23cc20a1e684bddbbb69b44c8d9e710e040ba',
   'android/arm64':
-      'a9b5498eb716afac147aff59214d90e49ec6cf5c8e6662b1cbc154483bebeb02',
+      'aafe3d7c5d3af48ee116d25de06af36ed365b59974aa91fc45357258252f7ea0',
   'android/x64':
-      'beff68270388aaec846dde7263c76ccc2ecf02dbc28fa2bb97897003358328ad',
+      '8cf337552cf5d35f12f72bad54d4c1d4042a99e4d966b4d0aa4b416427e6d586',
+  'ios/iphoneos/arm64':
+      '8ea90c1b899f4d3cd2c6a96381bbd7887d8370a8fea41d62e4eeded1903a40ff',
+  'ios/iphonesimulator/arm64':
+      'ddcb36fd4c0c05790c415bd6c11841791d1b7a9eb4b0edeed08b619c1d379526',
+  'ios/iphonesimulator/x64':
+      'ecae4ea5ac822159633e830094a07f84f3f08c892fe68e8693fce3b19cf4a5be',
   'linux/x64':
-      '6d529a6ab5b06841def0f0d336e243c31917a7705c25f5a44c4586149eb87e46',
+      'ec330078577dfaef66ad70016ca509e495950822698e74fd3484a05bf4abb567',
+  'macos/arm64':
+      '6d9ae9a92d91235460a8789a909b195250991801e999100f988eebe1b9866a05',
+  'macos/x64':
+      '2ad96907f608746098ca32de85d60b5ab8319b343b8c16ba6371981783e9c850',
   'windows/x64':
-      '2d934723ef9a35baf5d5579446a1196a1b598dfebd68b88fc9d6422dbf531949',
+      '7cba320887ac96058ad87d5213c2e5519599c7b124b72a47f25f689eb982c42f',
 };
 
 /// Stable pin map key for a native-assets target.
