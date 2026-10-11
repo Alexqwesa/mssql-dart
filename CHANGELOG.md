@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.9
+## 0.5.10
 
 * TLS: add macOS 12+ (arm64/x64) and iOS 15+ (arm64 device,
   arm64/x64 Simulator) native OpenSSL helpers. Apple builds validate default
@@ -9,6 +9,10 @@
 * Build: package, SHA-256 pin, attest, download, and Flutter-smoke-test macOS
   and iOS code assets alongside the existing Windows, Linux, and Android
   release binaries.
+
+## 0.5.9
+
+* Skipped release - setting up github actions...
 
 ## 0.5.8
 

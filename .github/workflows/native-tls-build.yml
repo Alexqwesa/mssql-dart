@@ -487,6 +487,7 @@ jobs:
           flutter pub get
       - name: Run iOS Simulator Flutter smoke test
         working-directory: build/apple-smoke
+        timeout-minutes: 10
         run: |
           set -euo pipefail
           DEVICE=$(xcrun simctl list devices available -j | \
