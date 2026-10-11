@@ -8,8 +8,9 @@ import 'native_tls_asset.dart';
 /// Resolution order:
 /// 1. `MSSQL_TLS_LIBRARY` absolute path override
 /// 2. Code asset registered by `hook/build.dart` ([nativeTlsAssetId])
-/// 3. Platform linker name (bundled app library, or `PATH` / cwd)
-/// 4. Checked-out desktop helper under `native/bin/...` or `dist/macos/...`
+/// 3. Apple framework embedded beside the application executable
+/// 4. Platform linker name (bundled app library, or `PATH` / cwd)
+/// 5. Checked-out desktop helper under `native/bin/...` or `dist/macos/...`
 DynamicLibrary loadMssqlTls() {
   final platform = Platform.operatingSystem;
   final name = nativeTlsLibraryName(platform);
@@ -28,12 +29,15 @@ DynamicLibrary loadMssqlTls() {
     // Hooks may be unavailable (older tooling) or not yet run.
   }
 
-  final candidates = nativeTlsLibraryCandidates(
-    operatingSystem: platform,
-    currentDirectory: Directory.current.path,
-    pathSeparator: Platform.pathSeparator,
-    architecture: _currentArchitecture(),
-  );
+  final candidates = [
+    if (platform == 'macos' || platform == 'ios') _appleFrameworkPath(platform),
+    ...nativeTlsLibraryCandidates(
+      operatingSystem: platform,
+      currentDirectory: Directory.current.path,
+      pathSeparator: Platform.pathSeparator,
+      architecture: _currentArchitecture(),
+    ),
+  ];
   Object? lastError;
   for (final candidate in candidates) {
     try {
@@ -48,6 +52,17 @@ DynamicLibrary loadMssqlTls() {
     'MSSQL_TLS_LIBRARY. Cleartext connections do not require it. '
     'Code asset error: $codeAssetError. Fallback error: $lastError',
   );
+}
+
+String _appleFrameworkPath(String platform) {
+  final executableDir = File(Platform.resolvedExecutable).parent;
+
+  final frameworksDir = platform == 'macos'
+      ? executableDir.parent
+      : executableDir;
+
+  return '${frameworksDir.path}/Frameworks/'
+      'mssql_tls.framework/mssql_tls';
 }
 
 /// Returns the helper filename for a supported native TLS platform.
