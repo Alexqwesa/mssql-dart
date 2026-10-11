@@ -245,17 +245,30 @@ jobs:
               -c "Add :com.apple.security.network.client bool true" \
               "$file"
           done
-      - name: Run macOS Flutter smoke test
+      - name: Build and inspect macOS application
         working-directory: build/apple-smoke
         run: |
           set -euo pipefail
-          flutter test integration_test/native_tls_smoke_test.dart -d macos
           flutter build macos --release
           HELPER=$(find build/macos -path \
             '*Frameworks/libmssql_tls.framework/libmssql_tls' -print -quit)
           test -n "$HELPER"
           file "$HELPER"
           otool -l "$HELPER" | grep -A 5 LC_BUILD_VERSION
+      - name: Run macOS Flutter smoke test
+        working-directory: build/apple-smoke
+        run: flutter test integration_test/native_tls_smoke_test.dart -d macos
+      - name: Inspect macOS native asset packaging
+        if: always()
+        run: |
+          find build/apple-smoke/build/macos \
+            -iname '*mssql_tls*' -print || true
+
+          find build/apple-smoke/.dart_tool \
+            -iname '*mssql_tls*' -print || true
+
+          find dist/macos \
+            -name 'libmssql_tls.dylib' -print
       - name: Run iOS Simulator Flutter smoke test
         if: matrix.test_ios
         working-directory: build/apple-smoke

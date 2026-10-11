@@ -18,11 +18,13 @@ DynamicLibrary loadMssqlTls() {
     return DynamicLibrary.open(override);
   }
 
+  Object? codeAssetError;
   try {
     // Present on Dart 3.13+ stable; analyzer marks it @Since(3.14).
     // ignore: sdk_version_since
     return DynamicLibrary.codeAsset(nativeTlsAssetId);
-  } catch (_) {
+  } catch (error) {
+    codeAssetError = error;
     // Hooks may be unavailable (older tooling) or not yet run.
   }
 
@@ -43,7 +45,8 @@ DynamicLibrary loadMssqlTls() {
   throw UnsupportedError(
     'Encrypted SQL Server connections require the native TLS helper '
     '($name). Run `dart pub get` so hook/build.dart can download it, or set '
-    'MSSQL_TLS_LIBRARY. Cleartext connections do not require it. ($lastError)',
+    'MSSQL_TLS_LIBRARY. Cleartext connections do not require it. '
+    'Code asset error: $codeAssetError. Fallback error: $lastError',
   );
 }
 
