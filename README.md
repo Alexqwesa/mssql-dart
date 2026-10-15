@@ -1,5 +1,10 @@
 # mssql_driver_with_native_tls
 
+[![pub.dev](https://img.shields.io/pub/v/mssql.svg)](https://pub.dev/packages/mssql)
+[![Tests](https://github.com/Alexqwesa/mssql-dart/actions/workflows/publish.yml/badge.svg?branch=v0.5%2B)](https://github.com/Alexqwesa/mssql-dart/actions/workflows/publish.yml?query=branch%3Av0.5%2B)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Coverage](https://codecov.io/gh/Alexqwesa/mssql-dart/branch/v0.5%2B/graph/badge.svg)](https://codecov.io/gh/Alexqwesa/mssql-dart/tree/v0.5%2B)
+
 A Dart-first driver for Microsoft SQL Server, built on the TDS 7.4 wire
 protocol. SQL Server protocol handling, authentication, queries, pooling,
 transactions, type encoding/decoding, Bulk Load, and related functionality are

@@ -229,6 +229,9 @@ jobs:
     name: Test (SQL Server 2022)
     needs: [analyze, unit]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     services:
       mssql:
@@ -269,9 +272,17 @@ jobs:
             ! -name 'tls_force_encrypt_stress_test.dart' \
             ! -name 'connection_churn_live_test.dart' \
             | sort | tr '\n' ' ')
-          dart test $TEST_FILES --timeout=90s --reporter=expanded \
+          dart test $TEST_FILES --timeout=90s --reporter=expanded --coverage=coverage \
             | tee sql-server-test.log
           ! grep -Eq '~[1-9][0-9]*' sql-server-test.log
+      - name: Format Dart coverage
+        run: dart run coverage:format_coverage --lcov --in=coverage --out=coverage/lcov.info --packages=.dart_tool/package_config.json --report-on=lib
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage/lcov.info
+          fail_ci_if_error: true
+          use_oidc: true
 
   # ════════════════════════════════════════════════════════════════════════════
   # 4 · Publish to pub.dev  (tag pushes only, after tests pass)
