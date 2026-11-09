@@ -1,4 +1,6 @@
 import 'dart:io';
+import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:mssql_driver_with_native_tls/src/native_tls/native_tls_asset.dart';
 import 'package:mssql_driver_with_native_tls/src/native_tls/native_tls_loader.dart';
@@ -113,6 +115,36 @@ void main() {
       );
     });
 
+    test(
+      'concurrent isolates publish complete copies without collisions',
+      () async {
+        final temp = Directory.systemTemp.createTempSync('mssql_tls_isolates');
+        addTearDown(() => temp.deleteSync(recursive: true));
+        final bytes = Uint8List(4 * 1024 * 1024)
+          ..fillRange(0, 4 * 1024 * 1024, 42);
+        final bundled = File('${temp.path}/mssql_tls.dll')
+          ..writeAsBytesSync(bytes);
+
+        // Repeat cold-cache starts: the race disappears once the copy exists.
+        for (var trial = 0; trial < 10; trial++) {
+          final root = Directory('${temp.path}/copies$trial');
+          final paths = await _concurrentCopies(bundled.path, root.path);
+          expect(paths.toSet(), hasLength(1));
+          expect(File(paths.first).readAsBytesSync(), bytes);
+          expect(
+            root.listSync(recursive: true).whereType<File>().map((f) => f.path),
+            [paths.first],
+            reason: 'temporary files must be cleaned up',
+          );
+          expect(
+            root.listSync(recursive: true).whereType<Directory>(),
+            hasLength(2),
+            reason: 'only the package and content-hash directories remain',
+          );
+        }
+      },
+    );
+
     test('load a private copy named by content, never written again', () {
       final temp = Directory.systemTemp.createTempSync('mssql_tls_copy_test');
       addTearDown(() => temp.deleteSync(recursive: true));
@@ -141,4 +173,39 @@ void main() {
       expect(File(first).readAsBytesSync(), [1, 2, 3]);
     });
   });
+}
+
+Future<List<String>> _concurrentCopies(String source, String root) async {
+  const count = 16;
+  final ready = ReceivePort();
+  final sendPort = ready.sendPort;
+  final starts = <SendPort>[];
+  ready.listen((message) {
+    starts.add(message as SendPort);
+    if (starts.length == count) {
+      for (final start in starts) {
+        start.send(null);
+      }
+    }
+  });
+  try {
+    return await Future.wait([
+      for (var i = 0; i < count; i++)
+        Isolate.run(() => _copyAfterSignal(source, root, sendPort)),
+    ]);
+  } finally {
+    ready.close();
+  }
+}
+
+Future<String> _copyAfterSignal(
+  String source,
+  String root,
+  SendPort ready,
+) async {
+  final start = ReceivePort();
+  ready.send(start.sendPort);
+  await start.first;
+  start.close();
+  return privateNativeTlsCopy(File(source), root: Directory(root));
 }

@@ -9,7 +9,9 @@
   the file the Dart tool re-copies from its local hook cache on every run (the
   helper is still downloaded only once per native release); no setup or
   `MSSQL_TLS_LIBRARY` env var needed.
-* TLS: the helper is loaded once per process (was: on every connection).
+* TLS: helper lookup is cached per isolate (was: on every connection).
+  Concurrent isolates use separate temporary files when publishing a shared
+  private DLL copy.
 * TLS: the "helper not found" error now says when the build hook downloads the
   helper (`dart run` / `dart test` / `dart build` / `flutter run|build`, not
   `dart pub get`) and where the offline instructions are.

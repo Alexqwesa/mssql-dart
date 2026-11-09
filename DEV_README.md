@@ -48,6 +48,16 @@ Normally, omit `release_tag`; the hook uses `nativeTlsPinnedReleaseTag` from
 the installed package. An arbitrary override is rejected unless the package
 contains matching SHA-256 pins.
 
+## Experimental pure-Dart TLS fork
+
+The repository also has an experimental
+[`mssql` 0.6.x fork](https://github.com/Alexqwesa/mssql-dart/tree/v0.6.0).
+It shares this driver's Dart TDS implementation but uses an explicit
+TLS-fragment API instead of the native OpenSSL helper. Encrypted connections
+require a patched Dart SDK; this is intended for testing that runtime approach.
+It is distinct from the published pure-Dart
+[`mssql`](https://pub.dev/packages/mssql) package, which runs on a standard SDK.
+
 ## Native TLS — local build
 
 Hook resolution order at runtime:

@@ -9,7 +9,7 @@ import 'native_tls_asset.dart';
 
 DynamicLibrary? _loaded;
 
-/// Loads the optional native TLS helper only for encrypted connections, once per process.
+/// Loads the optional native TLS helper only for encrypted connections, once per isolate.
 ///
 /// Resolution order:
 /// 1. `MSSQL_TLS_LIBRARY` absolute path override
@@ -138,14 +138,20 @@ String privateNativeTlsCopy(File source, {Directory? root}) {
   if (copy.existsSync() && copy.lengthSync() == bytes.length) return copy.path;
 
   dir.createSync(recursive: true);
-  final partial = File('${copy.path}.$pid.partial');
-  partial.writeAsBytesSync(bytes, flush: true);
+  // Isolates share a pid, so a pid-based filename is not unique. Keep each
+  // writer in its own directory on the same filesystem for an atomic rename.
+  final staging = dir.createTempSync('copy-');
+  final partial = File('${staging.path}${sep}library.partial');
   try {
-    partial.renameSync(copy.path);
-  } on FileSystemException {
-    // Another process put the same copy there first (and may have it loaded).
-    if (partial.existsSync()) partial.deleteSync();
-    if (!copy.existsSync()) rethrow;
+    partial.writeAsBytesSync(bytes, flush: true);
+    try {
+      partial.renameSync(copy.path);
+    } on FileSystemException {
+      // Another process/isolate published the copy and may have loaded it.
+      if (!copy.existsSync() || copy.lengthSync() != bytes.length) rethrow;
+    }
+  } finally {
+    staging.deleteSync(recursive: true);
   }
   return copy.path;
 }
