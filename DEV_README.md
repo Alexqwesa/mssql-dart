@@ -53,7 +53,12 @@ contains matching SHA-256 pins.
 Hook resolution order at runtime:
 
 1. `MSSQL_TLS_LIBRARY` environment override
-2. Code asset from `hook/build.dart` (`DynamicLibrary.codeAsset`)
+2. Code asset from `hook/build.dart` (`DynamicLibrary.codeAsset`). On Windows,
+   in `dart run` / `dart test` runs, the loader opens a private copy of it in
+   `%TEMP%\mssql_driver_with_native_tls\<SHA-256>\` instead of the file the Dart
+   tool bundled in `.dart_tool\lib`: each `dart run` / `dart test` re-copies
+   that file from the hook's cache (no download), which Windows refuses while a
+   process (a running server) has it loaded. Nothing to configure.
 3. Platform linker name (bundled app library or process search path)
 4. Checked-out `native/bin/<platform>/` or `dist/<platform>/<slice>/`
 

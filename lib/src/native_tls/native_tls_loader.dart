@@ -1,22 +1,38 @@
+import 'dart:convert';
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:isolate';
+
+import 'package:crypto/crypto.dart';
 
 import 'native_tls_asset.dart';
 
-/// Loads the optional native TLS helper only for encrypted connections.
+DynamicLibrary? _loaded;
+
+/// Loads the optional native TLS helper only for encrypted connections, once per process.
 ///
 /// Resolution order:
 /// 1. `MSSQL_TLS_LIBRARY` absolute path override
-/// 2. Code asset registered by `hook/build.dart` ([nativeTlsAssetId])
+/// 2. Code asset registered by `hook/build.dart` ([nativeTlsAssetId]). On Windows, in `dart run` / `dart test`
+///    runs, from a private copy ([privateNativeTlsCopy]) instead of the file the Dart tool bundled: every
+///    `dart run` / `dart test` of the package replaces that file, and Windows cannot replace a loaded DLL, so a
+///    second command would fail while a first one (a running server) has it loaded.
 /// 3. Apple framework embedded beside the application executable
 /// 4. Platform linker name (bundled app library, or `PATH` / cwd)
 /// 5. Checked-out desktop helper under `native/bin/...` or `dist/macos/...`
-DynamicLibrary loadMssqlTls() {
+DynamicLibrary loadMssqlTls() => _loaded ??= _loadMssqlTls();
+
+DynamicLibrary _loadMssqlTls() {
   final platform = Platform.operatingSystem;
   final name = nativeTlsLibraryName(platform);
   final override = Platform.environment['MSSQL_TLS_LIBRARY'];
   if (override != null && override.isNotEmpty) {
     return DynamicLibrary.open(override);
+  }
+
+  if (platform == 'windows') {
+    final copy = _privateCopyOfBundledAsset();
+    if (copy != null) return copy;
   }
 
   Object? codeAssetError;
@@ -47,11 +63,91 @@ DynamicLibrary loadMssqlTls() {
     }
   }
   throw UnsupportedError(
-    'Encrypted SQL Server connections require the native TLS helper '
-    '($name). Run `dart pub get` so hook/build.dart can download it, or set '
-    'MSSQL_TLS_LIBRARY. Cleartext connections do not require it. '
-    'Code asset error: $codeAssetError. Fallback error: $lastError',
+    'Encrypted SQL Server connections need the native TLS helper ($name); '
+    'cleartext connections (encrypt: false) do not. The package build hook '
+    'downloads it when the program is started or built by the Dart or Flutter '
+    'tool (`dart run`, `dart test`, `dart build`, `flutter run`, '
+    '`flutter build`; not `dart pub get`). Without network access, see '
+    "DEV_README.md, 'Native TLS — local build'. Or set MSSQL_TLS_LIBRARY to "
+    'the library file. Code asset error: $codeAssetError. Fallback error: '
+    '$lastError',
   );
+}
+
+/// The helper as the Dart tool bundled it for a `dart run` / `dart test` run, loaded from a private copy; null
+/// when this is not such a run (a compiled or Flutter app) or anything fails (then the code asset is loaded).
+DynamicLibrary? _privateCopyOfBundledAsset() {
+  try {
+    final packageConfig = Isolate.packageConfigSync;
+    if (packageConfig == null || !packageConfig.isScheme('file')) return null;
+    final mapping = File.fromUri(packageConfig.resolve('native_assets.yaml'));
+    if (!mapping.existsSync()) return null;
+    final bundled = nativeAssetPathFromMapping(
+      mapping.readAsStringSync(),
+      target: Abi.current().toString(),
+      assetId: nativeTlsAssetId,
+    );
+    if (bundled == null || !File(bundled).existsSync()) return null;
+    return DynamicLibrary.open(privateNativeTlsCopy(File(bundled)));
+  } catch (_) {
+    return null;
+  }
+}
+
+/// The file that the native-assets mapping of a `dart run` / `dart test` run (`.dart_tool/native_assets.yaml`,
+/// written by the Dart tool) gives for [assetId] on [target] (`Abi.current()`, e.g. `windows_x64`); null when it
+/// has none.
+String? nativeAssetPathFromMapping(
+  String mapping, {
+  required String target,
+  required String assetId,
+}) {
+  // JSON after `#` comment lines.
+  final json = const LineSplitter()
+      .convert(mapping)
+      .where((line) => !line.trimLeft().startsWith('#'))
+      .join('\n');
+  final decoded = jsonDecode(json);
+  if (decoded is! Map) return null;
+  final assets = decoded['native-assets'];
+  if (assets is! Map) return null;
+  final forTarget = assets[target];
+  if (forTarget is! Map) return null;
+  final entry = forTarget[assetId];
+  if (entry is List &&
+      entry.length == 2 &&
+      entry[0] == 'absolute' &&
+      entry[1] is String) {
+    return entry[1] as String;
+  }
+  return null;
+}
+
+/// Copies [source] to `<temp>/mssql_driver_with_native_tls/<SHA-256 of its content>/` (temp: [root], default
+/// the user's temporary directory) unless that copy exists, and returns the copy's path. Named by content:
+/// processes share a copy, a changed helper gets a new folder, and an existing copy is never written again, so
+/// none is replaced while a process has it loaded.
+String privateNativeTlsCopy(File source, {Directory? root}) {
+  final sep = Platform.pathSeparator;
+  final bytes = source.readAsBytesSync();
+  final digest = sha256.convert(bytes).toString();
+  final dir = Directory(
+    '${(root ?? Directory.systemTemp).path}${sep}mssql_driver_with_native_tls$sep$digest',
+  );
+  final copy = File('${dir.path}$sep${source.uri.pathSegments.last}');
+  if (copy.existsSync() && copy.lengthSync() == bytes.length) return copy.path;
+
+  dir.createSync(recursive: true);
+  final partial = File('${copy.path}.$pid.partial');
+  partial.writeAsBytesSync(bytes, flush: true);
+  try {
+    partial.renameSync(copy.path);
+  } on FileSystemException {
+    // Another process put the same copy there first (and may have it loaded).
+    if (partial.existsSync()) partial.deleteSync();
+    if (!copy.existsSync()) rethrow;
+  }
+  return copy.path;
 }
 
 String _appleFrameworkPath(String platform) {
