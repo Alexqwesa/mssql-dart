@@ -2,6 +2,8 @@ name: Publish
 
 on:
   push:
+    branches:
+      - mssql_driver_with_native_tls
     tags:
       - 'v[0-9]*'
   # Release native assets dispatches this on the tag after uploading assets.
@@ -15,7 +17,6 @@ concurrency:
 jobs:
   load-release-assets:
     name: Load pinned Release binaries
-    if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -281,6 +282,9 @@ jobs:
         uses: codecov/codecov-action@v5
         with:
           files: coverage/lcov.info
+          # Release runs check out tags; associate their coverage with the
+          # package branch used by the README badge.
+          override_branch: ${{ github.ref_type == 'tag' && 'mssql_driver_with_native_tls' || github.ref_name }}
           fail_ci_if_error: true
           use_oidc: true
 

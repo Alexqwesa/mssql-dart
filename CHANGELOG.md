@@ -2,14 +2,12 @@
 
 ## 0.5.11
 
-* TLS (Windows): `dart run` / `dart test` no longer fail with "Access is
-  denied" on `.dart_tool\lib\mssql_tls.dll` while another process of the same
-  project (e.g. a dev server in the IDE) has an encrypted connection open. The
-  loader opens a private, content-named copy of the bundled helper instead of
-  the file the Dart tool re-copies from its local hook cache on every run (the
-  helper is still downloaded only once per native release); no setup or
-  `MSSQL_TLS_LIBRARY` env var needed.
-* TLS: the helper is loaded once per process (was: on every connection).
+* TLS (Windows): fixed a Windows-specific build failure where DLL file locking
+  caused "Access is denied" during concurrent `dart run` / `dart test` runs.
+  The TLS helper now loads from a private copy.
+* TLS: helper lookup is cached per isolate (was: on every connection).
+  Concurrent isolates use separate temporary files when publishing a shared
+  private DLL copy.
 * TLS: the "helper not found" error now says when the build hook downloads the
   helper (`dart run` / `dart test` / `dart build` / `flutter run|build`, not
   `dart pub get`) and where the offline instructions are.
